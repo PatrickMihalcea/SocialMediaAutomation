@@ -8,7 +8,17 @@ import random
 
 # Initialize the OpenAI API client
 openai.api_key = os.getenv("OPENAI_API_KEY")
+# Generate Image using DALLE3 Unofficial API.
+# Need Cookie. Find by going to the Bing Chat page, open dev tools (CMD + OPT + I).
+# Click on storage, scroll to _U, and copy the value. Paste on .env file.
+cookie = os.getenv("BING_COOKIE_VALUE")
+logging.basicConfig(level=logging.INFO)
+dalle = Dalle(cookie)
+dalle.create("Using DALL-E 3, make: A fish swarming a shark. Geometric glass.")
+urls=dalle.get_urls()
+dalle.download(urls, "./images")
 
+print("Here")
 # Text to send as a prompt to the model
 topics = [
   "Interior Design of a House",
@@ -42,15 +52,9 @@ for theme in themes:
       n = 1 # Number of responses to generate
   )
   # Extract the generated text
-  image_prompt = "Create an image for this: " + response.choices[0].text
+  image_prompt = "Create an image with DALL-E 3 for this: " + response.choices[0].text
   
   # Generate Image.
-  # Generate Image using DALLE3 Unofficial API.
-  # Need Cookie. Find by going to the Bing Chat page, open dev tools (CMD + OPT + I).
-  # Click on storage, scroll to _U, and copy the value. Paste on .env file.
-  cookie = os.getenv("BING_COOKIE_VALUE")
-  logging.basicConfig(level=logging.INFO)
-  dalle = Dalle(cookie)
   print(image_prompt)
   dalle.run(image_prompt)
   # dalle.create(image_prompt)
