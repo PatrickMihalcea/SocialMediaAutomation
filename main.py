@@ -9,8 +9,6 @@ import random
 # Initialize the OpenAI API client
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-
-
 # Text to send as a prompt to the model
 topics = [
   "Interior Design of a House",
