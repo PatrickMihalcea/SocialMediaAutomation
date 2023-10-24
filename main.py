@@ -54,7 +54,7 @@ for theme in themes:
   logging.basicConfig(level=logging.INFO)
   dalle = Dalle(cookie)
   print(image_prompt)
-  dalle.create("Draw this: " + image_prompt)
+  dalle.create("Create an image for this: " + image_prompt)
   urls = dalle.get_urls()
   url = urls[:1] # Only save first choice.
   dalle.download(url, "./images")
