@@ -44,7 +44,7 @@ for theme in themes:
       n = 1 # Number of responses to generate
   )
   # Extract the generated text
-  image_prompt = response.choices[0].text
+  image_prompt = "Create an image for this: " + response.choices[0].text
   
   # Generate Image.
   # Generate Image using DALLE3 Unofficial API.
@@ -54,10 +54,11 @@ for theme in themes:
   logging.basicConfig(level=logging.INFO)
   dalle = Dalle(cookie)
   print(image_prompt)
-  dalle.create("Create an image for this: " + image_prompt)
-  urls = dalle.get_urls()
-  url = urls[:1] # Only save first choice.
-  dalle.download(url, "./images")
+  dalle.run(image_prompt)
+  # dalle.create(image_prompt)
+  # urls = dalle.get_urls()
+  # url = urls[:1] # Only save first choice.
+  # dalle.download(url, "./images")
 
   # Show progress.
   print("Image " + str(n) + "\n" + image_prompt)
