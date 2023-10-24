@@ -38,3 +38,4 @@ urls = dalle.get_urls()
 dalle.download(urls, "./images")
 
 print(image_prompt)
+
