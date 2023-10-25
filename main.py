@@ -5,8 +5,9 @@ load_dotenv()
 import logging
 from dalle import Dalle
 import random
-import urllib.request
 import time
+import requests
+import datetime
 
 
 # Initialize the OpenAI API client
@@ -17,7 +18,7 @@ cookie = os.getenv("BING_COOKIE_VALUE")
 logging.basicConfig(level=logging.INFO)
 dalle = Dalle(cookie)
 
-# Text to send as a prompt to the model
+# Initialize Variables.
 topics = [
     "Interior Design of a House",
     "Exterior Design of a House",
@@ -35,6 +36,19 @@ themes = [
     """Contemporary, open concept, neutral colours, large, high, flow, shapes, straight edges"""
 ]
 
+# Prepare Image download destination.
+base_image_dir = "./images"
+os.makedirs(base_image_dir, exist_ok=True) # Create the directory if it doesn't exist
+# Get the current date and time
+current_datetime = datetime.datetime.now()
+
+# Create a folder with the date and time as its title
+folder_title = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
+download_dir = os.path.join(base_image_dir, folder_title)
+# Create the folder
+os.makedirs(download_dir)
+
+# Generate and Download images.
 topic = random.choice(topics)
 n = 1
 for theme in themes:
@@ -56,20 +70,14 @@ for theme in themes:
     dalle.create(image_prompt)
     time.sleep(30) # Gives time for the AI to generate content before switching to the creations page to gather urls.
     urls = dalle.get_urls()
-    dalle.download(urls, "./images")
-    # image = openai.Image.create(
-    #     prompt=image_prompt,
-    #     n=1,
-    #     size="1024x1024"
-    # )
-    # image_url = image['data'][0]['url']
-    # save_path = "./images/image" + str(n) + ".jpg"
 
-    # try:
-    #     urllib.request.urlretrieve(image_url, save_path) # Download successful.
-    # except urllib.error.URLError as e:
-    #     print(f"Failed to download the image: {e}")
+    #Download Image.
+    response = requests.get(urls[0]) # Download first image only.
+    filename = os.path.join(download_dir, "image"+str(n)+".jpg") # Extract the image filename from the URL
+    # Save the image to the specified directory
+    with open(filename, "wb") as file:
+        file.write(response.content)
+    print(f"Downloaded: {filename}")
 
-    # Show progress.
-    print("Image " + str(n) + image_prompt)
+    # Increment Counter.
     n = n + 1
