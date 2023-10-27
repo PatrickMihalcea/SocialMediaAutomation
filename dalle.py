@@ -107,7 +107,7 @@ class Dalle:
         cookie = {"name": "_U", "value": self.cookie_value}
 
         self.driver.get("https://www.bing.com/search?iscopilotedu=1&sendquery=1&q=" + query + "&form=MA13G9&showconv=1")
-        print("https://www.bing.com/search?iscopilotedu=1&sendquery=1&q=" + query + "&form=MA13G9&showconv=1")
+        # print("https://www.bing.com/search?iscopilotedu=1&sendquery=1&q=" + query + "&form=MA13G9&showconv=1")
         logging.info(f"{self.get_time()} Bing Image Creator (Dalle-3) Opened")
 
         self.driver.add_cookie(cookie)

@@ -84,7 +84,6 @@ def generatePrompt(theme):
 
 
 def generateImageURLs(image_prompt):
-    
     dalle.create(image_prompt) # Generates 4 images.
     time.sleep(60) # Gives time for the AI to generate content before switching to the creations page to gather urls.
     urls = dalle.get_urls()
@@ -121,6 +120,6 @@ def main():
     parseArgs()
     getImages()
 
-# Check if the script is being run as the main program
+
 if __name__ == "__main__":
     main()
