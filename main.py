@@ -12,6 +12,7 @@ import threading
 import argparse
 
 # Initialize Global Variables.
+dalle = None
 parser = argparse.ArgumentParser()
 userPrompt = None
 base_image_dir = "./images"
@@ -35,6 +36,14 @@ themes = [
 ]
 imageNumber = 1
 
+def initializeAPIs():
+    global dalle
+    # Initialize the OpenAI API client
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+    # Initialize DALL-E 3 client.
+    logging.basicConfig(level=logging.INFO)
+    cookie = os.getenv("BING_COOKIE_VALUE")
+    dalle = Dalle(cookie)
 
 def prepareFileDownloads():
     global download_dir
@@ -75,8 +84,7 @@ def generatePrompt(theme):
 
 
 def generateImageURLs(image_prompt):
-    cookie = os.getenv("BING_COOKIE_VALUE")
-    dalle = Dalle(cookie)
+    
     dalle.create(image_prompt) # Generates 4 images.
     time.sleep(60) # Gives time for the AI to generate content before switching to the creations page to gather urls.
     urls = dalle.get_urls()
@@ -106,11 +114,9 @@ def getImages():
         for theme in themes:
             getImage(generatePrompt(theme))
 
-def main():
-    # Initialize the OpenAI API client
-    openai.api_key = os.getenv("OPENAI_API_KEY")
-    logging.basicConfig(level=logging.INFO)
 
+def main():
+    initializeAPIs()
     prepareFileDownloads()
     parseArgs()
     getImages()
