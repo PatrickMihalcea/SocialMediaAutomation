@@ -8,17 +8,14 @@ import random
 import time
 import requests
 import datetime
+import threading
+import argparse
 
-
-# Initialize the OpenAI API client
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-# Initialize Dalle API
-cookie = os.getenv("BING_COOKIE_VALUE")
-logging.basicConfig(level=logging.INFO)
-dalle = Dalle(cookie)
-
-# Initialize Variables.
+# Initialize Global Variables.
+parser = argparse.ArgumentParser()
+userPrompt = None
+base_image_dir = "./images"
+download_dir = None
 topics = [
     "Interior Design of a House",
     "Exterior Design of a House",
@@ -27,6 +24,7 @@ topics = [
     "Kitchen layout interior",
     "Living Room Interior Design"
 ]
+topic = random.choice(topics)
 themes = [
     """Dark, mysterious, warm light, dim, shimmer, shiny, marble, expensive, Minimalistic""",
     """Light, White, Gold, Shiny, Friendly, Approachable, marble, ambient, Sleek""",
@@ -35,23 +33,31 @@ themes = [
     """futuristic, digital, minimalist, cyberpunk, glass, shiny, LED Lighting""",
     """Contemporary, open concept, neutral colours, large, high, flow, shapes, straight edges"""
 ]
+imageNumber = 1
 
-# Prepare Image download destination.
-base_image_dir = "./images"
-os.makedirs(base_image_dir, exist_ok=True) # Create the directory if it doesn't exist
-# Get the current date and time
-current_datetime = datetime.datetime.now()
 
-# Create a folder with the date and time as its title
-folder_title = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
-download_dir = os.path.join(base_image_dir, folder_title)
-# Create the folder
-os.makedirs(download_dir)
+def prepareFileDownloads():
+    global download_dir
+    # Prepare Image download destination.
+    os.makedirs(base_image_dir, exist_ok=True) # Create the directory if it doesn't exist
+    # Get the current date and time
+    current_datetime = datetime.datetime.now()
+    # Create a folder with the date and time as its title
+    folder_title = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
+    download_dir = os.path.join(base_image_dir, folder_title)
+    # Create the folder
+    os.makedirs(download_dir)
 
-# Generate and Download images.
-topic = random.choice(topics)
-n = 1
-for theme in themes:
+
+def parseArgs():
+    global userPrompt
+    # Check if prompt was included.
+    parser.add_argument("input", nargs="?", help="User input string")
+    args = parser.parse_args()
+    userPrompt = args.input
+
+
+def generatePrompt(theme):
     prompt = "Generate a detailed description of a " + topic + """ 
                 and five of the following keywords: """ + theme + """. Keep the 
                 description to 50 words or less."""
@@ -65,19 +71,50 @@ for theme in themes:
     # Extract the generated text
     image_prompt = "Generate an image for: " + response.choices[0].text
     print(image_prompt)
-    
-    # Generate Image.
-    dalle.create(image_prompt)
-    time.sleep(30) # Gives time for the AI to generate content before switching to the creations page to gather urls.
-    urls = dalle.get_urls()
+    return image_prompt
 
-    #Download Image.
-    response = requests.get(urls[0]) # Download first image only.
-    filename = os.path.join(download_dir, "image"+str(n)+".jpg") # Extract the image filename from the URL
+
+def generateImageURLs(image_prompt):
+    cookie = os.getenv("BING_COOKIE_VALUE")
+    dalle = Dalle(cookie)
+    dalle.create(image_prompt) # Generates 4 images.
+    time.sleep(60) # Gives time for the AI to generate content before switching to the creations page to gather urls.
+    urls = dalle.get_urls()
+    return urls
+
+
+def downloadImage(url):
+    global imageNumber
+    response = requests.get(url)
+    filename = os.path.join(download_dir, "image"+str(imageNumber)+".jpg") # Extract the image filename from the URL
     # Save the image to the specified directory
     with open(filename, "wb") as file:
         file.write(response.content)
     print(f"Downloaded: {filename}")
+    imageNumber += 1
 
-    # Increment Counter.
-    n = n + 1
+
+def getImage(image_prompt):
+    urls = generateImageURLs(image_prompt)
+    downloadImage(urls[0]) # Only download first option.
+
+
+def getImages():
+    if userPrompt:
+        getImage("Generate an image for: " + userPrompt)
+    else:
+        for theme in themes:
+            getImage(generatePrompt(theme))
+
+def main():
+    # Initialize the OpenAI API client
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+    logging.basicConfig(level=logging.INFO)
+
+    prepareFileDownloads()
+    parseArgs()
+    getImages()
+
+# Check if the script is being run as the main program
+if __name__ == "__main__":
+    main()

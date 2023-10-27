@@ -141,10 +141,8 @@ class Dalle:
             )
 
             urls = [url.split("?")[0] for url in urls]
-            print("List of elements found:")
-            print(urls)
-
             return urls
+        
         except Exception as e:
             logging.critical(
                 f"Error while extracting image urls. Maybe something is wrong about your prompt. (You can check you prompt manually) \n{e}"
