@@ -71,51 +71,8 @@ class Dalle:
 
         self.originalImageSets = set()
         self.loadOriginalImageSets()
-    
 
-    @staticmethod
-    def get_time():
-        """Returns the current time in the format "[%d/%m/%Y %H:%M:%S]"""
-        return datetime.datetime.now().strftime("[%d/%m/%Y %H:%M:%S]")
-
-    @staticmethod
-    def get_time_save():
-        """Returns the current time in the format "%d-%m-%Y %H-%M-%S" """
-        return datetime.datetime.now().strftime("%d-%m-%Y %H-%M-%S")
-
-    def download(self, urls: list, save_folder: str):
-        """Downloads images from the provided URLs and saves them in the specified folder"""
-        save_folder = (save_folder)[:225]
-        try:
-            timestamp_folder = os.path.join(save_folder, self.get_time_save())
-            if not os.path.exists(timestamp_folder):
-                os.makedirs(timestamp_folder)
-
-            for index, url in enumerate(urls):
-                response = requests.get(url)
-                response.raise_for_status()
-                filename = os.path.join(timestamp_folder, f"image_{index + 1}.png")
-                with open(filename, "wb") as file:
-                    file.write(response.content)
-
-                logging.info(
-                    f'{self.get_time()} Image downloaded successfully and saved to "{filename}"'
-                )
-
-        except requests.exceptions.RequestException as e:
-            logging.critical(f"Image download failed: {str(e)}")
-
-    def create(self, query: str):
-        """Opens the Bing Image Creator (DALL-E 3) and adds a cookie"""
-        cookie = {"name": "_U", "value": self.cookie_value}
-        webQuery = "https://www.bing.com/search?iscopilotedu=1&sendquery=1&q=" + query + "&form=MA13G9&showconv=1"
-        self.driver.get(webQuery)
-
-        logging.info(f"{self.get_time()} Bing Image Creator (Dalle-3) Opened")
-        self.driver.add_cookie(cookie)
-        self.driver.refresh()
-        logging.info(f"{self.get_time()} Cookie values added ")
-        return True
+        self.threads = []
     
     def loadOriginalImageSets(self):
         cookie = {"name": "_U", "value": self.cookie_value}
@@ -146,7 +103,23 @@ class Dalle:
             )
         ))
 
+    def create(self, query: str):
+        """Opens the Bing Image Creator (DALL-E 3) and adds a cookie"""
+        cookie = {"name": "_U", "value": self.cookie_value}
+        webQuery = "https://www.bing.com/search?iscopilotedu=1&sendquery=1&q=" + query + "&form=MA13G9&showconv=1"
 
+        options = ChromeOptions()
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--headless")
+        driver = Chrome(options=options)
+        driver.get(webQuery)
+
+        logging.info("Bing Image Creator (Dalle-3) Opened")
+        driver.add_cookie(cookie)
+        driver.refresh()
+        logging.info("Cookie values added ")
+        return True
+    
     def get_urls(self, imagesPerPrompt = 4):
         """Extracts and returns image URLs from the website"""
         if imagesPerPrompt not in range (1, 5):

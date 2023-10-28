@@ -104,7 +104,7 @@ def generateImages():
         # threads = []
         for theme in themes:
             dalle.create(generatePrompt(theme))
-            time.sleep(32)
+            # time.sleep(32)
         #     thread = threading.Thread(target=getImage, args=(generatePrompt(theme), ))
         #     threads.append(thread)
         #     thread.start()
@@ -118,7 +118,7 @@ def main():
     prepareFileDownloads()
     parseArgs()
     generateImages()
-    time.sleep(30) # Gives time for the AI to generate content before switching to the creations page to gather urls.
+    time.sleep(60) # Gives time for the AI to generate content before switching to the creations page to gather urls.
     downloadImages()
 
 if __name__ == "__main__":
