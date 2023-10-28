@@ -27,14 +27,14 @@ topics = [
 ]
 topic = random.choice(topics)
 themes = [
-    """Dark, mysterious, warm light, dim, shimmer, shiny, marble, expensive, Minimalistic""",
-    """Light, White, Gold, Shiny, Friendly, Approachable, marble, ambient, Sleek""",
-    """Rustic, wood, forrestry, plants, natural light, nature, cozy, warm, earthy""",
+    #"""Dark, mysterious, warm light, dim, shimmer, shiny, marble, expensive, Minimalistic""",
+   #"""Light, White, Gold, Shiny, Friendly, Approachable, marble, ambient, Sleek""",
+    #"""Rustic, wood, forrestry, plants, natural light, nature, cozy, warm, earthy""",
     """Industrial, Brick, steel, concrete, urban, raw, rustic, machinery, grey, lightbulb""",
     """futuristic, digital, minimalist, cyberpunk, glass, shiny, LED Lighting""",
     """Contemporary, open concept, neutral colours, large, high, flow, shapes, straight edges"""
 ]
-imageNumber = 1
+imagesPerPrompt = 1 # Must be between 1 and 4
 
 def initializeAPIs():
     global dalle
@@ -67,9 +67,9 @@ def parseArgs():
 
 
 def generatePrompt(theme):
-    prompt = "Generate a detailed description of a " + topic + """ 
-                and five of the following keywords: """ + theme + """. Keep the 
-                description to 50 words or less."""
+    prompt = "Generate a description of a " + topic + """ 
+                including five of the following keywords: """ + theme + """. Keep the 
+                description to 75 words or less."""
     # Make an API call to generate text
     response = openai.Completion.create(
         engine="text-davinci-003",  # Specify the GPT-3.5 engine
@@ -83,43 +83,43 @@ def generatePrompt(theme):
     return image_prompt
 
 
-def generateImageURLs(image_prompt):
-    dalle.create(image_prompt) # Generates 4 images.
-    time.sleep(60) # Gives time for the AI to generate content before switching to the creations page to gather urls.
-    urls = dalle.get_urls()
-    return urls
+def downloadImages():
+    imageCounter = 1
+    urls = dalle.get_urls(imagesPerPrompt)
+    for url in urls:
+        response = requests.get(url)
+        filename = os.path.join(download_dir, "image"+str(imageCounter)+".jpg") # Extract the image filename from the URL
+        # Save the image to the specified directory
+        with open(filename, "wb") as file:
+            file.write(response.content)
+        print(f"Downloaded: {filename}")
+        imageCounter += 1
 
 
-def downloadImage(url):
-    global imageNumber
-    response = requests.get(url)
-    filename = os.path.join(download_dir, "image"+str(imageNumber)+".jpg") # Extract the image filename from the URL
-    # Save the image to the specified directory
-    with open(filename, "wb") as file:
-        file.write(response.content)
-    print(f"Downloaded: {filename}")
-    imageNumber += 1
-
-
-def getImage(image_prompt):
-    urls = generateImageURLs(image_prompt)
-    downloadImage(urls[0]) # Only download first option.
-
-
-def getImages():
+def generateImages():
     if userPrompt:
-        getImage("Generate an image for: " + userPrompt)
+        print("Running user prompt.")
+        dalle.create("Generate an image for: " + userPrompt)
     else:
+        # threads = []
         for theme in themes:
-            getImage(generatePrompt(theme))
-
+            dalle.create(generatePrompt(theme))
+            time.sleep(32)
+        #     thread = threading.Thread(target=getImage, args=(generatePrompt(theme), ))
+        #     threads.append(thread)
+        #     thread.start()
+        #     time.sleep(10)
+        # for thread in threads:
+        #     thread.join()
+    
 
 def main():
     initializeAPIs()
     prepareFileDownloads()
     parseArgs()
-    getImages()
-
+    generateImages()
+    time.sleep(30) # Gives time for the AI to generate content before switching to the creations page to gather urls.
+    downloadImages()
 
 if __name__ == "__main__":
     main()

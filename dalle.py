@@ -62,13 +62,16 @@ class Dalle:
     # Download the images to your specified folder
     dalle.download(urls, "images/")
     """
-
     def __init__(self, cookie_value: str):
         self.options = ChromeOptions()
         self.options.add_argument("--disable-blink-features=AutomationControlled")
         self.options.add_argument("--headless")
         self.driver = Chrome(options=self.options)
         self.cookie_value = cookie_value
+
+        self.originalImageSets = set()
+        self.loadOriginalImageSets()
+    
 
     @staticmethod
     def get_time():
@@ -105,48 +108,108 @@ class Dalle:
     def create(self, query: str):
         """Opens the Bing Image Creator (DALL-E 3) and adds a cookie"""
         cookie = {"name": "_U", "value": self.cookie_value}
+        webQuery = "https://www.bing.com/search?iscopilotedu=1&sendquery=1&q=" + query + "&form=MA13G9&showconv=1"
+        self.driver.get(webQuery)
 
-        self.driver.get("https://www.bing.com/search?iscopilotedu=1&sendquery=1&q=" + query + "&form=MA13G9&showconv=1")
-        # print("https://www.bing.com/search?iscopilotedu=1&sendquery=1&q=" + query + "&form=MA13G9&showconv=1")
         logging.info(f"{self.get_time()} Bing Image Creator (Dalle-3) Opened")
-
         self.driver.add_cookie(cookie)
         self.driver.refresh()
         logging.info(f"{self.get_time()} Cookie values added ")
-
         return True
+    
+    def loadOriginalImageSets(self):
+        cookie = {"name": "_U", "value": self.cookie_value}
+        listenerQuery = "https://www.bing.com/images/create"
+        self.driver.get(listenerQuery)
+        self.driver.add_cookie(cookie)
+        self.driver.refresh()
+        button_id = "gil_n_rc"  # "Creations" button on create page.
+        try:
+            button = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, button_id))
+            )
+            button.click()
+        except Exception as e:
+            print(f"Error in loadOriginal \n{e}")
 
-    def get_urls(self):
+        self.originalImageSets = set(
+            element.get_attribute("href")
+            for element in WebDriverWait(self.driver, 20).until(
+                EC.presence_of_all_elements_located((By.CLASS_NAME, "girr_set "))
+            )
+        )
+
+        self.originalImageSets.update(set(
+            element.get_attribute("href")
+            for element in WebDriverWait(self.driver, 20).until(
+                EC.presence_of_all_elements_located((By.CLASS_NAME, "girr_set.seled"))
+            )
+        ))
+
+
+    def get_urls(self, imagesPerPrompt = 4):
         """Extracts and returns image URLs from the website"""
-        self.driver.get("https://www.bing.com/images/create")
-        button_id = "gil_n_rc"  # Replace with the actual button ID
+        if imagesPerPrompt not in range (1, 5):
+            raise ValueError("picturesPerSet argument must be between 1 and 4. Thanks!")
+        
+        cookie = {"name": "_U", "value": self.cookie_value}
+        listenerQuery = "https://www.bing.com/images/create"
+        self.driver.get(listenerQuery)
+        self.driver.add_cookie(cookie)
+        self.driver.refresh()
+        button_id = "gil_n_rc"  # "Creations" button on create page"
+        # button_class = "gir_attr_lnk" # Generated link after images are created on bing chat.
 
         try:
             # Find the button by its ID
             button = self.driver.find_element(By.ID, button_id)
+            # button = WebDriverWait(self.driver, 60).until(
+            #     EC.presence_of_element_located((By.CLASS_NAME, button_class)))
             button.click()
         except Exception as e:
-            print(f"Error: {e}")
-
-        try:
-            urls = list(
-                set(
-                    [
-                        element.get_attribute("src")
-                        for element in WebDriverWait(self.driver, 60).until(
-                            EC.presence_of_all_elements_located((By.CLASS_NAME, "mimg"))
-                        )
-                    ]
-                )
-            )
-
-            urls = [url.split("?")[0] for url in urls]
-            return urls
+            print(f"Error")
         
-        except Exception as e:
-            logging.critical(
-                f"Error while extracting image urls. Maybe something is wrong about your prompt. (You can check you prompt manually) \n{e}"
+        # Get new image sets.
+        newImageSets = set(
+            element.get_attribute("href")
+            for element in WebDriverWait(self.driver, 20).until(
+                EC.presence_of_all_elements_located((By.CLASS_NAME, "girr_set "))
             )
+        )
+        newImageSets.update(set(
+            element.get_attribute("href")
+            for element in WebDriverWait(self.driver, 20).until(
+                EC.presence_of_all_elements_located((By.CLASS_NAME, "girr_set.seled"))
+            )
+        ))
+        # Remove old image sets.
+        newImageSets.difference_update(self.originalImageSets) 
+
+        allURLS = list()
+
+        for imageSet in newImageSets:
+            self.driver.get(imageSet)
+            try:
+                urls = list(
+                    set(
+                        [
+                            element.get_attribute("src")
+                            for element in WebDriverWait(self.driver, 60).until(
+                                EC.presence_of_all_elements_located((By.CLASS_NAME, "mimg"))
+                            )
+                        ]
+                    )
+                )
+
+                urls = [url.split("?")[0] for url in urls]
+                allURLS.extend(urls[:imagesPerPrompt])
+                # return urls
+            
+            except Exception as e:
+                logging.critical(
+                    f"Error while extracting image urls. Maybe something is wrong about your prompt. (You can check you prompt manually) \n{e}"
+                )
+        return allURLS
         
     def run(self, query):
         """
@@ -172,11 +235,11 @@ class Dalle:
 
         # Run the whole process of downloading images from the provided query
         dalle.run("Fish hivemind swarm in light blue avatar anime in zen garden pond concept art anime art, happy fish, anime scenery")
-
-        
         
         """
         query = self.create(query)
         urls = self.get_urls()
         download = self.download(urls, "images/")
         return download
+    
+    
