@@ -8,7 +8,6 @@ import random
 import time
 import requests
 import datetime
-import threading
 import argparse
 
 # Initialize Global Variables.
@@ -27,9 +26,9 @@ topics = [
 ]
 topic = random.choice(topics)
 themes = [
-    #"""Dark, mysterious, warm light, dim, shimmer, shiny, marble, expensive, Minimalistic""",
-   #"""Light, White, Gold, Shiny, Friendly, Approachable, marble, ambient, Sleek""",
-    #"""Rustic, wood, forrestry, plants, natural light, nature, cozy, warm, earthy""",
+    """Dark, mysterious, warm light, dim, shimmer, shiny, marble, expensive, Minimalistic""",
+    """Light, White, Gold, Shiny, Friendly, Approachable, marble, ambient, Sleek""",
+    """Rustic, wood, forrestry, plants, natural light, nature, cozy, warm, earthy""",
     """Industrial, Brick, steel, concrete, urban, raw, rustic, machinery, grey, lightbulb""",
     """futuristic, digital, minimalist, cyberpunk, glass, shiny, LED Lighting""",
     """Contemporary, open concept, neutral colours, large, high, flow, shapes, straight edges"""
@@ -57,14 +56,12 @@ def prepareFileDownloads():
     # Create the folder
     os.makedirs(download_dir)
 
-
 def parseArgs():
     global userPrompt
     # Check if prompt was included.
     parser.add_argument("input", nargs="?", help="User input string")
     args = parser.parse_args()
     userPrompt = args.input
-
 
 def generatePrompt(theme):
     prompt = "Generate a description of a " + topic + """ 
@@ -82,7 +79,6 @@ def generatePrompt(theme):
     print(image_prompt)
     return image_prompt
 
-
 def downloadImages():
     imageCounter = 1
     urls = dalle.get_urls(imagesPerPrompt)
@@ -95,24 +91,14 @@ def downloadImages():
         print(f"Downloaded: {filename}")
         imageCounter += 1
 
-
 def generateImages():
     if userPrompt:
         print("Running user prompt.")
         dalle.create("Generate an image for: " + userPrompt)
     else:
-        # threads = []
         for theme in themes:
             dalle.create(generatePrompt(theme))
-            # time.sleep(32)
-        #     thread = threading.Thread(target=getImage, args=(generatePrompt(theme), ))
-        #     threads.append(thread)
-        #     thread.start()
-        #     time.sleep(10)
-        # for thread in threads:
-        #     thread.join()
     
-
 def main():
     initializeAPIs()
     prepareFileDownloads()

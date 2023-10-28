@@ -1,4 +1,3 @@
-import datetime
 import logging
 import os
 import requests
@@ -13,7 +12,6 @@ import time
 class Dalle:
     """
     A class used to interact with the DALL-E 3 Unofficial API
-
     ...
 
     Attributes
@@ -24,20 +22,17 @@ class Dalle:
         a Chrome driver object to interact with the website
     cookie_value : str
         a string representing the cookie value to bypass automation detection
+    originalImageSets:
+        a set of links that exist on the creations page prior to generating new images. 
 
     Methods
     -------
-    get_time():
-        Returns the current time in the format "[%d/%m/%Y %H:%M:%S]"
-    get_time_save():
-        Returns the current time in the format "%d-%m-%Y %H-%M-%S"
-    download(urls: list, save_folder: str):
-        Downloads images from the provided URLs and saves them in the specified folder
+    def loadOriginalImageSets(self):
+        Store all links that exist on the creations page prior to generating new ones.
     create(query: str):
         Opens the Bing Image Creator (DALL-E 3) and adds a cookie
     get_urls():
         Extracts and returns image URLs from the website
-
 
     Usage:
     ------
@@ -59,9 +54,8 @@ class Dalle:
     # Get the image URLs
     urls = dalle.get_urls()
 
-    # Download the images to your specified folder
-    dalle.download(urls, "images/")
     """
+
     def __init__(self, cookie_value: str):
         self.options = ChromeOptions()
         self.options.add_argument("--disable-blink-features=AutomationControlled")
@@ -71,10 +65,9 @@ class Dalle:
 
         self.originalImageSets = set()
         self.loadOriginalImageSets()
-
-        self.threads = []
     
     def loadOriginalImageSets(self):
+        """Store all links that exist on the creations page prior to generating new ones."""
         cookie = {"name": "_U", "value": self.cookie_value}
         listenerQuery = "https://www.bing.com/images/create"
         self.driver.get(listenerQuery)
@@ -107,7 +100,7 @@ class Dalle:
         """Opens the Bing Image Creator (DALL-E 3) and adds a cookie"""
         cookie = {"name": "_U", "value": self.cookie_value}
         webQuery = "https://www.bing.com/search?iscopilotedu=1&sendquery=1&q=" + query + "&form=MA13G9&showconv=1"
-
+        # Create new webscraper to run parallel.
         options = ChromeOptions()
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_argument("--headless")
@@ -131,13 +124,10 @@ class Dalle:
         self.driver.add_cookie(cookie)
         self.driver.refresh()
         button_id = "gil_n_rc"  # "Creations" button on create page"
-        # button_class = "gir_attr_lnk" # Generated link after images are created on bing chat.
 
         try:
             # Find the button by its ID
             button = self.driver.find_element(By.ID, button_id)
-            # button = WebDriverWait(self.driver, 60).until(
-            #     EC.presence_of_element_located((By.CLASS_NAME, button_class)))
             button.click()
         except Exception as e:
             print(f"Error")
@@ -182,37 +172,8 @@ class Dalle:
                 logging.critical(
                     f"Error while extracting image urls. Maybe something is wrong about your prompt. (You can check you prompt manually) \n{e}"
                 )
+        # Reset data set so getting urls does not repeat. This is necessary for user input later.
+        self.originalImageSets.clear()
+        self.loadOriginalImageSets()
         return allURLS
-        
-    def run(self, query):
-        """
-        Run the whole process of downloading images from the provided query
-
-        Parameters
-        ----------
-        query : str
-            the query to search for
-        
-        Usage:
-        ------
-
-        # Import the necessary module
-        import logging
-        from dalle3 import Dalle
-
-        # Set up logging
-        logging.basicConfig(level=logging.INFO)
-
-        # Instantiate the Dalle class with your cookie value
-        dalle = Dalle("")
-
-        # Run the whole process of downloading images from the provided query
-        dalle.run("Fish hivemind swarm in light blue avatar anime in zen garden pond concept art anime art, happy fish, anime scenery")
-        
-        """
-        query = self.create(query)
-        urls = self.get_urls()
-        download = self.download(urls, "images/")
-        return download
-    
     
