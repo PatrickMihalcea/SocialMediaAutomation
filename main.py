@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 import logging
 from dalle import Dalle
+from videoMaker import videoMaker
 import random
 import time
 import requests
@@ -85,7 +86,7 @@ def downloadImages():
     urls = dalle.get_urls(imagesPerPrompt)
     for url in urls:
         response = requests.get(url)
-        filename = os.path.join(download_dir, "image"+str(imageCounter)+".jpg") # Extract the image filename from the URL
+        filename = os.path.join(download_dir, "image_"+str(imageCounter)+".jpg") # Extract the image filename from the URL
         # Save the image to the specified directory
         with open(filename, "wb") as file:
             file.write(response.content)
@@ -108,12 +109,15 @@ def countdown_sleep(seconds):
     sys.stdout.write(f"\rComplete. Downloading Images...\n")
  
 def main():
-    initializeAPIs()
-    prepareFileDownloads()
-    parseArgs()
-    generateImages()
-    countdown_sleep(len(themes)*20) # Gives time for the AI to generate content before switching to the creations page to gather urls.
-    downloadImages()
+    # initializeAPIs()
+    # prepareFileDownloads()
+    # parseArgs()
+    # generateImages()
+    # countdown_sleep(len(themes)*20) # Gives time for the AI to generate content before switching to the creations page to gather urls.
+    # downloadImages()
+    folder = './images/2023-11-03_14-47-06'
+    video = videoMaker(folder, 2)
+    video.addMusic('./Music/SUICIDAL-IDOL - ecstacy (slowed).mp3', 64)
 
 if __name__ == "__main__":
     main()
