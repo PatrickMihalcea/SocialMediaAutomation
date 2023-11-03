@@ -9,6 +9,7 @@ import time
 import requests
 import datetime
 import argparse
+import sys
 
 # Initialize Global Variables.
 dalle = None
@@ -66,17 +67,17 @@ def parseArgs():
 def generatePrompt(theme):
     prompt = "Generate a description of a " + topic + """ 
                 including five of the following keywords: """ + theme + """. Keep the 
-                description to 75 words or less."""
+                description to 100 tokens or less."""
     # Make an API call to generate text
     response = openai.Completion.create(
         engine="text-davinci-003",  # Specify the GPT-3.5 engine
         prompt=prompt,
-        max_tokens=100,  # Adjust the maximum number of tokens in the response as needed
+        max_tokens=100,
         n = 1 # Number of responses to generate
     )
     # Extract the generated text
     image_prompt = "Generate an image for: " + response.choices[0].text
-    print(image_prompt)
+    print(response.choices[0].text)
     return image_prompt
 
 def downloadImages():
@@ -98,13 +99,20 @@ def generateImages():
     else:
         for theme in themes:
             dalle.create(generatePrompt(theme))
-    
+
+def countdown_sleep(seconds):
+    for i in range(seconds, 0, -1):
+        sys.stdout.write(f"\rRemaining time: {i} seconds")
+        sys.stdout.flush()
+        time.sleep(1)
+    sys.stdout.write(f"\rComplete. Downloading Images...\n")
+ 
 def main():
     initializeAPIs()
     prepareFileDownloads()
     parseArgs()
     generateImages()
-    time.sleep(60) # Gives time for the AI to generate content before switching to the creations page to gather urls.
+    countdown_sleep(len(themes)*20) # Gives time for the AI to generate content before switching to the creations page to gather urls.
     downloadImages()
 
 if __name__ == "__main__":

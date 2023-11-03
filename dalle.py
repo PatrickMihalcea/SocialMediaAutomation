@@ -80,21 +80,24 @@ class Dalle:
             )
             button.click()
         except Exception as e:
-            print(f"Error in loadOriginal \n{e}")
+            print(f"Error in loadOriginal finding button.\n{e}")
 
-        self.originalImageSets = set(
-            element.get_attribute("href")
-            for element in WebDriverWait(self.driver, 20).until(
-                EC.presence_of_all_elements_located((By.CLASS_NAME, "girr_set "))
+        try:
+            self.originalImageSets = set(
+                element.get_attribute("href")
+                for element in WebDriverWait(self.driver, 20).until(
+                    EC.presence_of_all_elements_located((By.CLASS_NAME, "girr_set "))
+                )
             )
-        )
 
-        self.originalImageSets.update(set(
-            element.get_attribute("href")
-            for element in WebDriverWait(self.driver, 20).until(
-                EC.presence_of_all_elements_located((By.CLASS_NAME, "girr_set.seled"))
-            )
-        ))
+            self.originalImageSets.update(set(
+                element.get_attribute("href")
+                for element in WebDriverWait(self.driver, 20).until(
+                    EC.presence_of_all_elements_located((By.CLASS_NAME, "girr_set.seled"))
+                )
+            ))
+        except Exception as e:
+            print(f"Error in loadOriginal finding sets.\n{e}")
 
     def create(self, query: str):
         """Opens the Bing Image Creator (DALL-E 3) and adds a cookie"""
