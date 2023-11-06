@@ -12,6 +12,7 @@ import requests
 import datetime
 import argparse
 import sys
+import threading
 
 # Initialize Global Variables.
 dalle = None
@@ -20,21 +21,21 @@ userPrompt = None
 base_image_dir = "./images"
 download_dir = None
 topics = [
-    "Interior Design of a House",
-    "Exterior Design of a House",
-    "Design of a highway bridge over a river",
-    "Mansion Design",
+    "A realistic House with a front porch",
+    "A city",
     "Kitchen layout interior",
-    "Living Room Interior Design"
+    "Living Room Interior Design",
 ]
 topic = random.choice(topics)
 themes = [
-    """Dark, mysterious, warm light, dim, shimmer, shiny, marble, expensive, Minimalistic""",
+    """Dark, mysterious, warm light, rainy, dim, shimmer, shiny, marble, expensive, Minimalistic""",
+    """Accent colors, white, soft, natural light, friendly, cozy, modern, homey, humble"""
     """Light, White, Gold, Shiny, Friendly, Approachable, marble, ambient, Sleek""",
     """Rustic, wood, forrestry, plants, natural light, nature, cozy, warm, earthy""",
-    """Industrial, Brick, steel, concrete, urban, raw, rustic, machinery, grey, lightbulb""",
-    """futuristic, digital, minimalist, cyberpunk, glass, shiny, LED Lighting""",
-    """Contemporary, open concept, neutral colours, large, high, flow, shapes, straight edges"""
+    """Industrial, Brick, steel, concrete, urban, raw, rustic, beautiful, grey, lightbulb""",
+    """Modern, digital, minimalist, cyberpunk, glass, shiny, LED Lighting""",
+    """Contemporary, open concept, neutral colours, large, high, flow, shapes, straight edges""",
+    """Barn, field, outdoorsy, plants, red accents, silver, ladder, wood, cozy, homey, tools, clutter"""
 ]
 imagesPerPrompt = 1 # Must be between 1 and 4
 
@@ -98,27 +99,34 @@ def generateImages():
     if userPrompt:
         print("Running user prompt.")
         dalle.create("Generate an image for: " + userPrompt)
+        countdown_sleep(30)
     else:
+        waitTime = len(themes)*25
+        thread = threading.Thread(target=countdown_sleep, args=(waitTime,))
+        thread.start()
         for theme in themes:
             dalle.create(generatePrompt(theme))
+            time.sleep(20)
+        # countdown_sleep(len(themes)*20) # Gives time for the AI to generate content before switching to the creations page to gather urls.
+        thread.join()
 
 def countdown_sleep(seconds):
-    for i in range(seconds, 0, -1):
+    for i in range(seconds, 0, -5):
         sys.stdout.write(f"\rRemaining time: {i} seconds")
         sys.stdout.flush()
-        time.sleep(1)
-    sys.stdout.write(f"\rComplete. Downloading Images...\n")
+        time.sleep(5)
+    sys.stdout.write(f"\rDownloading Images...\n")
 
 
 def main():
+    # for i in range(0, 2):
     initializeAPIs()
     prepareFileDownloads()
     parseArgs()
     generateImages()
-    countdown_sleep(len(themes)*20) # Gives time for the AI to generate content before switching to the creations page to gather urls.
     downloadImages()
 
-    # download_dir = './images/2023-11-03_14-47-06' # Remove when uncommenting.
+    # download_dir = './images/2023-11-05_20-28-36' # Remove when uncommenting.
     video = videoMaker(download_dir, 2)
 
     video.addMusic('./Music/SUICIDAL-IDOL - ecstacy (slowed).mp3', 64)
