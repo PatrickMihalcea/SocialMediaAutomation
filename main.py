@@ -5,6 +5,7 @@ load_dotenv()
 import logging
 from dalle import Dalle
 from videoMaker import videoMaker
+from googleDriveUploader import upload
 import random
 import time
 import requests
@@ -107,17 +108,22 @@ def countdown_sleep(seconds):
         sys.stdout.flush()
         time.sleep(1)
     sys.stdout.write(f"\rComplete. Downloading Images...\n")
- 
+
+
 def main():
-    # initializeAPIs()
-    # prepareFileDownloads()
-    # parseArgs()
-    # generateImages()
-    # countdown_sleep(len(themes)*20) # Gives time for the AI to generate content before switching to the creations page to gather urls.
-    # downloadImages()
-    folder = './images/2023-11-03_14-47-06'
-    video = videoMaker(folder, 2)
+    initializeAPIs()
+    prepareFileDownloads()
+    parseArgs()
+    generateImages()
+    countdown_sleep(len(themes)*20) # Gives time for the AI to generate content before switching to the creations page to gather urls.
+    downloadImages()
+
+    # download_dir = './images/2023-11-03_14-47-06' # Remove when uncommenting.
+    video = videoMaker(download_dir, 2)
+
     video.addMusic('./Music/SUICIDAL-IDOL - ecstacy (slowed).mp3', 64)
+    upload(os.path.join(download_dir, "video.mp4"))
+
 
 if __name__ == "__main__":
     main()
