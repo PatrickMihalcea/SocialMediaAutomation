@@ -6,6 +6,7 @@ import logging
 from dalle import Dalle
 from videoMaker import videoMaker
 from googleDriveUploader import upload
+from parallax import applyParallax
 import random
 import time
 import requests
@@ -37,9 +38,9 @@ themes = [
     """Barn, field, outdoorsy, plants, red accents, silver, ladder, wood, cozy, homey, tools, clutter"""
 ]
 music = {
-    "1": {"file" : "./Music/SUICIDAL-IDOL - ecstacy (slowed).mp3", "startTime" : 64, "secondsPerImage" : 2},
-    "2": {"file" : "./Music/Richard Carter - Le Monde.mp3", "startTime" : 8, "secondsPerImage" : 2},
-    "3": {"file" : "./Music/Aesthetic.mp3", "startTime" : 22, "secondsPerImage" : 2.5},
+    # "1": {"file" : "./Music/SUICIDAL-IDOL - ecstacy (slowed).mp3", "startTime" : 64, "secondsPerImage" : 2},
+    # "2": {"file" : "./Music/Richard Carter - Le Monde.mp3", "startTime" : 8, "secondsPerImage" : 2},
+    # "3": {"file" : "./Music/Aesthetic.mp3", "startTime" : 22, "secondsPerImage" : 2.5},
     "4": {"file" : "./Music/synthwave goose - blade runner 2049.mp3", "startTime" : 16, "secondsPerImage" : 3},
 }
 imagesPerPrompt = 2 # Must be between 1 and 4
@@ -107,13 +108,12 @@ def generateImages():
         dalle.create("Generate an image for: " + userPrompt)
         countdown_sleep(30)
     else:
-        waitTime = len(themes)*25
+        waitTime = 180
         thread = threading.Thread(target=countdown_sleep, args=(waitTime,))
         thread.start()
         topic = random.choice(topics)
         for theme in themes:
             dalle.create(generatePrompt(topic, theme))
-            time.sleep(14)
         # countdown_sleep(len(themes)*20) # Gives time for the AI to generate content before switching to the creations page to gather urls.
         thread.join()
 
@@ -126,17 +126,18 @@ def countdown_sleep(seconds):
 
 
 def main():
-    for i in range(0, 1):
-        initializeAPIs()
-        prepareFileDownloads()
-        parseArgs()
-        generateImages()
-        downloadImages()
-        randomSongKey = random.choice(list(music.keys()))
-        # download_dir = './images/2023-11-05_18-58-17' # Remove when uncommenting.
-        video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"])
-        video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
-        upload(os.path.join(download_dir, "video.mp4"))
+    # for i in range(0, 2):
+    #     initializeAPIs()
+    #     prepareFileDownloads()
+    #     parseArgs()
+    #     generateImages()
+    #     downloadImages()
+    #     randomSongKey = random.choice(list(music.keys()))
+    #     # download_dir = './images/2023-11-05_18-58-17' # Remove when uncommenting.
+    #     video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"])
+    #     video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
+    #     upload(os.path.join(download_dir, "video.mp4"))
+    applyParallax("./images/2023-11-06_01-03-17/image_2.jpg")
 
 if __name__ == "__main__":
     main()
