@@ -3,4 +3,5 @@ venv/
 .env
 *.jpg
 credentials.json
+client_secrets.json
 settings.yaml
