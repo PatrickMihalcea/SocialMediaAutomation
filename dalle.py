@@ -22,6 +22,13 @@ class Dalle:
         a Chrome driver object to interact with the website
     cookie_value : str
         a string representing the cookie value to bypass automation detection
+        TO OBTAIN COOKIE:
+            1. Go to Bing Image Creator in your browser and log in to your account.
+            2. Right click > Inspect.
+            3. Navigate to the Application section on chrome or Storage on Firefox.
+            4. Click on the Cookies section.
+            5. Find the variable _U and copy its value.
+            6. Paste in the cookie parameter.
     originalImageSets:
         a set of links that exist on the creations page prior to generating new images. 
 

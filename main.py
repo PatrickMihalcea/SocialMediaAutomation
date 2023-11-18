@@ -38,10 +38,10 @@ themes = [
     """Barn, field, outdoorsy, plants, red accents, silver, ladder, wood, cozy, homey, tools, clutter"""
 ]
 music = {
-    # "1": {"file" : "./Music/SUICIDAL-IDOL - ecstacy (slowed).mp3", "startTime" : 64, "secondsPerImage" : 2},
-    # "2": {"file" : "./Music/Richard Carter - Le Monde.mp3", "startTime" : 8, "secondsPerImage" : 2},
-    # "3": {"file" : "./Music/Aesthetic.mp3", "startTime" : 22, "secondsPerImage" : 2.5},
-    "4": {"file" : "./Music/synthwave goose - blade runner 2049.mp3", "startTime" : 16, "secondsPerImage" : 3},
+    # "1": {"file" : "./Music/SUICIDAL-IDOL - ecstacy (slowed).mp3", "startTime" : 63.4, "secondsPerImage" : 2.245},
+     "2": {"file" : "./Music/Richard Carter - Le Monde.mp3", "startTime" : 8.42, "secondsPerImage" : 1.86},
+    # "3": {"file" : "./Music/Aesthetic.mp3", "startTime" : 22.44, "secondsPerImage" : 2.774},
+    # "4": {"file" : "./Music/synthwave goose - blade runner 2049.mp3", "startTime" : 16.63, "secondsPerImage" : 2.075},
 }
 imagesPerPrompt = 2 # Must be between 1 and 4
 
@@ -127,17 +127,17 @@ def countdown_sleep(seconds):
 
 def main():
     # for i in range(0, 2):
-    #     initializeAPIs()
-    #     prepareFileDownloads()
-    #     parseArgs()
-    #     generateImages()
-    #     downloadImages()
-    #     randomSongKey = random.choice(list(music.keys()))
-    #     # download_dir = './images/2023-11-05_18-58-17' # Remove when uncommenting.
-    #     video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"])
-    #     video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
+        # initializeAPIs()
+        # prepareFileDownloads()
+        # parseArgs()
+        # generateImages()
+        # downloadImages()
+        randomSongKey = random.choice(list(music.keys()))
+        download_dir = './images/2023-11-17_22-04-42' # Remove when uncommenting.
+        video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"])
+        video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
     #     upload(os.path.join(download_dir, "video.mp4"))
-    applyParallax("./images/2023-11-06_01-03-17/image_2.jpg")
+    # applyParallax("./images/2023-11-06_01-03-17/image_2.jpg")
 
 if __name__ == "__main__":
     main()
