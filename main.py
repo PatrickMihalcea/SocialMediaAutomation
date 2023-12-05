@@ -14,6 +14,7 @@ import datetime
 import argparse
 import sys
 import threading
+import re
 
 # Initialize Global Variables.
 dalle = None
@@ -28,12 +29,15 @@ topics = [
     # ----------------------------------------------------------   Space Topics   ----------------------------------------------------------
     # "A unique planet viewed from outer space with interesting space elements in background. Realistic art style.",
     # "A spaceport with ships with distant galaxies in the background"
-    "A space battle over a planet with a main hero ship centered on a tarmac preparred for battle."
+    # "A space battle over a planet with a main hero ship centered on a tarmac preparred for battle."
     # ----------------------------------------------------------   Home Topics   ----------------------------------------------------------
-    # "A realistic House with a front porch",
+    "A modern House",
     # "A city",
     # "Kitchen layout interior",
     # "Living Room Interior Design",
+    # ----------------------------------------------------------   Other Topics   ----------------------------------------------------------
+    # "A tree of life towering over the forest"
+    # "A big or small city in space"
 ]
 themes = [
     # ----------------------------------------------------------   Animal Themes   ----------------------------------------------------------
@@ -68,10 +72,11 @@ music = {
     # "3": {"file" : "./Music/Aesthetic.mp3", "startTime" : 22.44, "secondsPerImage" : 2.774},
     # "4": {"file" : "./Music/synthwave goose - blade runner 2049.mp3", "startTime" : 16.63, "secondsPerImage" : 2.075},
     # "5": {"file" : "./Music/Hans Zimmer - Mountains (Interstellar Soundtrack).mp3", "startTime" : 118.533, "secondsPerImage" : 2},
-     "6": {"file" : "Music/Cushy - Pushing (Royalty Free Music).mp3", "startTime" : 9.7083, "secondsPerImage" : 2.375}
+      "6": {"file" : "./Music/Cushy - Pushing (Royalty Free Music).mp3", "startTime" : 9.708, "secondsPerImage" : 2.392}
 }
-imagesPerPrompt = 1 # Must be between 1 and 4
-iterationsPerTheme = 3
+imagesPerPrompt = 2 # Must be between 1 and 4
+iterationsPerTheme = 1
+topic = random.choice(topics)
 
 def initializeAPIs():
     global dalle
@@ -102,22 +107,41 @@ def parseArgs():
     userPrompt = args.input
 
 def generatePrompt(topic, theme):
-    prompt = "Generate a description of " + topic + """ 
-                including five of the following keywords: """ + theme + """. Keep the 
-                description to 135 tokens or less."""
+    prompt = """Generate a description of an image of """ + topic + """ 
+                including some of the following keywords: """ + theme + """. Keep the 
+                description to 200 tokens or less. Possibly mention the focus of the image, the background, the view, and lighting."""
     customPrompt = "Generate a description of " + topic + """. Make it unique and interesting. 
                 Keep the art style realistic but inspire creativity and add detail. Keep the description to 135 tokens or less."""
     # Make an API call to generate text
     response = openai.Completion.create(
         engine="text-davinci-003",  # Specify the GPT-3.5 engine
         prompt=prompt,
-        max_tokens=150,
+        max_tokens=250,
         n = 1 # Number of responses to generate
     )
     # Extract the generated text
-    image_prompt = "Generate an image for: " + response.choices[0].text
+    image_prompt = "Generate an image for: " + response.choices[0].text + "Photorealistic style! No words allowed."
     print(response.choices[0].text)
     return image_prompt
+
+def generateThemes(topic, numberOfThemes, numberOfKeyWordsPerTheme):
+    global themes
+    prompt = "You are a cinematic world builder for fantasy movies. Create " + str(numberOfThemes) + """ interesting lists of 
+    """ + str(numberOfKeyWordsPerTheme) + " words or locations or objects each to describe different thematic scenes involving: " + topic + """.
+    Keep your answer to the point and concise. Only the lists please. Make the lists very grounded in their individual themes."""
+    response = openai.Completion.create(
+        engine="text-davinci-003",  # Specify the GPT-3.5 engine
+        prompt=prompt,
+        max_tokens=250,
+        n = 1 # Number of responses to generate
+    )
+    # Extract the generated text
+    ans = response.choices[0].text.replace('\n', '').replace('.', '').replace(':', ',').replace('-',',')
+    ans = re.split(r'\d+', ans)
+    themes = [item for item in ans if item]
+    for theme in themes:
+        print(theme)
+    print(len(themes))
 
 def downloadImages():
     global imageCounter
@@ -135,13 +159,12 @@ def downloadImages():
 def generateImages(iterationsPerTheme = iterationsPerTheme):
     if userPrompt:
         print("Running user prompt.")
-        dalle.create("Generate an image for: " + userPrompt)
+        dalle.create("Generate a realistic image for: " + userPrompt + "No words allowed.")
         countdown_sleep(30)
     else:
-        waitTime = iterationsPerTheme*75
+        waitTime = iterationsPerTheme*len(themes)*12
         thread = threading.Thread(target=countdown_sleep, args=(waitTime,))
         thread.start()
-        topic = random.choice(topics)
         for theme in themes:
             for i in range(iterationsPerTheme):
                 dalle.create(generatePrompt(topic, theme))
@@ -157,17 +180,19 @@ def countdown_sleep(seconds):
 
 
 def main():
-    # prepareFileDownloads()
-    # parseArgs()
-    # initializeAPIs()
-    # generateImages()
-    # downloadImages()
+    # download_dir = './images/2023-12-04_20-03-52' # Remove when uncommenting.
+    initializeAPIs()
+    generateThemes(topic, 12, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks.
+    prepareFileDownloads()
+    parseArgs()
+    generateImages()
+    downloadImages()
     randomSongKey = random.choice(list(music.keys()))
-    download_dir = './images/2023-12-04_20-03-52' # Remove when uncommenting.
     video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"])
     video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
+
     #     upload(os.path.join(download_dir, "video.mp4"))
-    # applyParallax("./images/2023-11-06_01-03-17/image_2.jpg")
+    # applyParallax("./images/2023-12-04_20-03-52/image_8.jpg")
 
 if __name__ == "__main__":
     main()

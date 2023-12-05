@@ -38,7 +38,7 @@ def applyParallax(imagePath):
     # Set the figure size to match the original image dimensions
     plt.figure(figsize=(image_width / 100, image_height / 100))
 
-    plt.imshow(output, cmap='gray')
+    plt.imshow(output, cmap='gray_r')
     plt.axis('off')
     plt.savefig("depth_map.jpg", dpi=100, bbox_inches='tight', pad_inches=0)
     return
