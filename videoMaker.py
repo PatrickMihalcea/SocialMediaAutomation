@@ -14,13 +14,14 @@ class videoMaker:
         # Set the output video file name and its parameters
         self.video_name = os.path.join(self.image_folder, 'video.mp4') 
         self.video = cv2.VideoWriter(self.video_name, cv2.VideoWriter_fourcc(*'mp4v'), 30, (self.width, self.height))
-        self.addNumbersToImages()
-        self.makeVideoZoomToFitWidth(secondsPerImage)
+        self.resizeImagesToFitWidth()
+        # self.addNumbersToImages()
+        self.createVideo(secondsPerImage)
 
         cv2.destroyAllWindows()
         self.video.release()
 
-    def makeVideoZoomToFitWidth(self, secondsPerImage):
+    def resizeImagesToFitWidth(self):
         for image in self.images:
             img = os.path.join(self.image_folder, image)
             # Open the original 1024x1024 image
@@ -47,12 +48,7 @@ class videoMaker:
             original_image.close()
             new_image.close()
 
-            # Write to video using 30 fps multiplied by time per image.
-            img = cv2.imread(img)
-            for _ in range(int (30 * secondsPerImage)):
-                self.video.write(img)
-
-    def makeVideoZoomToFitHeight(self, secondsPerImage):
+    def resizeImagesToFitHeight(self):
         # Create the video from images
         for image in self.images:
             img = cv2.imread(os.path.join(self.image_folder, image))
@@ -73,7 +69,10 @@ class videoMaker:
 
             # Resize the cropped image to the target dimensions
             img = cv2.resize(img, (self.width, self.height))
-            
+    
+    def createVideo(self, secondsPerImage):
+        for image in self.images:
+            img = cv2.imread(os.path.join(self.image_folder, image))
             # Write to video using 30 fps multiplied by time per image.
             for _ in range(int (30 * secondsPerImage)):
                 self.video.write(img)
