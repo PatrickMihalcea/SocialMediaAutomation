@@ -66,6 +66,7 @@ themes = [
     # """Contemporary, open concept, neutral colours, large, high, flow, shapes, straight edges""",
     # # """Barn, field, outdoorsy, plants, red accents, silver, ladder, wood, cozy, homey, tools, clutter"""
 ]
+
 music = {
     # "1": {"file" : "./Music/SUICIDAL-IDOL - ecstacy (slowed).mp3", "startTime" : 63.4, "secondsPerImage" : 2.245},
     # "2": {"file" : "./Music/Richard Carter - Le Monde.mp3", "startTime" : 8.42, "secondsPerImage" : 1.86},
