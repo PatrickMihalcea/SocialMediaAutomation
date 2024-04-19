@@ -25,19 +25,31 @@ base_image_dir = "./images"
 download_dir = None
 topics = [
     # ----------------------------------------------------------   Animal Topics   ----------------------------------------------------------
-    # "realistic cat and hamster photograph"
+    # "realistic cat and hamster photograph",
+    # "Monkey and bananas",
+    # "Dogs or one dog outside",
     # ----------------------------------------------------------   Space Topics   ----------------------------------------------------------
     # "A unique planet viewed from outer space with interesting space elements in background. Realistic art style.",
     # "A spaceport with ships with distant galaxies in the background"
     # "A space battle over a planet with a main hero ship centered on a tarmac preparred for battle."
+    
     # ----------------------------------------------------------   Home Topics   ----------------------------------------------------------
-    "A modern House",
+    # "A modern House",
     # "A city",
     # "Kitchen layout interior",
     # "Living Room Interior Design",
     # ----------------------------------------------------------   Other Topics   ----------------------------------------------------------
-    # "A tree of life towering over the forest"
-    # "A big or small city in space"
+    # "A tree of life towering over the forest",
+    # "A big or small city in space",
+    # ----------------------------------------------------------   Imagination Topics   ----------------------------------------------------------
+    # "A traveller",
+    # "A adventure",
+    # "Night time",
+    # "A new place",
+    # "A battle",
+    # "A race",
+    # "A mission",
+    "Vintage",
 ]
 themes = [
     # ----------------------------------------------------------   Animal Themes   ----------------------------------------------------------
@@ -73,9 +85,10 @@ music = {
     # "3": {"file" : "./Music/Aesthetic.mp3", "startTime" : 22.44, "secondsPerImage" : 2.774},
     # "4": {"file" : "./Music/synthwave goose - blade runner 2049.mp3", "startTime" : 16.63, "secondsPerImage" : 2.075},
     # "5": {"file" : "./Music/Hans Zimmer - Mountains (Interstellar Soundtrack).mp3", "startTime" : 118.533, "secondsPerImage" : 2},
-      "6": {"file" : "./Music/Cushy - Pushing (Royalty Free Music).mp3", "startTime" : 9.708, "secondsPerImage" : 2.392}
+    # "6": {"file" : "./Music/Cushy - Pushing (Royalty Free Music).mp3", "startTime" : 9.708, "secondsPerImage" : 2.392},
+    "7": {"file" : "./Music/Collide (sped up).mp3", "startTime" : 36.95, "secondsPerImage" : 1.347},
 }
-imagesPerPrompt = 2 # Must be between 1 and 4
+imagesPerPrompt = 1 # Must be between 1 and 4
 iterationsPerTheme = 1
 topic = random.choice(topics)
 
@@ -115,23 +128,23 @@ def generatePrompt(topic, theme):
                 Keep the art style realistic but inspire creativity and add detail. Keep the description to 135 tokens or less."""
     # Make an API call to generate text
     response = openai.Completion.create(
-        engine="text-davinci-003",  # Specify the GPT-3.5 engine
+        model="gpt-3.5-turbo-instruct", # Specify the GPT-3.5 engine
         prompt=prompt,
         max_tokens=250,
         n = 1 # Number of responses to generate
     )
     # Extract the generated text
-    image_prompt = "Generate an image for: " + response.choices[0].text + "Photorealistic style! No words allowed."
+    image_prompt = "Generate a realistic image for: " + response.choices[0].text + "Photorealistic style! No words allowed."
     print(response.choices[0].text)
     return image_prompt
 
 def generateThemes(topic, numberOfThemes, numberOfKeyWordsPerTheme):
     global themes
     prompt = "You are a cinematic world builder for fantasy movies. Create " + str(numberOfThemes) + """ interesting lists of 
-    """ + str(numberOfKeyWordsPerTheme) + " words or locations or objects each to describe different thematic scenes involving: " + topic + """.
+    """ + str(numberOfKeyWordsPerTheme) + " words, locations, or objects each to describe different thematic scenes involving: " + topic + """.
     Keep your answer to the point and concise. Only the lists please. Make the lists very grounded in their individual themes."""
     response = openai.Completion.create(
-        engine="text-davinci-003",  # Specify the GPT-3.5 engine
+        model="gpt-3.5-turbo-instruct", # Specify the GPT-3.5 engine
         prompt=prompt,
         max_tokens=250,
         n = 1 # Number of responses to generate
@@ -181,19 +194,20 @@ def countdown_sleep(seconds):
 
 
 def main():
-    # download_dir = './images/2023-12-04_20-03-52' # Remove when uncommenting.
-    initializeAPIs()
-    generateThemes(topic, 12, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks.
-    prepareFileDownloads()
-    parseArgs()
-    generateImages()
-    downloadImages()
+    download_dir = './images/2024-04-14_19-34-56' # Remove when uncommenting.
+
+    # initializeAPIs()
+    # generateThemes(topic, 16, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks.
+    # prepareFileDownloads()
+    # parseArgs()
+    # generateImages()
+    # downloadImages()
     randomSongKey = random.choice(list(music.keys()))
     video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"])
     video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
 
     #     upload(os.path.join(download_dir, "video.mp4"))
-    # applyParallax("./images/2023-12-04_20-03-52/image_8.jpg")
+    # applyParallax("./images/2024-04-14_19-34-56/image_6.jpg")
 
 if __name__ == "__main__":
     main()

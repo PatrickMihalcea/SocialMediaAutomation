@@ -15,7 +15,7 @@ class videoMaker:
         self.video_name = os.path.join(self.image_folder, 'video.mp4') 
         self.video = cv2.VideoWriter(self.video_name, cv2.VideoWriter_fourcc(*'mp4v'), 30, (self.width, self.height))
         self.resizeImagesToFitWidth()
-        # self.addNumbersToImages()
+        self.addNumbersToImages()
         self.createVideo(secondsPerImage)
 
         cv2.destroyAllWindows()
