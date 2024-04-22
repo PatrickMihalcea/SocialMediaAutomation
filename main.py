@@ -43,13 +43,13 @@ topics = [
     # "A big or small city in space",
     # ----------------------------------------------------------   Imagination Topics   ----------------------------------------------------------
     # "A traveller",
-    # "A adventure",
+    "A adventure",
     # "Night time",
     # "A new place",
     # "A battle",
     # "A race",
     # "A mission",
-    "Vintage",
+    # "Vintage",
 ]
 themes = [
     # ----------------------------------------------------------   Animal Themes   ----------------------------------------------------------
@@ -88,7 +88,7 @@ music = {
     # "6": {"file" : "./Music/Cushy - Pushing (Royalty Free Music).mp3", "startTime" : 9.708, "secondsPerImage" : 2.392},
     "7": {"file" : "./Music/Collide (sped up).mp3", "startTime" : 36.95, "secondsPerImage" : 1.347},
 }
-imagesPerPrompt = 1 # Must be between 1 and 4
+imagesPerPrompt = 2 # Must be between 1 and 4
 iterationsPerTheme = 1
 topic = random.choice(topics)
 
@@ -194,14 +194,14 @@ def countdown_sleep(seconds):
 
 
 def main():
-    download_dir = './images/2024-04-14_19-34-56' # Remove when uncommenting.
+    # download_dir = './images/2024-04-14_19-34-56' # Remove when uncommenting.
 
-    # initializeAPIs()
-    # generateThemes(topic, 16, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks.
-    # prepareFileDownloads()
-    # parseArgs()
-    # generateImages()
-    # downloadImages()
+    initializeAPIs()
+    generateThemes(topic, 16, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks.
+    prepareFileDownloads()
+    parseArgs()
+    generateImages()
+    downloadImages()
     randomSongKey = random.choice(list(music.keys()))
     video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"])
     video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
