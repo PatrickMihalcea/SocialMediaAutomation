@@ -8,8 +8,9 @@ import moviepy.video.fx.all as vfx
 class videoMaker:
     def __init__(self, folder, secondsPerImage):
         self.image_folder = folder
+        self.renamePNGtoJPG()
         self.images = [img for img in os.listdir(self.image_folder) if img.endswith(".jpg")]
-        self.images.sort(key=lambda x: int(x.split('_')[1].split('.jpg')[0]))
+        # self.images.sort(key=lambda x: int(x.split('_')[1].split('.jpg')[0]))
         self.width, self.height = 1080, 1920
         # Set the output video file name and its parameters
         self.video_name = os.path.join(self.image_folder, 'video.mp4') 
@@ -20,6 +21,14 @@ class videoMaker:
 
         cv2.destroyAllWindows()
         self.video.release()
+
+    def renamePNGtoJPG(self):
+        for filename in os.listdir(self.image_folder):
+        # Check if the file is a PNG file
+            if filename.endswith('.png'):
+                new_filename = os.path.join(self.image_folder, filename[:-4] + '.jpg')
+                os.rename(os.path.join(self.image_folder, filename), new_filename)
+
 
     def resizeImagesToFitWidth(self):
         for image in self.images:

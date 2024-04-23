@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 import logging
 from dalle import Dalle
+from imageGenerator import imageGenerator
 from videoMaker import videoMaker
 from googleDriveUploader import upload
 from parallax import applyParallax
@@ -17,6 +18,7 @@ import threading
 import re
 
 # Initialize Global Variables.
+imageCreator = None
 dalle = None
 parser = argparse.ArgumentParser()
 userPrompt = None
@@ -88,18 +90,9 @@ music = {
     # "6": {"file" : "./Music/Cushy - Pushing (Royalty Free Music).mp3", "startTime" : 9.708, "secondsPerImage" : 2.392},
     "7": {"file" : "./Music/Collide (sped up).mp3", "startTime" : 36.95, "secondsPerImage" : 1.347},
 }
-imagesPerPrompt = 2 # Must be between 1 and 4
+imagesPerPrompt = 1 # Must be between 1 and 4
 iterationsPerTheme = 1
 topic = random.choice(topics)
-
-def initializeAPIs():
-    global dalle
-    # Initialize the OpenAI API client
-    openai.api_key = os.getenv("OPENAI_API_KEY")
-    # Initialize DALL-E 3 client.
-    logging.basicConfig(level=logging.INFO)
-    cookie = os.getenv("BING_COOKIE_VALUE")
-    dalle = Dalle(cookie)
 
 def prepareFileDownloads():
     global download_dir
@@ -112,6 +105,18 @@ def prepareFileDownloads():
     download_dir = os.path.join(base_image_dir, folder_title)
     # Create the folder
     os.makedirs(download_dir)
+
+def initializeAPIs():
+    global dalle
+    global imageCreator
+    global download_dir
+    # Initialize the OpenAI API client
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+    # Initialize DALL-E 3 client.
+    logging.basicConfig(level=logging.INFO)
+    cookie = os.getenv("BING_COOKIE_VALUE")
+    dalle = Dalle(cookie)
+    imageCreator = imageGenerator(cookie, os.path.abspath(download_dir))
 
 def parseArgs():
     global userPrompt
@@ -134,7 +139,7 @@ def generatePrompt(topic, theme):
         n = 1 # Number of responses to generate
     )
     # Extract the generated text
-    image_prompt = "Generate a realistic image for: " + response.choices[0].text + "Photorealistic style! No words allowed."
+    image_prompt = "Generate a realistic image for: " + response.choices[0].text.strip() + "Photorealistic style! No words allowed."
     print(response.choices[0].text)
     return image_prompt
 
@@ -156,6 +161,9 @@ def generateThemes(topic, numberOfThemes, numberOfKeyWordsPerTheme):
     for theme in themes:
         print(theme)
     print(len(themes))
+    # Trim themes down to desired length specified.
+    if len(themes) > numberOfThemes:
+        themes = themes[:numberOfThemes]
 
 def downloadImages():
     global imageCounter
@@ -192,16 +200,34 @@ def countdown_sleep(seconds):
         time.sleep(5)
     sys.stdout.write(f"\rDownloading Images...\n")
 
+def generateLandscapeImages(iterationsPerTheme = iterationsPerTheme):
+    threads = []
+    maxThreads = 3 # Actual maximum bing chat allows to prompt at once. Cannot increase.
+    semaphore = threading.Semaphore(maxThreads)
+
+    def threadTask(prompt):
+        semaphore.acquire()
+        imageCreator.create(prompt)
+        semaphore.release()
+
+    for theme in themes:
+        prompt = generatePrompt(topic, theme)
+        thread = threading.Thread(target=threadTask, args=(prompt,))
+        thread.start()
+        threads.append(thread)
+    
+    for thread in threads:
+        thread.join()
 
 def main():
     # download_dir = './images/2024-04-14_19-34-56' # Remove when uncommenting.
 
-    initializeAPIs()
-    generateThemes(topic, 16, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks.
     prepareFileDownloads()
+    initializeAPIs()
+    generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
     parseArgs()
-    generateImages()
-    downloadImages()
+    generateLandscapeImages()
+    # downloadImages()
     randomSongKey = random.choice(list(music.keys()))
     video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"])
     video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
