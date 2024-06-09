@@ -115,7 +115,7 @@ def initializeAPIs():
     # Initialize DALL-E 3 client.
     logging.basicConfig(level=logging.INFO)
     cookie = os.getenv("BING_COOKIE_VALUE")
-    dalle = Dalle(cookie)
+    # dalle = Dalle(cookie)
     imageCreator = imageGenerator(cookie, os.path.abspath(download_dir))
 
 def parseArgs():
@@ -220,14 +220,13 @@ def generateLandscapeImages(iterationsPerTheme = iterationsPerTheme):
         thread.join()
 
 def main():
-    # download_dir = './images/2024-04-14_19-34-56' # Remove when uncommenting.
+    download_dir = './images/2024-05-16_15-25-30' # Remove when uncommenting.
 
-    prepareFileDownloads()
-    initializeAPIs()
-    generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
-    parseArgs()
-    generateLandscapeImages()
-    # downloadImages()
+    # prepareFileDownloads()
+    # initializeAPIs()
+    # generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
+    # parseArgs()
+    # generateLandscapeImages()
     randomSongKey = random.choice(list(music.keys()))
     video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"])
     video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])

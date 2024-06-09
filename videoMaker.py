@@ -10,13 +10,14 @@ class videoMaker:
         self.image_folder = folder
         self.renamePNGtoJPG()
         self.images = [img for img in os.listdir(self.image_folder) if img.endswith(".jpg")]
+        self.rotateImages()
         # self.images.sort(key=lambda x: int(x.split('_')[1].split('.jpg')[0]))
         self.width, self.height = 1080, 1920
         # Set the output video file name and its parameters
         self.video_name = os.path.join(self.image_folder, 'video.mp4') 
         self.video = cv2.VideoWriter(self.video_name, cv2.VideoWriter_fourcc(*'mp4v'), 30, (self.width, self.height))
-        self.resizeImagesToFitWidth()
-        self.addNumbersToImages()
+        self.resizeImagesToFitHeight()
+        # self.addNumbersToImages()
         self.createVideo(secondsPerImage)
 
         cv2.destroyAllWindows()
@@ -27,7 +28,17 @@ class videoMaker:
         # Check if the file is a PNG file
             if filename.endswith('.png'):
                 new_filename = os.path.join(self.image_folder, filename[:-4] + '.jpg')
-                os.rename(os.path.join(self.image_folder, filename), new_filename)
+                image = Image.open(filename)
+                rgb_im = image.convert('RGB')
+                rgb_im.save(new_filename)
+                os.remove(os.path.join(self.image_folder, filename))
+
+    def rotateImages(self):
+        for imageFile in self.images:
+            image = Image.open(os.path.join(self.image_folder, imageFile))
+            rotatedImage = image.rotate(-45, expand=True)
+            rotatedImage.save(os.path.join(self.image_folder, imageFile))
+            rotatedImage.close()
 
 
     def resizeImagesToFitWidth(self):
@@ -99,8 +110,8 @@ class videoMaker:
             text = str(i) + "."
             i += 1
             # Calculate the X-coordinate to center the text horizontally
-            x_centered = image_width / 2
-            y_position = 120
+            x_centered = image_width-10 / 2
+            y_position = 130
             # Draw a shadow.
             draw.text((x_centered+2, y_position+2), text, fill=background_color, font=font)
             # Draw the background rectangle

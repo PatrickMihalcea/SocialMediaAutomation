@@ -29,7 +29,10 @@ class imageGenerator:
             driver = Chrome(options=options)
             # Go to Bing Chat and supply login.
             driver.get("https://www.bing.com/chat")
+            time.sleep(5)
             driver.add_cookie(cookie)
+            driver.refresh()
+            
             #Give prompt and locate image once generated.
             searchbox = WebDriverWait(driver,5).until(EC.presence_of_element_located((By.CLASS_NAME,"cib-serp-main")))
             searchbox.send_keys(prompt)
@@ -40,10 +43,13 @@ class imageGenerator:
             shadowHost3 = WebDriverWait(shadowHost2,15).until(EC.presence_of_element_located((By.CSS_SELECTOR,"#cib-chat-main > cib-chat-turn:nth-child(4)"))).shadow_root
             shadowHost4 = WebDriverWait(shadowHost3,15).until(EC.presence_of_element_located((By.CLASS_NAME,"response-message-group"))).shadow_root
             shadowHost5 = WebDriverWait(shadowHost4,15).until(EC.presence_of_element_located((By.CSS_SELECTOR,"cib-message:nth-child(3)"))).shadow_root
-            frame = WebDriverWait(shadowHost5,30).until(EC.presence_of_element_located((By.CSS_SELECTOR,".frame")))
-            driver.switch_to.frame(frame)
-            image = WebDriverWait(driver,60).until(EC.presence_of_element_located((By.CLASS_NAME,"mimg")))
+            testElement = WebDriverWait(shadowHost5,15).until(EC.presence_of_element_located((By.CSS_SELECTOR,"cib-shared")))
+            print(testElement.get_attribute('innerHTML'))
+            frame = WebDriverWait(shadowHost5,30).until(EC.presence_of_element_located((By.CSS_SELECTOR,"cib-shared > iframe")))
+            print("In frame")
             
+            driver.switch_to.frame(frame)
+            image = WebDriverWait(driver,60).until(EC.element_to_be_clickable((By.CLASS_NAME,"mimg")))
             # Resize.
             image.click()
             WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,"//*[@id='canvas-inlay-resize-fre-target']"))).click()
