@@ -29,7 +29,7 @@ class imageGenerator:
             driver = Chrome(options=options)
             # Go to Bing Chat and supply login.
             driver.get("https://www.bing.com/chat")
-            time.sleep(5)
+            time.sleep(1)
             driver.add_cookie(cookie)
             driver.refresh()
             
@@ -67,6 +67,7 @@ class imageGenerator:
 
 def main():
     cookie = os.getenv("BING_COOKIE_VALUE")
+    print(cookie)
     dir = "/Users/Patrick1/Documents/Projects/SocialMediaAutomation/images/2024-04-22_13-31-27"
     driver = imageGenerator(cookie,dir)
     driver.create("Generate an image of a mountain climber climbing a mountain")

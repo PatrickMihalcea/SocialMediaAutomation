@@ -2,41 +2,42 @@ import cv2
 import os
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from moviepy.editor import VideoFileClip, AudioFileClip
+from moviepy.editor import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips
 import moviepy.video.fx.all as vfx
 
+
 class videoMaker:
-    def __init__(self, folder, secondsPerImage):
+    def __init__(self, folder, secondsPerImage, zoomFactor):
         self.image_folder = folder
         self.renamePNGtoJPG()
         self.images = [img for img in os.listdir(self.image_folder) if img.endswith(".jpg")]
+        self.addNumbersToImages()
         self.rotateImages()
         # self.images.sort(key=lambda x: int(x.split('_')[1].split('.jpg')[0]))
         self.width, self.height = 1080, 1920
         # Set the output video file name and its parameters
         self.video_name = os.path.join(self.image_folder, 'video.mp4') 
-        self.video = cv2.VideoWriter(self.video_name, cv2.VideoWriter_fourcc(*'mp4v'), 30, (self.width, self.height))
+
         self.resizeImagesToFitHeight()
-        # self.addNumbersToImages()
-        self.createVideo(secondsPerImage)
+        
+        self.createVideoWithZoom(secondsPerImage,zoomFactor)
 
         cv2.destroyAllWindows()
-        self.video.release()
 
     def renamePNGtoJPG(self):
         for filename in os.listdir(self.image_folder):
         # Check if the file is a PNG file
             if filename.endswith('.png'):
-                new_filename = os.path.join(self.image_folder, filename[:-4] + '.jpg')
-                image = Image.open(filename)
+                new_filename = filename[:-4] + '.jpg'
+                image = Image.open(os.path.join(self.image_folder, filename))
                 rgb_im = image.convert('RGB')
-                rgb_im.save(new_filename)
+                rgb_im.save(os.path.join(self.image_folder, new_filename))
                 os.remove(os.path.join(self.image_folder, filename))
 
     def rotateImages(self):
         for imageFile in self.images:
             image = Image.open(os.path.join(self.image_folder, imageFile))
-            rotatedImage = image.rotate(-45, expand=True)
+            rotatedImage = image.rotate(-90, expand=True)
             rotatedImage.save(os.path.join(self.image_folder, imageFile))
             rotatedImage.close()
 
@@ -97,6 +98,25 @@ class videoMaker:
             for _ in range(int (30 * secondsPerImage)):
                 self.video.write(img)
 
+    def zoom_in_effect(self, image_clip, secondsPerImage, zoom_factor=1.2):
+        # Create a zoom-in effect by resizing the image clip over time
+        zoomed_clip = image_clip.resize(lambda t: 1 + (zoom_factor - 1) * (t / secondsPerImage))
+        return zoomed_clip.set_duration(secondsPerImage)
+
+    def createVideoWithZoom(self, secondsPerImage, zoom_factor):
+        # Get a list of image file paths in the folder
+        image_files = [os.path.join(self.image_folder, img) for img in os.listdir(self.image_folder) if img.endswith(('jpg'))]
+
+        # Create an ImageClip for each image and apply the zoom-in effect
+        clips = [self.zoom_in_effect(ImageClip(img), secondsPerImage, zoom_factor) for img in image_files]
+
+        # Concatenate the clips into a single video
+        video = concatenate_videoclips(clips, method="compose")
+
+        # Write the video to a file
+        video.write_videofile(self.video_name, fps=30, codec='libx264')
+
+
     def addNumbersToImages(self):
         font = ImageFont.truetype("./Fonts/Archivo-Regular.ttf", 70)
         text_color = (255, 255, 255)  # RGB color tuple
@@ -110,8 +130,8 @@ class videoMaker:
             text = str(i) + "."
             i += 1
             # Calculate the X-coordinate to center the text horizontally
-            x_centered = image_width-10 / 2
-            y_position = 130
+            x_centered = (image_width-10) / 2
+            y_position = image_height/4
             # Draw a shadow.
             draw.text((x_centered+2, y_position+2), text, fill=background_color, font=font)
             # Draw the background rectangle

@@ -1,6 +1,7 @@
 import cv2
 import torch
 import urllib.request
+import os
 
 import matplotlib.pyplot as plt
 
@@ -42,3 +43,9 @@ def applyParallax(imagePath):
     plt.axis('off')
     plt.savefig("depth_map.jpg", dpi=100, bbox_inches='tight', pad_inches=0)
     return
+
+def main():
+    applyParallax("/Users/Patrick1/Documents/Projects/SocialMediaAutomation/images/2024-07-05_14-03-40/Designer (2).jpg")
+
+if __name__ == "__main__":
+    main()

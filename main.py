@@ -220,19 +220,19 @@ def generateLandscapeImages(iterationsPerTheme = iterationsPerTheme):
         thread.join()
 
 def main():
-    download_dir = './images/2024-05-16_15-25-30' # Remove when uncommenting.
+    # download_dir = './images/2024-07-05_13-11-59' # Remove when uncommenting.
 
-    # prepareFileDownloads()
-    # initializeAPIs()
-    # generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
-    # parseArgs()
-    # generateLandscapeImages()
+    prepareFileDownloads()
+    initializeAPIs()
+    generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
+    parseArgs()
+    generateLandscapeImages()
     randomSongKey = random.choice(list(music.keys()))
-    video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"])
+    video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"],zoomFactor=1.05)
     video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
 
     #     upload(os.path.join(download_dir, "video.mp4"))
-    # applyParallax("./images/2024-04-14_19-34-56/image_6.jpg")
+    # applyParallax("/Users/Patrick1/Documents/Projects/SocialMediaAutomation/images/TestImages/Designer (2).png")
 
 if __name__ == "__main__":
     main()
