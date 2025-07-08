@@ -132,7 +132,7 @@ def generatePrompt(topic, theme):
     customPrompt = "Generate a description of " + topic + """. Make it unique and interesting. 
                 Keep the art style realistic but inspire creativity and add detail. Keep the description to 135 tokens or less."""
     # Make an API call to generate text
-    response = openai.Completion.create(
+    response = openai.completions.create(
         model="gpt-3.5-turbo-instruct", # Specify the GPT-3.5 engine
         prompt=prompt,
         max_tokens=250,
@@ -148,7 +148,7 @@ def generateThemes(topic, numberOfThemes, numberOfKeyWordsPerTheme):
     prompt = "You are a cinematic world builder for fantasy movies. Create " + str(numberOfThemes) + """ interesting lists of 
     """ + str(numberOfKeyWordsPerTheme) + " words, locations, or objects each to describe different thematic scenes involving: " + topic + """.
     Keep your answer to the point and concise. Only the lists please. Make the lists very grounded in their individual themes."""
-    response = openai.Completion.create(
+    response = openai.completions.create(
         model="gpt-3.5-turbo-instruct", # Specify the GPT-3.5 engine
         prompt=prompt,
         max_tokens=250,
@@ -220,13 +220,13 @@ def generateLandscapeImages(iterationsPerTheme = iterationsPerTheme):
         thread.join()
 
 def main():
-    download_dir = './images/2023-12-05_02-58-08' # Remove when uncommenting.
+    # download_dir = './images/2023-12-05_02-58-08' # Remove when uncommenting.
 
-    # prepareFileDownloads()
-    # initializeAPIs()
-    # generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
-    # parseArgs()
-    # generateLandscapeImages()
+    prepareFileDownloads()
+    initializeAPIs()
+    generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
+    parseArgs()
+    generateLandscapeImages()
     randomSongKey = random.choice(list(music.keys()))
     video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"],zoomFactor=1.05)
     video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])

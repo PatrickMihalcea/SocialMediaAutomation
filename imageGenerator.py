@@ -1,13 +1,11 @@
-import logging
 import os
-import requests
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from undetected_chromedriver import Chrome, ChromeOptions
 from selenium.webdriver.common.keys import Keys
 import time
-import base64
+
 
 class imageGenerator:
     def __init__(self, cookie_value: str, downloadDirectory: str):
@@ -28,41 +26,45 @@ class imageGenerator:
             options.headless = False
             driver = Chrome(options=options)
             # Go to Bing Chat and supply login.
-            driver.get("https://www.bing.com/chat")
+            driver.get("https://www.bing.com/images/create")
             time.sleep(1)
             driver.add_cookie(cookie)
             driver.refresh()
             
-            #Give prompt and locate image once generated.
-            searchbox = WebDriverWait(driver,5).until(EC.presence_of_element_located((By.CLASS_NAME,"cib-serp-main")))
+            # Give prompt and locate image once generated.
+            searchbox = WebDriverWait(driver,5).until(EC.presence_of_element_located((By.ID,"gi_form_q")))
             searchbox.send_keys(prompt)
             print("generating image")
             searchbox.send_keys(Keys.ENTER)
-            shadowHost = searchbox.shadow_root
-            shadowHost2 = WebDriverWait(shadowHost,15).until(EC.presence_of_element_located((By.ID,"cib-conversation-main"))).shadow_root
-            shadowHost3 = WebDriverWait(shadowHost2,15).until(EC.presence_of_element_located((By.CSS_SELECTOR,"#cib-chat-main > cib-chat-turn:nth-child(4)"))).shadow_root
-            shadowHost4 = WebDriverWait(shadowHost3,15).until(EC.presence_of_element_located((By.CLASS_NAME,"response-message-group"))).shadow_root
-            shadowHost5 = WebDriverWait(shadowHost4,15).until(EC.presence_of_element_located((By.CSS_SELECTOR,"cib-message:nth-child(3)"))).shadow_root
-            testElement = WebDriverWait(shadowHost5,15).until(EC.presence_of_element_located((By.CSS_SELECTOR,"cib-shared")))
-            print(testElement.get_attribute('innerHTML'))
-            frame = WebDriverWait(shadowHost5,30).until(EC.presence_of_element_located((By.CSS_SELECTOR,"cib-shared > iframe")))
-            print("In frame")
+            # shadowHost = searchbox.shadow_root
+            # shadowHost2 = WebDriverWait(shadowHost,15).until(EC.presence_of_element_located((By.ID,"cib-conversation-main"))).shadow_root
+            # shadowHost3 = WebDriverWait(shadowHost2,15).until(EC.presence_of_element_located((By.CSS_SELECTOR,"#cib-chat-main > cib-chat-turn:nth-child(4)"))).shadow_root
+            # shadowHost4 = WebDriverWait(shadowHost3,15).until(EC.presence_of_element_located((By.CLASS_NAME,"response-message-group"))).shadow_root
+            # shadowHost5 = WebDriverWait(shadowHost4,15).until(EC.presence_of_element_located((By.CSS_SELECTOR,"cib-message:nth-child(3)"))).shadow_root
+            # testElement = WebDriverWait(shadowHost5,15).until(EC.presence_of_element_located((By.CSS_SELECTOR,"cib-shared")))
+            # print(testElement.get_attribute('innerHTML'))
+            # frame = WebDriverWait(shadowHost5,30).until(EC.presence_of_element_located((By.CSS_SELECTOR,"cib-shared > iframe")))
+            # print("In frame")
             
-            driver.switch_to.frame(frame)
+            # driver.switch_to.frame(frame)
+
             image = WebDriverWait(driver,60).until(EC.element_to_be_clickable((By.CLASS_NAME,"mimg")))
-            # Resize.
             image.click()
-            WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,"//*[@id='canvas-inlay-resize-fre-target']"))).click()
-            WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,"/html/body/div/div/div/div/div/div[5]/div/div/div/button[2]"))).click()
-            WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,"/html/body/div/div/div/div/div/div[5]/div/div/div/div/button[2]"))).click()
-            # Download
-            WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,"//*[@id='canvas-inlay-header-bar-ellipsis-button']"))).click()
-            WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,"//*[@id='canvas-inlay-header-bar-download-button']"))).click()
+            frame = WebDriverWait(driver,30).until(EC.presence_of_element_located((By.CSS_SELECTOR,"#OverlayIFrame")))
+            print("In frame")
+            driver.switch_to.frame(frame)
+            # Download.
+            WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,'//*[@id="detailMeta"]/div[2]/ul/li[4]'))).click()
+            # WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,"/html/body/div/div/div/div/div/div[5]/div/div/div/button[2]"))).click()
+            # WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,"/html/body/div/div/div/div/div/div[5]/div/div/div/div/button[2]"))).click()
+            # WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,"//*[@id='canvas-inlay-header-bar-ellipsis-button']"))).click()
+            # WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,"//*[@id='canvas-inlay-header-bar-download-button']"))).click()
             time.sleep(10) # Wait for file to download.
             print("downloaded")
             driver.quit()
-        except:
+        except Exception as e:
             print("An error has occured when generating an image")
+            print(e)
             return
 
 def main():
