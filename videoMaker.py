@@ -2,25 +2,20 @@ import cv2
 import os
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from moviepy.editor import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips
-import moviepy.video.fx.all as vfx
-
+from moviepy import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips
 
 class videoMaker:
     def __init__(self, folder, secondsPerImage, zoomFactor):
         self.image_folder = folder
         self.renamePNGtoJPG()
         self.images = [img for img in os.listdir(self.image_folder) if img.endswith(".jpg")]
-        self.addNumbersToImages()
-        self.rotateImages()
-        # self.images.sort(key=lambda x: int(x.split('_')[1].split('.jpg')[0]))
         self.width, self.height = 1080, 1920
         # Set the output video file name and its parameters
         self.video_name = os.path.join(self.image_folder, 'video.mp4') 
 
-        self.resizeImagesToFitHeight()
-        
-        self.createVideoWithZoom(secondsPerImage,zoomFactor)
+        self.resizeImagesToFitWidth()
+        self.createVideo(secondsPerImage)
+        # self.createVideoWithZoom(secondsPerImage,zoomFactor)
 
         cv2.destroyAllWindows()
 
@@ -92,29 +87,29 @@ class videoMaker:
             img = cv2.resize(img, (self.width, self.height))
     
     def createVideo(self, secondsPerImage):
-        for image in self.images:
-            img = cv2.imread(os.path.join(self.image_folder, image))
-            # Write to video using 30 fps multiplied by time per image.
-            for _ in range(int (30 * secondsPerImage)):
-                self.video.write(img)
-
-    def zoom_in_effect(self, image_clip, secondsPerImage, zoom_factor=1.2):
-        # Create a zoom-in effect by resizing the image clip over time
-        zoomed_clip = image_clip.resize(lambda t: 1 + (zoom_factor - 1) * (t / secondsPerImage))
-        return zoomed_clip.set_duration(secondsPerImage)
-
-    def createVideoWithZoom(self, secondsPerImage, zoom_factor):
-        # Get a list of image file paths in the folder
         image_files = [os.path.join(self.image_folder, img) for img in os.listdir(self.image_folder) if img.endswith(('jpg'))]
-
-        # Create an ImageClip for each image and apply the zoom-in effect
-        clips = [self.zoom_in_effect(ImageClip(img), secondsPerImage, zoom_factor) for img in image_files]
-
-        # Concatenate the clips into a single video
+        clips = [ImageClip(img, duration=secondsPerImage) for img in image_files]
         video = concatenate_videoclips(clips, method="compose")
-
-        # Write the video to a file
         video.write_videofile(self.video_name, fps=30, codec='libx264')
+
+
+    # WARNING: BROKEN
+    def createVideoWithZoom(self, secondsPerImage, zoom_factor):
+        clips = []
+        for filename in sorted(os.listdir(self.image_folder)):
+            if filename.lower().endswith((".jpg", ".jpeg", ".png")):
+                img_path = os.path.join(self.image_folder, filename)
+                base_clip = ImageClip(img_path, duration=secondsPerImage)
+
+                # no .fx apparently
+                zoomed_clip = base_clip.fx(
+                    ImageClip.resize,
+                    lambda t: 1 + (zoom_factor - 1) * (t / secondsPerImage)
+                )
+                clips.append(zoomed_clip)
+
+        final_clip = concatenate_videoclips(clips, method="compose")
+        final_clip.write_videofile(self.video_name, fps=30)
 
 
     def addNumbersToImages(self):
@@ -150,14 +145,14 @@ class videoMaker:
 
         # Trim the audio clip to start from a specific time
         video_clip = VideoFileClip(self.video_name)
-        audio_clip = audio_clip.subclip(start_time, start_time+video_clip.duration)
+        audio_clip = AudioFileClip(audioPath).subclipped(start_time, start_time+video_clip.duration)
 
         # # Ensure the audio duration matches the video duration
         # if audio_clip.duration < video_clip.duration:
         #     audio_clip = audio_clip.crossfade(self.video.duration)
 
         # Set the audio of the video to the modified audio clip
-        video_clip = video_clip.set_audio(audio_clip)
+        video_clip = video_clip.with_audio(audio_clip)
 
         # Write the final video to the output file
         video_clip.write_videofile(os.path.join(self.image_folder, "temp.mp4"), codec='libx264', audio_codec='aac', fps=30)

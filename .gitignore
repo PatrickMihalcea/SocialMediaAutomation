@@ -1,5 +1,6 @@
 images/
 venv/
+.venv/
 .env
 *.jpg
 credentials.json

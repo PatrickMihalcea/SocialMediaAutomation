@@ -7,7 +7,7 @@ from dalle import Dalle
 from imageGenerator import imageGenerator
 from videoMaker import videoMaker
 from googleDriveUploader import upload
-from parallax import applyParallax
+# from parallax import applyParallax
 import random
 import time
 import requests
@@ -220,13 +220,13 @@ def generateLandscapeImages(iterationsPerTheme = iterationsPerTheme):
         thread.join()
 
 def main():
-    # download_dir = './images/2024-07-05_13-11-59' # Remove when uncommenting.
+    download_dir = './images/2023-12-05_02-58-08' # Remove when uncommenting.
 
-    prepareFileDownloads()
-    initializeAPIs()
-    generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
-    parseArgs()
-    generateLandscapeImages()
+    # prepareFileDownloads()
+    # initializeAPIs()
+    # generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
+    # parseArgs()
+    # generateLandscapeImages()
     randomSongKey = random.choice(list(music.keys()))
     video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"],zoomFactor=1.05)
     video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
