@@ -44,8 +44,8 @@ topics = [
     # "A tree of life towering over the forest",
     # "A big or small city in space",
     # ----------------------------------------------------------   Imagination Topics   ----------------------------------------------------------
-    # "A traveller",
-    "A adventure",
+    "A traveller",
+    # "A adventure",
     # "Night time",
     # "A new place",
     # "A battle",
@@ -82,12 +82,12 @@ themes = [
 ]
 
 music = {
-    # "1": {"file" : "./Music/SUICIDAL-IDOL - ecstacy (slowed).mp3", "startTime" : 63.4, "secondsPerImage" : 2.245},
-    # "2": {"file" : "./Music/Richard Carter - Le Monde.mp3", "startTime" : 8.42, "secondsPerImage" : 1.86},
-    # "3": {"file" : "./Music/Aesthetic.mp3", "startTime" : 22.44, "secondsPerImage" : 2.774},
-    # "4": {"file" : "./Music/synthwave goose - blade runner 2049.mp3", "startTime" : 16.63, "secondsPerImage" : 2.075},
-    # "5": {"file" : "./Music/Hans Zimmer - Mountains (Interstellar Soundtrack).mp3", "startTime" : 118.533, "secondsPerImage" : 2},
-    # "6": {"file" : "./Music/Cushy - Pushing (Royalty Free Music).mp3", "startTime" : 9.708, "secondsPerImage" : 2.392},
+    "1": {"file" : "./Music/SUICIDAL-IDOL - ecstacy (slowed).mp3", "startTime" : 63.4, "secondsPerImage" : 2.245},
+    "2": {"file" : "./Music/Richard Carter - Le Monde.mp3", "startTime" : 8.42, "secondsPerImage" : 1.86},
+    "3": {"file" : "./Music/Aesthetic.mp3", "startTime" : 22.44, "secondsPerImage" : 2.774},
+    "4": {"file" : "./Music/synthwave goose - blade runner 2049.mp3", "startTime" : 16.63, "secondsPerImage" : 2.075},
+    "5": {"file" : "./Music/Hans Zimmer - Mountains (Interstellar Soundtrack).mp3", "startTime" : 118.533, "secondsPerImage" : 2},
+    "6": {"file" : "./Music/Cushy - Pushing (Royalty Free Music).mp3", "startTime" : 9.708, "secondsPerImage" : 2.392},
     "7": {"file" : "./Music/Collide (sped up).mp3", "startTime" : 36.95, "secondsPerImage" : 1.347},
 }
 imagesPerPrompt = 1 # Must be between 1 and 4
@@ -115,7 +115,7 @@ def initializeAPIs():
     # Initialize DALL-E 3 client.
     logging.basicConfig(level=logging.INFO)
     cookie = os.getenv("BING_COOKIE_VALUE")
-    # dalle = Dalle(cookie)
+    dalle = Dalle()
     imageCreator = imageGenerator(cookie, os.path.abspath(download_dir))
 
 def parseArgs():
@@ -127,26 +127,25 @@ def parseArgs():
 
 def generatePrompt(topic, theme):
     prompt = """Generate a description of an image of """ + topic + """ 
-                including some of the following keywords: """ + theme + """. Keep the 
-                description to 200 tokens or less. Possibly mention the focus of the image, the background, the view, and lighting."""
+                including some of the following keywords: """ + theme + """. Keep the description to 150 tokens or less. Describe the focus of the image, camera angle, background, the view, and lighting."""
     customPrompt = "Generate a description of " + topic + """. Make it unique and interesting. 
                 Keep the art style realistic but inspire creativity and add detail. Keep the description to 135 tokens or less."""
     # Make an API call to generate text
     response = openai.completions.create(
         model="gpt-3.5-turbo-instruct", # Specify the GPT-3.5 engine
         prompt=prompt,
-        max_tokens=250,
+        max_tokens=200,
         n = 1 # Number of responses to generate
     )
     # Extract the generated text
-    image_prompt = "Generate a realistic image for: " + response.choices[0].text.strip() + "Photorealistic style! No words allowed."
+    image_prompt = "Generate a realistic, highly detailed, cinematic, 4k realism image for: " + response.choices[0].text.strip() + "Photorealistic style! 4k realism No words allowed."
     print(response.choices[0].text)
     return image_prompt
 
 def generateThemes(topic, numberOfThemes, numberOfKeyWordsPerTheme):
     global themes
-    prompt = "You are a cinematic world builder for fantasy movies. Create " + str(numberOfThemes) + """ interesting lists of 
-    """ + str(numberOfKeyWordsPerTheme) + " words, locations, or objects each to describe different thematic scenes involving: " + topic + """.
+    prompt = "You are a cinematic world builder for fantasy movies. Create " + str(numberOfThemes) + """ lists of 
+    """ + str(numberOfKeyWordsPerTheme) + "themed objects, or items each to add to thematic scenes involving: " + topic + """.
     Keep your answer to the point and concise. Only the lists please. Make the lists very grounded in their individual themes."""
     response = openai.completions.create(
         model="gpt-3.5-turbo-instruct", # Specify the GPT-3.5 engine
@@ -181,7 +180,7 @@ def downloadImages():
 def generateImages(iterationsPerTheme = iterationsPerTheme):
     if userPrompt:
         print("Running user prompt.")
-        dalle.create("Generate a realistic image for: " + userPrompt + "No words allowed.")
+        dalle.createImage(download_dir,"Generate a realistic image for: " + userPrompt + "No words allowed.")
         countdown_sleep(30)
     else:
         waitTime = iterationsPerTheme*len(themes)*12
@@ -189,7 +188,7 @@ def generateImages(iterationsPerTheme = iterationsPerTheme):
         thread.start()
         for theme in themes:
             for i in range(iterationsPerTheme):
-                dalle.create(generatePrompt(topic, theme))
+                dalle.createImage(download_dir, generatePrompt(topic, theme))
                 # countdown_sleep(len(themes)*20) # Gives time for the AI to generate content before switching to the creations page to gather urls.
         thread.join()
 
@@ -220,16 +219,16 @@ def generateLandscapeImages(iterationsPerTheme = iterationsPerTheme):
         thread.join()
 
 def main():
-    # download_dir = './images/2023-12-05_02-58-08' # Remove when uncommenting.
+    # download_dir = "images/2025-07-14_13-01-57" # Remove when uncommenting.
 
     prepareFileDownloads()
     initializeAPIs()
     generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
-    parseArgs()
+
     generateLandscapeImages()
-    randomSongKey = random.choice(list(music.keys()))
-    video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"],zoomFactor=1.05)
-    video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
+    # randomSongKey = random.choice(list(music.keys()))
+    # video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"],zoomFactor=1.05)
+    # video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
 
     #     upload(os.path.join(download_dir, "video.mp4"))
     # applyParallax("/Users/Patrick1/Documents/Projects/SocialMediaAutomation/images/TestImages/Designer (2).png")

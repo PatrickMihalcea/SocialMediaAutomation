@@ -6,3 +6,4 @@ venv/
 credentials.json
 client_secrets.json
 settings.yaml
+openai_pricing.png

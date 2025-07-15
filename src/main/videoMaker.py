@@ -7,7 +7,7 @@ from moviepy import VideoFileClip, AudioFileClip, ImageClip, concatenate_videocl
 class videoMaker:
     def __init__(self, folder, secondsPerImage, zoomFactor):
         self.image_folder = folder
-        self.renamePNGtoJPG()
+        self.renameToJPG()
         self.images = [img for img in os.listdir(self.image_folder) if img.endswith(".jpg")]
         self.width, self.height = 1080, 1920
         # Set the output video file name and its parameters
@@ -19,7 +19,24 @@ class videoMaker:
 
         cv2.destroyAllWindows()
 
-    def renamePNGtoJPG(self):
+    def renameToJPG(self):
+        valid_extensions = ('.png', '.jpeg', '.webp', '.tiff', '.bmp', '.gif')
+
+        for filename in os.listdir(self.image_folder):
+            if filename.lower().endswith(valid_extensions):
+                original_path = os.path.join(self.image_folder, filename)
+                new_filename = os.path.splitext(filename)[0] + '.jpg'
+                new_path = os.path.join(self.image_folder, new_filename)
+
+                try:
+                    image = Image.open(original_path).convert('RGB')
+                    image.save(new_path, 'JPEG')
+                    os.remove(original_path)
+                except Exception as e:
+                    print(f"Failed to convert {filename}: {e}")
+
+
+
         for filename in os.listdir(self.image_folder):
         # Check if the file is a PNG file
             if filename.endswith('.png'):
