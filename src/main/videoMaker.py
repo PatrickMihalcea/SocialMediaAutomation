@@ -3,88 +3,28 @@ import os
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from moviepy import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips
+from helper import renameToJPEG, resizeImagesToFitWidth
 
 class videoMaker:
-    def __init__(self, folder, secondsPerImage, zoomFactor):
+    def __init__(self, folder, secondsPerImage):
         self.image_folder = folder
-        self.renameToJPG()
-        self.images = [img for img in os.listdir(self.image_folder) if img.endswith(".jpg")]
+        renameToJPEG(self.image_folder)
+        self.images = [os.path.join(self.image_folder, img) for img in os.listdir(self.image_folder) if img.endswith(('jpeg'))]
         self.width, self.height = 1080, 1920
         # Set the output video file name and its parameters
         self.video_name = os.path.join(self.image_folder, 'video.mp4') 
 
-        self.resizeImagesToFitWidth()
+        resizeImagesToFitWidth(self.image_folder)
+        # self.resizeImagesToFitHeight()
         self.createVideo(secondsPerImage)
-        # self.createVideoWithZoom(secondsPerImage,zoomFactor)
+        # self.createVideoWithZoom(secondsPerImage,1.05)
 
         cv2.destroyAllWindows()
-
-    def renameToJPG(self):
-        valid_extensions = ('.png', '.jpeg', '.webp', '.tiff', '.bmp', '.gif')
-
-        for filename in os.listdir(self.image_folder):
-            if filename.lower().endswith(valid_extensions):
-                original_path = os.path.join(self.image_folder, filename)
-                new_filename = os.path.splitext(filename)[0] + '.jpg'
-                new_path = os.path.join(self.image_folder, new_filename)
-
-                try:
-                    image = Image.open(original_path).convert('RGB')
-                    image.save(new_path, 'JPEG')
-                    os.remove(original_path)
-                except Exception as e:
-                    print(f"Failed to convert {filename}: {e}")
-
-
-
-        for filename in os.listdir(self.image_folder):
-        # Check if the file is a PNG file
-            if filename.endswith('.png'):
-                new_filename = filename[:-4] + '.jpg'
-                image = Image.open(os.path.join(self.image_folder, filename))
-                rgb_im = image.convert('RGB')
-                rgb_im.save(os.path.join(self.image_folder, new_filename))
-                os.remove(os.path.join(self.image_folder, filename))
-
-    def rotateImages(self):
-        for imageFile in self.images:
-            image = Image.open(os.path.join(self.image_folder, imageFile))
-            rotatedImage = image.rotate(-90, expand=True)
-            rotatedImage.save(os.path.join(self.image_folder, imageFile))
-            rotatedImage.close()
-
-
-    def resizeImagesToFitWidth(self):
-        for image in self.images:
-            img = os.path.join(self.image_folder, image)
-            # Open the original 1024x1024 image
-            original_image = Image.open(img)
-            new_width, new_height = 1080, 1920
-            # Create a new blank image with the desired dimensions and a black background
-            new_image = Image.new('RGB', (new_width, new_height), (0, 0, 0))
-            # Calculate the dimensions for the scaled image to fit the width
-            scaled_width = new_width
-            scaled_height = int(original_image.height * (new_width / original_image.width))
-
-            # Calculate the position to center the scaled image vertically
-            left = 0
-            top = (new_height - scaled_height) // 2
-
-            # Resize and paste the original image onto the new image
-            resized_image = original_image.resize((scaled_width, scaled_height), resample=Image.LANCZOS)
-            new_image.paste(resized_image, (left, top))
-
-            # Save the resulting image with black borders
-            new_image.save(img)
-
-            # Close the images
-            original_image.close()
-            new_image.close()
 
     def resizeImagesToFitHeight(self):
         # Create the video from images
         for image in self.images:
-            img = cv2.imread(os.path.join(self.image_folder, image))
+            img = cv2.imread(image)
             img_height, img_width, _ = img.shape
             img_aspect_ratio = img_width / img_height
             target_aspect_ratio = self.width / self.height
@@ -104,8 +44,7 @@ class videoMaker:
             img = cv2.resize(img, (self.width, self.height))
     
     def createVideo(self, secondsPerImage):
-        image_files = [os.path.join(self.image_folder, img) for img in os.listdir(self.image_folder) if img.endswith(('jpg'))]
-        clips = [ImageClip(img, duration=secondsPerImage) for img in image_files]
+        clips = [ImageClip(img, duration=secondsPerImage) for img in self.images]
         video = concatenate_videoclips(clips, method="compose")
         video.write_videofile(self.video_name, fps=30, codec='libx264')
 
@@ -136,7 +75,7 @@ class videoMaker:
     
         i = 1
         for imageFile in self.images:
-            image = Image.open(os.path.join(self.image_folder, imageFile))
+            image = Image.open(imageFile)
             image_width, image_height = image.size
             draw = ImageDraw.Draw(image)
             text = str(i) + "."
@@ -181,3 +120,9 @@ class videoMaker:
         video_clip.close()
         audio_clip.close()
 
+def main():
+    clip = VideoFileClip('/Users/Patrick1/Documents/Projects/SocialMediaAutomation/images/TestImages/video_2.mp4')
+    print(f"FPS: {clip.fps}")
+
+if __name__ == "__main__":
+    main()

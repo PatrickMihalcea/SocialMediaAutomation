@@ -47,7 +47,7 @@ class Dalle:
         ext = ".jpeg"
         counter = 0
 
-        while True:
+        while counter <= 100:
             if counter == 0:
                 file_name = f"{base_name}{ext}"
             else:

@@ -63,7 +63,7 @@ class imageGenerator:
                 # WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,"//*[@id='canvas-inlay-header-bar-ellipsis-button']"))).click()
                 # WebDriverWait(driver,60).until(EC.presence_of_element_located((By.XPATH,"//*[@id='canvas-inlay-header-bar-download-button']"))).click()
                 time.sleep(10) # Wait for file to download.
-                print(f"Attempt {attempt}: Downloaded")
+                print(f"Attempt {attempt}: Downloaded to {self.downloadDirectory}")
                 driver.quit()
                 break
             except Exception as e:

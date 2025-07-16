@@ -7,7 +7,7 @@ from dalle import Dalle
 from imageGenerator import imageGenerator
 from videoMaker import videoMaker
 from googleDriveUploader import upload
-# from parallax import applyParallax
+from parallax import Parallax
 import random
 import time
 import requests
@@ -44,10 +44,10 @@ topics = [
     # "A tree of life towering over the forest",
     # "A big or small city in space",
     # ----------------------------------------------------------   Imagination Topics   ----------------------------------------------------------
-    "A traveller",
+    # "A traveller",
     # "A adventure",
     # "Night time",
-    # "A new place",
+    "A new place",
     # "A battle",
     # "A race",
     # "A mission",
@@ -164,19 +164,6 @@ def generateThemes(topic, numberOfThemes, numberOfKeyWordsPerTheme):
     if len(themes) > numberOfThemes:
         themes = themes[:numberOfThemes]
 
-def downloadImages():
-    global imageCounter
-    urls = dalle.get_urls(imagesPerPrompt)
-    random.shuffle(urls)
-    for url in urls:
-        response = requests.get(url)
-        filename = os.path.join(download_dir, "image_"+str(imageCounter)+".jpg") # Extract the image filename from the URL
-        # Save the image to the specified directory
-        with open(filename, "wb") as file:
-            file.write(response.content)
-        print(f"Downloaded: {filename}")
-        imageCounter += 1
-
 def generateImages(iterationsPerTheme = iterationsPerTheme):
     if userPrompt:
         print("Running user prompt.")
@@ -219,19 +206,18 @@ def generateLandscapeImages(iterationsPerTheme = iterationsPerTheme):
         thread.join()
 
 def main():
-    # download_dir = "images/2025-07-14_13-01-57" # Remove when uncommenting.
+    download_dir = "images/2025-07-14_21-29-24" # Remove when uncommenting.
 
-    prepareFileDownloads()
-    initializeAPIs()
-    generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
-
-    generateLandscapeImages()
-    # randomSongKey = random.choice(list(music.keys()))
-    # video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"],zoomFactor=1.05)
-    # video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
+    # prepareFileDownloads()
+    # initializeAPIs()
+    # generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
+    # generateLandscapeImages()
+    randomSongKey = random.choice(list(music.keys()))
+    video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"])
+    video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
 
     #     upload(os.path.join(download_dir, "video.mp4"))
-    # applyParallax("/Users/Patrick1/Documents/Projects/SocialMediaAutomation/images/TestImages/Designer (2).png")
+    # applyParallax("/Users/Patrick1/Documents/Projects/SocialMediaAutomation/images/2025-07-14_13-01-57/generated_image_5.jpeg")
 
 if __name__ == "__main__":
     main()
