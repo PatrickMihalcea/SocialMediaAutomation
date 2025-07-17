@@ -5,7 +5,7 @@ load_dotenv()
 import logging
 from dalle import Dalle
 from imageGenerator import imageGenerator
-from videoMaker import videoMaker
+from videoMaker import VideoMaker
 from googleDriveUploader import upload
 from parallax import Parallax
 import random
@@ -213,8 +213,9 @@ def main():
     # generateThemes(topic, 6, 5) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
     # generateLandscapeImages()
     randomSongKey = random.choice(list(music.keys()))
-    video = videoMaker(download_dir, music[randomSongKey]["secondsPerImage"])
-    video.addMusic(music[randomSongKey]["file"], music[randomSongKey]["startTime"])
+    videoMaker = VideoMaker()
+    video = videoMaker.createVideoFromImageFolder(download_dir, music[randomSongKey]["secondsPerImage"])
+    videoMaker.addMusic(video, music[randomSongKey]["file"], music[randomSongKey]["startTime"])
 
     #     upload(os.path.join(download_dir, "video.mp4"))
     # applyParallax("/Users/Patrick1/Documents/Projects/SocialMediaAutomation/images/2025-07-14_13-01-57/generated_image_5.jpeg")
