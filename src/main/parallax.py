@@ -17,19 +17,24 @@ class Parallax:
         self.videoMaker = VideoMaker()
 
     # Return outputPath to video.
-    def applyParallax(self, folder, secondsPerImage):
+    def applyParallax(self, folder, secondsPerImage, addNumbers=True, addText=True, text=""):
         clipUrls = []
         renameToJPEG(folder)
         images = [os.path.join(folder, img) for img in os.listdir(folder) if img.endswith(('jpeg'))]
         videoCount = 1
         for img in images:
+            if addNumbers:
+                self.videoMaker.addNumberToImage(img, videoCount)
             self.depthscene.input(img)
             output = os.path.join(folder, 'parallaxVideo_'+str(videoCount)+'.mp4')
             self.depthscene.main(time=str(secondsPerImage), output=output)
-            videoCount += 1
+            if (addText and videoCount == 1):
+                self.videoMaker.addTextToVideo(output, text)
             clipUrls.append(output)
+            videoCount += 1
 
         output_path = self.videoMaker.mergeVideosFromUrlList(clipUrls, folder)
+        
         return output_path
     
 
