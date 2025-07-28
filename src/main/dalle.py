@@ -62,8 +62,9 @@ def main():
     dalle = Dalle()
     dalle.createImage(
         "images/2025-07-22_01-24-35",
-        "realistic, highly detailed, 4k realism. " \
-        "From an aerial view, capture a tightly packed, multilevel interior loft home. At the center forefront is a cozy living space with a plush rug, small coffee table, and a comfortable couch. To the left, spiral stairs elegantly wind upwards to a small but efficient bedroom with a double bed and built-in shelves. To the right, a compact kitchen area displays a minimalist design with a breakfast bar and two stools. Large windows in the midground flood the space with soft, natural light. Outside, cityscape silhouettes are visible through the glass, slightly reflected on the windows. The atmosphere exudes an harmonious blend of modern minimalism, with warm sunlight illuminating wooden floors. The entire scene is encompassed by calm, homely vibes, taking advantage of every inch of space with thoughtful and stylish detailing.")
+        "Style: dark fantasy, highly detailed, 4k realism. " \
+        "A cozy medieval tavern interior at night, lit by flickering candlelight and a roaring fireplace. Wooden beams and stone walls, barrels stacked behind a rustic wooden bar. Old-fashioned mugs and tankards on tables, a barkeep serving ale to rugged adventurers and knights in armor. Warm, golden lighting with deep shadows. Smoky atmosphere, with medieval banners and hunting trophies on the walls. Style: high-detail, cinematic realism, with a touch of fantasy.",
+        size="1024x1024")
     
 if __name__ == "__main__":
     main()

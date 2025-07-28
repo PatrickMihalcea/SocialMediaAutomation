@@ -71,6 +71,7 @@ music = {
     # "8": {"file" : "./Music/Amor Na Praia (Super Slowed).mp3", "startTime" : 0.0, "secondsPerImage" : 2.8},
     # "9": {"file" : "./Music/Pasos De Fuego.mp3", "startTime" : 7.00, "secondsPerImage" : 2.8},
     "10": {"file" : "./Music/Levitate.mp3", "startTime" : 58.00, "secondsPerImage" : 3.15},
+    
 }
 topic = random.choice(topics)
 function_schema = {
@@ -265,27 +266,26 @@ def generateDalleImages(test=True):
 
 
 def main():
-    download_dir = "./images/TestImages/2025-07-23_00-44-42" # Remove when uncommenting.
+    # download_dir = "./images/TestImages/2025-07-23_00-44-42" # Remove when uncommenting.
 
     # prepareFileDownloads()
     # initializeAPIs()
     # generatePrompts(topic, 8) # Number of themes (arg2) should be at least 3. Otherwise splitting breaks. Arg 3 is keywords.
     # generateDalleImages(test=False)
 
-    randomSongKey = random.choice(list(music.keys()))
-    secondsPerImage = music[randomSongKey]["secondsPerImage"]
-    videoMaker = VideoMaker()
-    parallaxAgent = Parallax()
+    # randomSongKey = random.choice(list(music.keys()))
+    # secondsPerImage = music[randomSongKey]["secondsPerImage"]
+    # videoMaker = VideoMaker()
+    # parallaxAgent = Parallax()
 
-    video = parallaxAgent.applyParallax(download_dir, secondsPerImage, addNumbers=True, addText=True, text="Where can you live\n100 days if Mr. Beast\nmade you?")
-    videoMaker.addMusic(video, music[randomSongKey]["file"], music[randomSongKey]["startTime"])
+    # video = parallaxAgent.applyParallax(download_dir, secondsPerImage, addNumbers=True, addText=True, text="Where can you live\n100 days if Mr. Beast\nmade you?")
+    # videoMaker.addMusic(video, music[randomSongKey]["file"], music[randomSongKey]["startTime"])
 
     # upload(os.path.join(download_dir, "video.mp4"))
 
     # Testing image prompts
-    # generatePrompts(topic, 1, 1)
-    # for theme in themes:
-    #     prompt = generatePrompt(topic, theme)
+    generatePrompts(topic, 1)
+
 
 if __name__ == "__main__":
     main()
