@@ -12,6 +12,7 @@ const dbMock = vi.hoisted(() => ({
   socialAccount: { update: vi.fn(), findUnique: vi.fn() },
 }));
 const enqueueMock = vi.hoisted(() => vi.fn());
+const notifyWorkspaceMock = vi.hoisted(() => vi.fn());
 const adapter = vi.hoisted(() => ({
   validatePost: vi.fn(() => []),
   publish: vi.fn(),
@@ -26,11 +27,14 @@ vi.mock('@/lib/social/accounts', () => ({
 }));
 vi.mock('@/lib/social/registry', () => ({ getAdapterForAccount: vi.fn(() => adapter) }));
 vi.mock('@/lib/publishing/payload', () => ({ toOutgoingPost: vi.fn(async () => ({})) }));
-vi.mock('@/lib/notifications/service', () => ({ notifyWorkspace: vi.fn() }));
+vi.mock('@/lib/notifications/service', () => ({ notifyWorkspace: notifyWorkspaceMock }));
 vi.mock('@/lib/audit', () => ({ audit: vi.fn() }));
+vi.mock('@/lib/posts/service', () => ({ assertStoredPostValid: vi.fn() }));
 
 import {
+  publishPost,
   publishPostPlatform,
+  reconcilePostStatus,
   scanDuePosts,
   STALE_PUBLISHING_CLAIM_MS,
 } from '@/lib/publishing/engine';
@@ -49,6 +53,58 @@ describe('publishing reliability', () => {
     expect(dbMock.post.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ workspace: { queuePaused: false } }),
+      }),
+    );
+  });
+
+  it('retries only channel rows that have not published', async () => {
+    dbMock.post.findUnique.mockResolvedValue({
+      id: 'post-1',
+      workspaceId: 'workspace-1',
+      status: 'FAILED',
+      platforms: [
+        { id: 'instagram-row', status: 'PUBLISHED' },
+        { id: 'linkedin-row', status: 'FAILED' },
+        { id: 'x-row', status: 'PUBLISHED' },
+      ],
+    });
+    dbMock.post.update.mockResolvedValue({});
+    enqueueMock.mockResolvedValue('job-1');
+
+    await publishPost('post-1');
+
+    expect(enqueueMock).toHaveBeenCalledOnce();
+    expect(enqueueMock).toHaveBeenCalledWith(
+      'publish-post-platform',
+      { postPlatformId: 'linkedin-row' },
+      { workspaceId: 'workspace-1' },
+    );
+  });
+
+  it('discloses fully simulated publishing in the success notification', async () => {
+    dbMock.post.findUnique.mockResolvedValue({
+      id: 'post-1',
+      workspaceId: 'workspace-1',
+      title: 'Campaign update',
+      publishedAt: null,
+      workspace: { slug: 'northwind' },
+      platforms: [
+        {
+          status: 'PUBLISHED',
+          publishedAt: new Date(),
+          socialAccount: { metadata: { mock: true } },
+        },
+      ],
+    });
+    dbMock.post.update.mockResolvedValue({});
+
+    await reconcilePostStatus('post-1');
+
+    expect(notifyWorkspaceMock).toHaveBeenCalledWith(
+      'workspace-1',
+      expect.objectContaining({
+        body: expect.stringContaining('no post was sent to a real social network'),
+        href: '/w/northwind/calendar?post=post-1',
       }),
     );
   });

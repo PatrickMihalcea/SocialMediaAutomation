@@ -13,6 +13,7 @@ import { publicEnv } from '@/lib/env';
 import { requireUser } from '@/lib/auth/guard';
 import { redirect } from 'next/navigation';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
+import { conflict } from '@/lib/errors';
 
 const inviteMemberSchema = z.object({
   email: z.string().email(),
@@ -24,6 +25,14 @@ export async function inviteMemberAction(slug: string, formData: FormData): Prom
   if (!parsed.success) return actionError(parsed.error, 'Enter a valid email and role.');
   try {
     const ctx = await requireWorkspace(slug, 'member:invite');
+    const existingMember = await db.workspaceMember.findFirst({
+      where: {
+        workspaceId: ctx.workspace.id,
+        user: { email: parsed.data.email.toLowerCase() },
+      },
+      select: { id: true },
+    });
+    if (existingMember) throw conflict('That person is already a workspace member.');
     const count = await db.workspaceMember.count({ where: { workspaceId: ctx.workspace.id } });
     await assertWithinLimit(ctx.workspace.id, 'teamMembers', count);
     const { secret, hash } = issueSecret();

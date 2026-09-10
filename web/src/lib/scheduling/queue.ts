@@ -48,6 +48,7 @@ export function isCompleteQueueOrder(currentPostIds: string[], proposedPostIds: 
 }
 
 export function selectBulkSlots(slots: Slot[], count: number, startAt?: Date): Date[] {
+  if (!Number.isInteger(count) || count <= 0) return [];
   return slots
     .filter((slot) => !slot.taken && (!startAt || slot.at.getTime() >= startAt.getTime()))
     .slice(0, count)
@@ -107,23 +108,41 @@ export async function addToQueue(workspaceId: string, postId: string): Promise<D
   if (!slot) throw conflict('Every slot in the next four months is taken. Add more posting times.');
 
   const position = await nextPosition(workspaceId);
-  await db.$transaction([
-    db.queueItem.upsert({
+  await db.$transaction(async (tx) => {
+    const post = await tx.post.updateMany({
+      where: {
+        id: postId,
+        workspaceId,
+        status: { notIn: [PostStatus.PUBLISHED, PostStatus.PUBLISHING] },
+      },
+      data: { scheduledAt: slot, status: PostStatus.SCHEDULED, timezone: workspace.timezone },
+    });
+    if (post.count !== 1) {
+      throw conflict('This post started publishing while it was being queued. Its publishing time was left unchanged.');
+    }
+    await tx.queueItem.upsert({
       where: { postId },
       create: { workspaceId, postId, position, slotAt: slot },
       update: { position, slotAt: slot },
-    }),
-    db.post.update({
-      where: { id: postId },
-      data: { scheduledAt: slot, status: PostStatus.SCHEDULED, timezone: workspace.timezone },
-    }),
-  ]);
+    });
+  });
   return slot;
 }
 
 export async function removeFromQueue(postId: string): Promise<void> {
-  await db.queueItem.deleteMany({ where: { postId } });
-  await db.post.update({ where: { id: postId }, data: { status: PostStatus.DRAFT, scheduledAt: null } });
+  await db.$transaction(async (tx) => {
+    const post = await tx.post.updateMany({
+      where: {
+        id: postId,
+        status: { notIn: [PostStatus.PUBLISHED, PostStatus.PUBLISHING] },
+      },
+      data: { status: PostStatus.DRAFT, scheduledAt: null },
+    });
+    if (post.count !== 1) {
+      throw conflict('This post started publishing while it was being removed. It remains in the queue.');
+    }
+    await tx.queueItem.deleteMany({ where: { postId } });
+  });
 }
 
 /**
@@ -143,12 +162,25 @@ export async function reorderQueue(workspaceId: string, orderedPostIds: string[]
     throw conflict('There are not enough posting times for that order. Add more slots first.');
   }
 
-  await db.$transaction(
-    orderedPostIds.flatMap((postId, index) => [
-      db.queueItem.update({ where: { postId }, data: { position: index, slotAt: usable[index] } }),
-      db.post.update({ where: { id: postId }, data: { scheduledAt: usable[index] } }),
-    ]),
-  );
+  await db.$transaction(async (tx) => {
+    for (const [index, postId] of orderedPostIds.entries()) {
+      const post = await tx.post.updateMany({
+        where: {
+          id: postId,
+          workspaceId,
+          status: { notIn: [PostStatus.PUBLISHED, PostStatus.PUBLISHING] },
+        },
+        data: { scheduledAt: usable[index] },
+      });
+      if (post.count !== 1) {
+        throw conflict('A post started publishing while the queue was being reordered. The order was left unchanged.');
+      }
+      await tx.queueItem.update({
+        where: { postId },
+        data: { position: index, slotAt: usable[index] },
+      });
+    }
+  });
 }
 
 export async function setQueuePaused(workspaceId: string, paused: boolean): Promise<void> {

@@ -16,6 +16,8 @@ import {
 } from '@/lib/ai/providers/external-media';
 import { env } from '@/lib/env';
 import type { AiMediaResult } from '@/lib/ai/types';
+import { incrementUsage } from '@/lib/billing/limits';
+import { notify } from '@/lib/notifications/service';
 
 export function mediaProviderDescriptor(kind: AiMediaJobKind) {
   const external = env.AI_PROVIDER === 'openai';
@@ -25,18 +27,41 @@ export function mediaProviderDescriptor(kind: AiMediaJobKind) {
 }
 
 export async function runAiMediaJob(aiMediaJobId: string): Promise<void> {
-  const job = await db.aiMediaJob.findUnique({ where: { id: aiMediaJobId } });
+  const job = await db.aiMediaJob.findUnique({
+    where: { id: aiMediaJobId },
+    include: { workspace: { select: { slug: true } } },
+  });
   if (!job) throw new PermanentJobError(`AI media job ${aiMediaJobId} no longer exists`);
   if (job.status === JobStatus.COMPLETED || job.status === JobStatus.CANCELLED) return;
   const startedAt = new Date();
   await db.aiMediaJob.update({ where: { id: job.id }, data: { status: 'RUNNING', startedAt, error: null } });
+  let generationRecorded = false;
   try {
     const inputs = await loadInputs(job.workspaceId, job.inputAssetIds);
     const result = await produce(job.kind, job.prompt, inputs);
+    const latest = await db.aiMediaJob.findUnique({ where: { id: job.id }, select: { status: true } });
+    // Cancellation is durable and server-side. A provider request that was already
+    // in flight may finish, but its bytes must not become a new library asset.
+    if (latest?.status === JobStatus.CANCELLED) return;
     const filename = `ai-${job.kind.toLowerCase().replaceAll('_', '-')}.${result.extension}`;
     const key = mediaKey(job.workspaceId, filename);
     await storage().put(key, result.data, result.mimeType);
     const source = inputs[0]?.asset;
+    const generation = await db.aiGeneration.create({
+      data: {
+        workspaceId: job.workspaceId,
+        userId: job.userId,
+        provider: job.provider,
+        model: result.model,
+        operation: operationFor(job.kind),
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        estimatedCost: job.estimatedCost ?? 0,
+        succeeded: true,
+      },
+    });
+    generationRecorded = true;
     const asset = await db.mediaAsset.create({
       data: {
         workspaceId: job.workspaceId,
@@ -50,6 +75,7 @@ export async function runAiMediaJob(aiMediaJobId: string): Promise<void> {
         duration: result.durationSeconds,
         storageKey: key,
         status: 'READY',
+        aiGenerationId: generation.id,
         derivedFromId: source?.id,
         derivationPreset: job.kind,
         altText: job.prompt.slice(0, 500),
@@ -65,7 +91,35 @@ export async function runAiMediaJob(aiMediaJobId: string): Promise<void> {
         metadata: { mimeType: result.mimeType, model: result.model },
       },
     });
+    await incrementUsage(job.workspaceId, 'ai_generations');
+    if (job.userId) {
+      await notify({
+        workspaceId: job.workspaceId,
+        userIds: [job.userId],
+        type: 'MEDIA_PROCESSING_COMPLETE',
+        title: 'AI media is ready',
+        body: 'The generated asset is available in AI studio and the Media Library.',
+        href: `/w/${job.workspace.slug}/studio`,
+      });
+    }
   } catch (error) {
+    if (!generationRecorded) {
+      await db.aiGeneration.create({
+        data: {
+          workspaceId: job.workspaceId,
+          userId: job.userId,
+          provider: job.provider,
+          model: job.model,
+          operation: operationFor(job.kind),
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          estimatedCost: 0,
+          succeeded: false,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
     await db.aiMediaJob.update({
       where: { id: job.id },
       data: {
@@ -124,4 +178,11 @@ function mediaType(mimeType: string): MediaType {
   if (mimeType.startsWith('video/')) return 'VIDEO';
   if (mimeType.startsWith('audio/')) return 'AUDIO';
   throw new PermanentJobError(`Unsupported generated media type: ${mimeType}`);
+}
+
+function operationFor(kind: AiMediaJobKind) {
+  if (kind === 'IMAGE_EDIT' || kind === 'IMAGE_VARIATION') return 'IMAGE_EDIT' as const;
+  if (kind.startsWith('IMAGE')) return 'IMAGE' as const;
+  if (kind.startsWith('VIDEO')) return 'VIDEO' as const;
+  return 'AUDIO' as const;
 }

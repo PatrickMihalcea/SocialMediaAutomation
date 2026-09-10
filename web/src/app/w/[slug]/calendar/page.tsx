@@ -1,3 +1,4 @@
+import { Platform, PostStatus } from '@prisma/client';
 import { Button } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
@@ -18,14 +19,22 @@ export default async function CalendarPage({
   const { slug } = await params;
   const query = await searchParams;
   const ctx = await requireWorkspace(slug, 'post:view');
+  const status = Object.values(PostStatus).includes(query.status as PostStatus)
+    ? query.status as PostStatus
+    : undefined;
+  const platform = Object.values(Platform).includes(query.platform as Platform)
+    ? query.platform as Platform
+    : undefined;
+  const campaign = isUuid(query.campaign) ? query.campaign : undefined;
+  const account = isUuid(query.account) ? query.account : undefined;
   const [posts, campaigns, accounts] = await Promise.all([db.post.findMany({
     where: {
       workspaceId: ctx.workspace.id,
-      ...(query.status ? { status: query.status as never } : {}),
-      ...(query.campaign ? { campaignId: query.campaign } : {}),
-      ...((query.platform || query.account) ? { platforms: { some: {
-        ...(query.platform ? { platform: query.platform as never } : {}),
-        ...(query.account ? { socialAccountId: query.account } : {}),
+      ...(status ? { status } : {}),
+      ...(campaign ? { campaignId: campaign } : {}),
+      ...((platform || account) ? { platforms: { some: {
+        ...(platform ? { platform } : {}),
+        ...(account ? { socialAccountId: account } : {}),
       } } } : {}),
     },
     include: {
@@ -62,7 +71,7 @@ export default async function CalendarPage({
   const view = ['month', 'week', 'list'].includes(query.view ?? '') ? query.view as 'month' | 'week' | 'list' : 'month';
   const anchor = /^\d{4}-\d{2}-\d{2}$/.test(query.date ?? '') ? query.date! : formatInZone(new Date(), ctx.workspace.timezone, 'yyyy-MM-dd');
   const filters = Object.fromEntries(Object.entries({
-    status: query.status, platform: query.platform, campaign: query.campaign, account: query.account,
+    status, platform, campaign, account,
   }).filter((entry): entry is [string, string] => Boolean(entry[1])));
 
   return (
@@ -89,4 +98,8 @@ export default async function CalendarPage({
       />
     </>
   );
+}
+
+function isUuid(value?: string): value is string {
+  return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
 }

@@ -131,6 +131,7 @@ describe('savePost', () => {
     mocks.findFirstPost.mockResolvedValue({
       id: postId,
       status: PostStatus.DRAFT,
+      updatedAt: new Date('2026-09-10T12:00:00.000Z'),
       platforms: [{ status: 'PENDING' }],
     });
     const result = await savePost(workspaceId, authorId, { ...baseInput, id: postId });
@@ -142,10 +143,31 @@ describe('savePost', () => {
     );
   });
 
+  it('rejects a stale editor instead of silently overwriting newer changes', async () => {
+    mocks.findFirstPost.mockResolvedValue({
+      id: postId,
+      status: PostStatus.DRAFT,
+      updatedAt: new Date('2026-09-10T12:01:00.000Z'),
+      platforms: [{ status: 'PENDING' }],
+    });
+    await expect(
+      savePost(workspaceId, authorId, {
+        ...baseInput,
+        id: postId,
+        expectedUpdatedAt: new Date('2026-09-10T12:00:00.000Z'),
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: expect.stringContaining('changed in another session'),
+    });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it('duplicates a published post as a new draft instead of mutating it', async () => {
     mocks.findFirstPost.mockResolvedValue({
       id: postId,
       status: PostStatus.PUBLISHED,
+      updatedAt: new Date('2026-09-10T12:00:00.000Z'),
       platforms: [{ status: 'PUBLISHED' }],
     });
     await savePost(workspaceId, authorId, { ...baseInput, id: postId });
@@ -164,6 +186,16 @@ describe('savePost', () => {
       code: 'VALIDATION',
       fields: { [accountId]: ['Caption is too long.'] },
     });
+  });
+
+  it('allows incomplete platform content to be persisted as a draft', async () => {
+    mocks.validatePost.mockReturnValue([
+      { severity: 'error', field: 'media', message: 'This platform requires media.' },
+    ]);
+    await expect(
+      savePost(workspaceId, authorId, baseInput, { validateContent: false }),
+    ).resolves.toMatchObject({ id: postId, status: PostStatus.DRAFT });
+    expect(mocks.validatePost).not.toHaveBeenCalled();
   });
 
   it('rejects social accounts from another workspace', async () => {

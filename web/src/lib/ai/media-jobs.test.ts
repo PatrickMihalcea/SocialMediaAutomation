@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const dbMock = vi.hoisted(() => ({
   aiMediaJob: { findUnique: vi.fn(), update: vi.fn() },
+  aiGeneration: { create: vi.fn() },
   mediaAsset: { findMany: vi.fn(), create: vi.fn() },
 }));
 const storageMock = vi.hoisted(() => ({ put: vi.fn(), get: vi.fn() }));
@@ -9,6 +10,8 @@ const storageMock = vi.hoisted(() => ({ put: vi.fn(), get: vi.fn() }));
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/env', () => ({ env: { AI_PROVIDER: 'mock' } }));
 vi.mock('@/lib/ai', () => ({ aiProvider: vi.fn() }));
+vi.mock('@/lib/billing/limits', () => ({ incrementUsage: vi.fn() }));
+vi.mock('@/lib/notifications/service', () => ({ notify: vi.fn() }));
 vi.mock('@/lib/storage', () => ({
   storage: () => storageMock,
   mediaKey: () => 'workspaces/workspace-1/original/generated.wav',
@@ -28,8 +31,13 @@ describe('AI media worker', () => {
       status: 'QUEUED',
       prompt: 'Read this release note',
       inputAssetIds: [],
+      provider: 'mock',
+      model: 'mock-audio-1',
+      estimatedCost: null,
+      workspace: { slug: 'northwind-studio' },
     });
     dbMock.mediaAsset.findMany.mockResolvedValue([]);
+    dbMock.aiGeneration.create.mockResolvedValue({ id: 'generation-1' });
     dbMock.mediaAsset.create.mockResolvedValue({ id: 'asset-1' });
     dbMock.aiMediaJob.update.mockResolvedValue({});
 
@@ -41,10 +49,40 @@ describe('AI media worker', () => {
       'audio/wav',
     );
     expect(dbMock.mediaAsset.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ type: 'AUDIO', status: 'READY' }),
+      data: expect.objectContaining({
+        type: 'AUDIO',
+        status: 'READY',
+        aiGenerationId: 'generation-1',
+      }),
     }));
     expect(dbMock.aiMediaJob.update).toHaveBeenLastCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: 'COMPLETED', outputAssetId: 'asset-1' }),
     }));
+  });
+
+  it('does not persist provider output after cancellation', async () => {
+    dbMock.aiMediaJob.findUnique
+      .mockResolvedValueOnce({
+        id: 'job-2',
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        kind: 'AUDIO_TTS',
+        status: 'QUEUED',
+        prompt: 'Cancel this narration',
+        inputAssetIds: [],
+        provider: 'mock',
+        model: 'mock-audio-1',
+        estimatedCost: null,
+        workspace: { slug: 'northwind-studio' },
+      })
+      .mockResolvedValueOnce({ status: 'CANCELLED' });
+    dbMock.mediaAsset.findMany.mockResolvedValue([]);
+    dbMock.aiMediaJob.update.mockResolvedValue({});
+
+    await runAiMediaJob('job-2');
+
+    expect(storageMock.put).not.toHaveBeenCalled();
+    expect(dbMock.mediaAsset.create).not.toHaveBeenCalled();
+    expect(dbMock.aiGeneration.create).not.toHaveBeenCalled();
   });
 });

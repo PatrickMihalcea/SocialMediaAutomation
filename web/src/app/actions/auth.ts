@@ -4,6 +4,7 @@ import { AuthError } from 'next-auth';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { db } from '@/lib/db';
 import { hashPassword, verifyPassword } from '@/lib/auth/password';
@@ -11,6 +12,7 @@ import {
   changePasswordSchema,
   profileSchema,
   resetPasswordSchema,
+  sanitizeLoginRedirect,
   signUpSchema,
 } from '@/lib/auth/validation';
 import { signIn, signOut } from '@/auth';
@@ -34,14 +36,22 @@ export async function signUpAction(_state: FormState, formData: FormData): Promi
   if (await db.user.findUnique({ where: { email }, select: { id: true } })) {
     return { status: 'error', error: 'An account already uses that email. Sign in instead.' };
   }
-  const user = await db.user.create({
-    data: {
-      name: parsed.data.name,
-      email,
-      passwordHash: await hashPassword(parsed.data.password),
-      emailVerified: env.MOCK_MODE ? new Date() : null,
-    },
-  });
+  let user;
+  try {
+    user = await db.user.create({
+      data: {
+        name: parsed.data.name,
+        email,
+        passwordHash: await hashPassword(parsed.data.password),
+        emailVerified: env.MOCK_MODE ? new Date() : null,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return { status: 'error', error: 'An account already uses that email. Sign in instead.' };
+    }
+    throw error;
+  }
   await audit({ userId: user.id, action: 'user.created', entityType: 'user', entityId: user.id });
   if (!env.MOCK_MODE) {
     const { secret, hash } = issueSecret();
@@ -92,16 +102,6 @@ export async function loginAction(_state: FormState, formData: FormData): Promis
   }
 }
 
-export function sanitizeLoginRedirect(
-  value: FormDataEntryValue | string | null | undefined,
-  fallback = '/w',
-): string {
-  const next = String(value || fallback).trim();
-  if (!next.startsWith('/') || next.startsWith('//') || /^\/login(?:[/?#]|$)/.test(next)) return fallback;
-  if (/^\/(?:calendar|queue|compose|media)(?:[/?#]|$)/.test(next)) return fallback;
-  return next;
-}
-
 export async function googleSignInAction(formData: FormData) {
   await signIn('google', { redirectTo: sanitizeLoginRedirect(formData.get('next')) });
 }
@@ -120,7 +120,9 @@ export async function deleteAccountAction() {
   const user = await requireUser();
   const owned = await db.workspaceMember.count({ where: { userId: user.id, role: 'OWNER' } });
   if (owned) redirect('/account?error=owned-workspaces');
+  const profileKey = managedProfileKey(user.image, user.id);
   await db.user.delete({ where: { id: user.id } });
+  if (profileKey) await storage().delete(profileKey).catch(() => undefined);
   await signOut({ redirectTo: '/' });
 }
 
@@ -154,6 +156,8 @@ export async function updateProfileAction(
       where: { id: user.id },
       data: { name: input.name, ...(imageUrl ? { image: imageUrl } : {}) },
     });
+    const previousKey = imageUrl ? managedProfileKey(user.image, user.id) : null;
+    if (previousKey) await storage().delete(previousKey).catch(() => undefined);
     await audit({
       userId: user.id,
       action: 'user.profile_updated',
@@ -255,13 +259,27 @@ export async function resetPasswordAction(
   if (!token || token.purpose !== 'PASSWORD_RESET' || token.usedAt || token.expiresAt < new Date()) {
     return { status: 'error', error: 'This reset link has expired or was already used.' };
   }
-  await db.$transaction([
-    db.user.update({
+  const passwordHash = await hashPassword(parsed.data.password);
+  const updated = await db.$transaction(async (transaction) => {
+    const claimed = await transaction.authToken.updateMany({
+      where: {
+        id: token.id,
+        purpose: 'PASSWORD_RESET',
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      data: { usedAt: new Date() },
+    });
+    if (claimed.count !== 1) return false;
+    await transaction.user.update({
       where: { email: token.email },
-      data: { passwordHash: await hashPassword(parsed.data.password) },
-    }),
-    db.authToken.update({ where: { id: token.id }, data: { usedAt: new Date() } }),
-  ]);
+      data: { passwordHash },
+    });
+    return true;
+  });
+  if (!updated) {
+    return { status: 'error', error: 'This reset link has expired or was already used.' };
+  }
   return actionSuccess('Password updated. You can sign in now.');
 }
 
@@ -290,4 +308,16 @@ export async function passwordResetTokenIsValid(tokenValue: string): Promise<boo
     !token.usedAt &&
     token.expiresAt > new Date(),
   );
+}
+
+function managedProfileKey(imageUrl: string | null, userId: string): string | null {
+  if (!imageUrl) return null;
+  try {
+    const path = decodeURIComponent(new URL(imageUrl, publicEnv.appUrl).pathname);
+    const prefix = `users/${userId}/profile/`;
+    const start = path.indexOf(prefix);
+    return start >= 0 ? path.slice(start) : null;
+  } catch {
+    return null;
+  }
 }

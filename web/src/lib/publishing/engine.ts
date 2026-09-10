@@ -142,6 +142,13 @@ export async function publishPostPlatform(postPlatformId: string): Promise<void>
       throw new PermanentJobError(blocking.map((i) => i.message).join(' '));
     }
 
+    await audit({
+      workspaceId: row.workspaceId,
+      action: 'post.publish_attempted',
+      entityType: 'post_platform',
+      entityId: row.id,
+      metadata: { platform: row.platform, attempt: row.attempts },
+    });
     const result = await adapter.publish({
       account,
       post: outgoing,
@@ -169,7 +176,7 @@ export async function publishPostPlatform(postPlatformId: string): Promise<void>
       { workspaceId: row.workspaceId, runAt: new Date(Date.now() + 60 * 60 * 1000) },
     );
   } catch (error) {
-    await handleFailure(row.id, row.workspaceId, workspace.slug, row.socialAccountId, error);
+    await handleFailure(row.id, row.postId, row.workspaceId, workspace.slug, row.socialAccountId, error);
     throw error;
   } finally {
     await reconcilePostStatus(row.postId);
@@ -196,6 +203,7 @@ async function recordPublished(
 
 async function handleFailure(
   postPlatformId: string,
+  postId: string,
   workspaceId: string,
   workspaceSlug: string,
   socialAccountId: string,
@@ -227,11 +235,18 @@ async function handleFailure(
     if (account) await markExpired(account, platformError.message);
   }
 
+  await audit({
+    workspaceId,
+    action: 'post.publish_failed',
+    entityType: 'post_platform',
+    entityId: postPlatformId,
+    metadata: { code: platformError?.code ?? 'UNKNOWN', retryable: platformError?.retryable ?? false },
+  });
   await notifyWorkspace(workspaceId, {
     type: 'POST_FAILED',
     title: 'A post did not publish',
     body: message,
-    href: `/w/${workspaceSlug}/calendar`,
+    href: `/w/${workspaceSlug}/calendar?post=${encodeURIComponent(postId)}`,
   });
 }
 
@@ -246,7 +261,13 @@ export async function reconcilePostStatus(postId: string): Promise<void> {
     where: { id: postId },
     include: {
       workspace: { select: { slug: true } },
-      platforms: { select: { status: true, publishedAt: true } },
+      platforms: {
+        select: {
+          status: true,
+          publishedAt: true,
+          socialAccount: { select: { metadata: true } },
+        },
+      },
     },
   });
   if (!post || post.platforms.length === 0) return;
@@ -276,11 +297,21 @@ export async function reconcilePostStatus(postId: string): Promise<void> {
   });
 
   if (status === PostStatus.PUBLISHED) {
+    const publishedCount = statuses.filter((channelStatus) => channelStatus === PostPlatformStatus.PUBLISHED).length;
+    const simulatedCount = post.platforms.filter(
+      (channel) => (channel.socialAccount.metadata as { mock?: boolean } | null)?.mock === true,
+    ).length;
+    const simulationNote =
+      simulatedCount === post.platforms.length
+        ? ' This was a simulation; no post was sent to a real social network.'
+        : simulatedCount > 0
+          ? ` ${simulatedCount} channel${simulatedCount === 1 ? ' was' : 's were'} simulated.`
+          : '';
     await notifyWorkspace(post.workspaceId, {
       type: 'POST_PUBLISHED',
-      title: post.title ? `"${post.title}" is live` : 'A post is live',
-      body: `Published to ${post.platforms.length} channel${post.platforms.length === 1 ? '' : 's'}.`,
-      href: `/w/${post.workspace.slug}/calendar`,
+      title: post.title ? `"${post.title}" published` : 'A post published',
+      body: `Published to ${publishedCount} channel${publishedCount === 1 ? '' : 's'}.${simulationNote}`,
+      href: `/w/${post.workspace.slug}/calendar?post=${encodeURIComponent(post.id)}`,
     });
   }
 }

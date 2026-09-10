@@ -1,4 +1,4 @@
-import { Button } from '@/bridge88/components';
+import { Button, PricingCard } from '@/bridge88/components';
 import { PLAN_LIMITS } from '@/lib/billing/limits';
 import Link from 'next/link';
 
@@ -16,26 +16,30 @@ export default function PricingPage() {
       <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {plans.map((plan) => {
           const limits = PLAN_LIMITS[plan.key];
-          return <section key={plan.key} className={`b88-card flex flex-col ${plan.key === 'PRO' ? 'border-ink' : ''}`}>
-            <div className="flex items-center justify-between gap-3">
-              <p className="b88-caption">{plan.name}</p>
-              {plan.key === 'PRO' && <span className="b88-caption rounded-pill bg-ink px-3 py-1 text-canvas">Recommended</span>}
-            </div>
-            <p className="mt-4 text-[48px] font-[340]">{plan.price}<span className="text-base"> / month</span></p>
-            <p className="mt-3">{plan.blurb}</p>
-            <ul className="mt-6 space-y-2"><li>{limits.socialAccounts} social accounts</li><li>{limits.teamMembers} team members</li><li>{limits.scheduledPosts ?? 'Unlimited'} scheduled posts</li><li>{limits.aiGenerations.toLocaleString()} AI generations monthly</li></ul>
-            <div className="mt-auto pt-8">
-              <Button
+          return <PricingCard
+            key={plan.key}
+            tier={plan.key === 'PRO' ? `${plan.name} · Recommended` : plan.name}
+            price={plan.price}
+            cadence="/ month"
+            blurb={plan.blurb}
+            highlighted={plan.key === 'PRO'}
+            features={[
+              `${limits.socialAccounts} social accounts`,
+              `${limits.teamMembers} ${limits.teamMembers === 1 ? 'team member' : 'team members'}`,
+              `${limits.scheduledPosts ?? 'Unlimited'} scheduled posts`,
+              `${limits.aiGenerations.toLocaleString()} AI generations monthly`,
+            ]}
+            cta={<Button
                 href={plan.key === 'FREE' ? '/signup' : `/signup?plan=${plan.key}`}
                 variant={plan.key === 'PRO' ? 'primary' : 'secondary'}
                 fullWidth
               >
                 {plan.key === 'FREE' ? 'Start free' : `Choose ${plan.name}`}
-              </Button>
-            </div>
-          </section>;
+              </Button>}
+          />;
         })}
       </div>
+      <p className="mt-8 max-w-2xl text-sm">Paid plans are billed monthly. You can change or cancel a plan from workspace billing; access continues through the paid period.</p>
     </main>
   );
 }

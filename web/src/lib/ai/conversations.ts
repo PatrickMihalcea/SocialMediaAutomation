@@ -7,6 +7,9 @@ import { buildSystemPrompt } from '@/lib/ai/brand-voice';
 import { assistantReplySchema, type AssistantReply } from '@/lib/ai/schemas';
 import { can } from '@/lib/auth/rbac';
 import { forbidden, invalid, notFound } from '@/lib/errors';
+import { assertPostNotLive } from '@/lib/posts/service';
+
+const PROPOSAL_TTL_MS = 30 * 60 * 1000;
 
 export async function listConversations(workspaceId: string, userId: string) {
   return db.aiConversation.findMany({
@@ -37,7 +40,13 @@ export async function sendAssistantMessage(input: {
   });
   const system = await buildSystemPrompt({
     workspaceId: input.workspaceId,
-    extra: 'You are a workspace assistant. Actions must be proposed using the structured action field. Never claim an action has already happened.',
+    extra: [
+      'You are a workspace assistant.',
+      'Actions must be proposed using the structured action field. Never claim an action has already happened.',
+      'This assistant can only propose creating drafts or scheduling existing posts.',
+      'Campaign creation, media generation, media reuse, post moves, deletion, publishing, and editing existing records are not available here.',
+      'When asked for an unavailable action, say that plainly and direct the user to the relevant workspace page. Never imply an unavailable action will run.',
+    ].join(' '),
   });
   const result = await generateObject({
     workspaceId: input.workspaceId,
@@ -89,6 +98,9 @@ export async function confirmProposal(input: {
   });
   if (!message?.proposal) throw notFound('That proposal is unavailable.');
   if (message.proposalStatus === 'COMPLETED') return { status: 'COMPLETED' as const };
+  if (Date.now() - message.createdAt.getTime() > PROPOSAL_TTL_MS) {
+    throw invalid('This proposal expired. Ask the assistant to prepare a new one before confirming.');
+  }
   const proposal = assistantReplySchema.shape.action.safeParse(message.proposal);
   if (!proposal.success || !proposal.data) throw invalid('That proposal is no longer valid.');
   const required = proposal.data.kind === 'schedule_posts' ? 'post:schedule' : 'post:create';
@@ -114,6 +126,7 @@ export async function confirmProposal(input: {
 
 async function executeProposal(workspaceId: string, userId: string, proposal: NonNullable<AssistantReply['action']>) {
   if (proposal.kind === 'create_drafts') {
+    if (!proposal.posts.length) throw invalid('The proposal does not contain any drafts.');
     const accounts = await db.socialAccount.findMany({
       where: { workspaceId, status: 'ACTIVE' },
       select: { id: true, platform: true },
@@ -139,11 +152,18 @@ async function executeProposal(workspaceId: string, userId: string, proposal: No
     })));
     return;
   }
-  const posts = await db.post.findMany({ where: { workspaceId, id: { in: proposal.postIds } }, select: { id: true } });
-  if (posts.length !== proposal.postIds.length) throw invalid('One or more proposed posts no longer exist.');
+  if (!proposal.postIds.length) throw invalid('The proposal does not contain any posts to schedule.');
+  const uniquePostIds = [...new Set(proposal.postIds)];
+  if (uniquePostIds.length !== proposal.postIds.length) throw invalid('The proposal contains the same post more than once.');
+  const posts = await db.post.findMany({
+    where: { workspaceId, id: { in: uniquePostIds } },
+    select: { id: true, status: true },
+  });
+  if (posts.length !== uniquePostIds.length) throw invalid('One or more proposed posts no longer exist.');
+  for (const post of posts) assertPostNotLive(post, 'move');
   const slots = futureSlots(proposal.weekdays, proposal.hour, proposal.minute, posts.length);
   await db.$transaction(posts.map((post, index) => db.post.update({
-    where: { id: post.id },
+    where: { id: post.id, workspaceId },
     data: { status: 'SCHEDULED', scheduledAt: slots[index] },
   })));
 }

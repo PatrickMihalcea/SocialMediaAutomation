@@ -18,7 +18,7 @@ One-line: the system's pill CTA — use for every action, in every surface; neve
 - `variant`: `primary` (black) · `secondary` (white) · `tertiary` (text link hit-target) · `promo` (magenta, one per page).
 - Pair primary + secondary whenever a section needs a main and a sales action — that black/white pair is the brand signature.
 - Press state is a micro-scale (`--press-scale`), not a darker fill. Hover is opacity.
-- `size="sm"` for in-app toolbars; default `md` holds a 44px tap height.
+- App buttons are exactly 40px high and keep labels on one line, including pending states.
 
 ```ts
 import * as React from 'react';
@@ -78,7 +78,7 @@ export function IconButton(props: IconButtonProps): JSX.Element;
 ## forms
 
 ### Checkbox
-`import { Checkbox } from './components/forms/Checkbox.js';`
+`import { Checkbox } from '@/bridge88/components';`
 
 One-line: multi-select control for settings, channel pickers and consent rows.
 
@@ -86,7 +86,9 @@ One-line: multi-select control for settings, channel pickers and consent rows.
 <Checkbox label="Re-post top performers" description="30-day window" defaultChecked />
 ```
 
-- Checked = `--primary` fill with a white ✓; unchecked is canvas with a hairline border. Never a coloured fill.
+- The native glyph is fixed at 20×20px and the associated label provides a minimum 44px touch target.
+- Checked state uses a `--primary` fill and white check; disabled rows remain visible at 40% opacity.
+- `className` and `style` apply to the checkbox glyph; `containerClassName` is merged onto the label row.
 
 ```ts
 import * as React from 'react';
@@ -99,6 +101,8 @@ export interface CheckboxProps extends React.InputHTMLAttributes<HTMLInputElemen
   checked?: boolean;
   defaultChecked?: boolean;
   disabled?: boolean;
+  /** classes merged onto the 44px-minimum label row */
+  containerClassName?: string;
   style?: React.CSSProperties;
 }
 export function Checkbox(props: CheckboxProps): JSX.Element;
@@ -764,7 +768,7 @@ export function EmptyState(props: EmptyStateProps): JSX.Element;
 ## media
 
 ### AssetTile
-`import { AssetTile } from './components/media/AssetTile.js';`
+`import { AssetTile } from '@/bridge88/components';`
 
 One-line: one asset in the media library grid.
 
@@ -773,6 +777,7 @@ One-line: one asset in the media library grid.
 ```
 
 - Selection is a 1px ink outline plus a soft fill — never a colour tint or a checkbox overlay.
+- Every tile uses a square 1:1 media frame so mixed source dimensions form a uniform grid; assets use `object-fit: contain`.
 
 ```ts
 import * as React from 'react';
@@ -783,6 +788,7 @@ export interface AssetTileProps extends React.HTMLAttributes<HTMLDivElement> {
   /** mono uppercase line, e.g. "1080×1350 · 2.1 MB" */
   meta?: string;
   type?: 'image' | 'video';
+  /** accepted for backwards compatibility; the library frame is always 1:1 */
   ratio?: string;
   src?: string;
   tone?: 'soft' | 'mint' | 'cream' | 'lime' | 'lilac' | 'coral' | 'pink';
@@ -792,6 +798,8 @@ export interface AssetTileProps extends React.HTMLAttributes<HTMLDivElement> {
   /** e.g. "3 posts" */
   usedIn?: string;
   onClick?: () => void;
+  /** merged onto the tile button without replacing its base geometry */
+  className?: string;
   style?: React.CSSProperties;
 }
 export function AssetTile(props: AssetTileProps): JSX.Element;
@@ -899,23 +907,26 @@ export function MediaUploader(props: MediaUploaderProps): JSX.Element;
 ```
 
 ### VideoPlayer
-`import { VideoPlayer } from './components/media/VideoPlayer.js';`
+`import { VideoPlayer } from '@/bridge88/components';`
 
 One-line: playback for a single video — composer preview, asset detail, marketing product film.
 
 ```jsx
-<VideoPlayer ratio="9:16" duration="0:32" caption="Studio walkthrough · TikTok cut" />
+<VideoPlayer src={asset.downloadUrl} poster={asset.previewUrl} ratio="9:16"
+  duration="0:32" caption="Studio walkthrough · TikTok cut" />
 ```
 
-- Controls are the documented circular icon button; the only chrome is a 4px scrubber and the duration. No skins, no branded player colour.
+- Playback uses the browser's native accessible controls and inline mobile playback.
+- A missing source renders a visible “Video unavailable” state. A load or decode failure renders a visible alert rather than an empty black frame.
+- The frame follows `MediaFrame`: 8px radius, aspect-locked, responsive width and `object-fit: contain`.
 - Never autoplay with sound.
 
 ```ts
 import * as React from 'react';
 
-/** Video surface with a centred circular play control, thin scrubber and mono duration. */
-export interface VideoPlayerProps extends React.HTMLAttributes<HTMLElement> {
-  src?: string;
+/** Responsive native video surface with explicit missing-source and playback-error states. */
+export interface VideoPlayerProps {
+  src?: string | null;
   poster?: string;
   ratio?: '16:9' | '9:16' | '1:1' | '4:5' | string;
   /** mono duration shown next to the scrubber */
@@ -923,8 +934,16 @@ export interface VideoPlayerProps extends React.HTMLAttributes<HTMLElement> {
   /** mono uppercase caption under the frame */
   caption?: string;
   /** placeholder ground when there is no src */
-  tone?: 'cream' | 'mint' | 'lime' | 'lilac' | 'coral' | 'pink';
+  tone?: 'soft' | 'cream' | 'mint' | 'lime' | 'lilac' | 'coral' | 'pink';
+  className?: string;
   style?: React.CSSProperties;
+  /** native video attributes; src, poster and controls remain owned by VideoPlayer */
+  videoProps?: Omit<React.VideoHTMLAttributes<HTMLVideoElement>, 'src' | 'poster' | 'controls' | 'className' | 'style'> & {
+    className?: string;
+    style?: React.CSSProperties;
+  };
+  unavailableMessage?: string;
+  errorMessage?: string;
 }
 export function VideoPlayer(props: VideoPlayerProps): JSX.Element;
 ```

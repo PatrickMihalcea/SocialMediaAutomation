@@ -1,5 +1,6 @@
 import { Button } from '@/bridge88/components';
-import { sanitizeLoginRedirect, verifyEmailToken } from '@/app/actions/auth';
+import { verifyEmailToken } from '@/app/actions/auth';
+import { sanitizeLoginRedirect } from '@/lib/auth/validation';
 
 export default async function VerifyEmailPage({
   searchParams,

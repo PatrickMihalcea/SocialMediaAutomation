@@ -10,6 +10,12 @@ export function slugifyWorkspace(value: string): string {
     .replace(/^-|-$/g, '') || 'workspace';
 }
 
+export function timezoneChangeNotice(timezone: string, scheduledPosts: number): string {
+  if (!scheduledPosts) return `Calendar and future scheduling now use ${timezone}.`;
+  const subject = scheduledPosts === 1 ? 'publication instant remains' : 'publication instants remain';
+  return `${scheduledPosts} existing ${subject} unchanged; calendar times now display in ${timezone}.`;
+}
+
 export async function availableWorkspaceSlug(name: string, currentId?: string): Promise<string> {
   const base = slugifyWorkspace(name);
   for (let suffix = 1; ; suffix += 1) {

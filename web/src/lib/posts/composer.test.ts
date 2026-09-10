@@ -13,12 +13,14 @@ const accounts: ComposerAccount[] = [
     accountName: 'Demo',
     accountHandle: '@demo',
     platform: Platform.MOCK,
+    isDemo: true,
   },
   {
     id: '22222222-2222-4222-8222-222222222222',
     accountName: 'LinkedIn',
     accountHandle: '@acme',
     platform: Platform.LINKEDIN,
+    isDemo: false,
   },
 ];
 
@@ -28,6 +30,7 @@ describe('composer helpers', () => {
       title: 'Q4',
       campaignId: null,
       scheduledAt: '2026-09-15T09:00',
+      updatedAt: '2026-09-10T12:00:00.000Z',
       status: 'DRAFT',
       platforms: [
         {
@@ -47,23 +50,20 @@ describe('composer helpers', () => {
     expect(draft.versions[accounts[0].id].hashtags).toBe('launch');
     expect(draft.versions[accounts[0].id].mentions).toBe('@bridge88');
     expect(draft.versions[accounts[1].id].text).toBe('');
+    expect(draft.selectedAccountIds).toEqual([accounts[0].id]);
+    expect(draft.sourceUpdatedAt).toBe('2026-09-10T12:00:00.000Z');
   });
 
-  it('serializes only filled platform versions, with a fallback tab', () => {
+  it('serializes every explicitly selected account and no unselected account', () => {
     const draft = buildInitialDraft(accounts);
     draft.versions[accounts[1].id].text = 'LinkedIn version';
     draft.versions[accounts[1].id].hashtags = '#b2b';
-    const payload = versionsToPayload(draft.versions, accounts[0].id);
+    const payload = versionsToPayload(draft.versions, [accounts[1].id]);
     expect(payload).toHaveLength(1);
     expect(payload[0].platform).toBe(Platform.LINKEDIN);
     expect(payload[0].hashtags).toEqual(['b2b']);
 
-    expect(
-      versionsToPayload(
-        { [accounts[0].id]: { ...draft.versions[accounts[0].id], text: '' } },
-        accounts[0].id,
-      ),
-    ).toHaveLength(1);
+    expect(versionsToPayload(draft.versions, [accounts[0].id, accounts[1].id])).toHaveLength(2);
   });
 
   it('uses stable local draft keys per workspace and post', () => {

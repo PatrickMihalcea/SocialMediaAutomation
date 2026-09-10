@@ -12,6 +12,7 @@ import { getAdapterForAccount } from '@/lib/social/registry';
 import { consumeOAuthSelection, persistConnections, readOAuthSelection } from '@/lib/social/oauth';
 import { encryptToken } from '@/lib/crypto/tokens';
 import { rateLimit, LIMITS } from '@/lib/rate-limit';
+import { reconcilePostStatus } from '@/lib/publishing/engine';
 
 export async function connectDemoChannelAction(slug: string, formData: FormData) {
   const ctx = await requireWorkspace(slug, 'channel:connect');
@@ -55,24 +56,61 @@ export async function disconnectChannelAction(slug: string, accountId: string) {
     revokeFailed = true;
     console.error(`[oauth] revoke failed for ${account.platform} ${account.id}`, error);
   }
-  await db.socialAccount.update({
-    where: { id: account.id },
-    data: {
-      status: 'DISCONNECTED',
-      accessTokenEncrypted: null,
-      refreshTokenEncrypted: null,
-      statusMessage: 'Disconnected by a workspace administrator.',
+  const affected = await db.postPlatform.findMany({
+    where: {
+      socialAccountId: account.id,
+      workspaceId: ctx.workspace.id,
+      status: 'PENDING',
+      post: { status: 'SCHEDULED', scheduledAt: { gt: new Date() } },
     },
+    select: { postId: true },
   });
+  const affectedPostIds = [...new Set(affected.map((target) => target.postId))];
+  await db.$transaction([
+    db.socialAccount.update({
+      where: { id: account.id },
+      data: {
+        status: 'DISCONNECTED',
+        accessTokenEncrypted: null,
+        refreshTokenEncrypted: null,
+        statusMessage: 'Disconnected by a workspace administrator.',
+      },
+    }),
+    db.postPlatform.updateMany({
+      where: {
+        socialAccountId: account.id,
+        workspaceId: ctx.workspace.id,
+        status: 'PENDING',
+        postId: { in: affectedPostIds },
+      },
+      data: {
+        status: 'CANCELLED',
+        errorCode: null,
+        errorMessage: 'Channel disconnected before its scheduled publishing time.',
+      },
+    }),
+  ]);
+  await Promise.all(affectedPostIds.map(async (postId) => {
+    await reconcilePostStatus(postId);
+    await audit({
+      workspaceId: ctx.workspace.id,
+      userId: ctx.user.id,
+      action: 'post.channel_cancelled',
+      entityType: 'post',
+      entityId: postId,
+      metadata: { socialAccountId: account.id, reason: 'channel_disconnected' },
+    });
+  }));
   await audit({
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
     action: 'channel.disconnected',
     entityType: 'social_account',
     entityId: account.id,
-    metadata: { platform: account.platform, revokeFailed },
+    metadata: { platform: account.platform, revokeFailed, affectedPostIds },
   });
   revalidatePath(`/w/${slug}/channels`);
+  revalidatePath(`/w/${slug}/calendar`);
 }
 
 export async function reconnectDemoChannelAction(slug: string, accountId: string) {

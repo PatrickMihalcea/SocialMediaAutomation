@@ -13,6 +13,7 @@ import { savePostSchema, type SavePostInput } from '@/lib/posts/schemas';
 export async function validateDraft(
   workspaceId: string,
   input: SavePostInput,
+  options: { validateContent?: boolean } = {},
 ): Promise<Record<string, string[]>> {
   const issues: Record<string, string[]> = {};
   for (const version of input.platforms) {
@@ -44,6 +45,7 @@ export async function validateDraft(
       continue;
     }
 
+    if (options.validateContent === false) continue;
     const adapter = getAdapterForAccount(account);
     const outgoing = {
       text: version.text,
@@ -81,6 +83,7 @@ export async function savePost(
   workspaceId: string,
   authorId: string,
   raw: SavePostInput,
+  options: { validateContent?: boolean } = {},
 ) {
   let input = savePostSchema.parse(raw);
   let source = input.id
@@ -133,7 +136,7 @@ export async function savePost(
     await assertWithinLimit(workspaceId, 'scheduledPosts', scheduledCount);
   }
 
-  const fieldIssues = await validateDraft(workspaceId, input);
+  const fieldIssues = await validateDraft(workspaceId, input, options);
   if (Object.keys(fieldIssues).length) {
     throw invalid('Fix the platform-specific issues before saving this post.', fieldIssues);
   }

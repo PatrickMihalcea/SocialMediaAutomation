@@ -74,9 +74,9 @@ export async function notifyRoles(
   await notify({ ...notification, workspaceId, userIds: members.map((m) => m.userId) });
 }
 
-export async function markRead(userId: string, notificationId?: string): Promise<void> {
+export async function markRead(userId: string, notificationId?: string, workspaceId?: string): Promise<void> {
   await db.notification.updateMany({
-    where: { userId, readAt: null, ...(notificationId ? { id: notificationId } : {}) },
+    where: { userId, readAt: null, ...(workspaceId ? { workspaceId } : {}), ...(notificationId ? { id: notificationId } : {}) },
     data: { readAt: new Date() },
   });
 }

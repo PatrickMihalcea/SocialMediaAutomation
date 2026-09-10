@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useId, useState } from 'react';
-import type { ButtonHTMLAttributes, CSSProperties, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { ButtonHTMLAttributes, CSSProperties, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes, VideoHTMLAttributes } from 'react';
 import type { LucideIcon } from 'lucide-react';
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -26,7 +26,7 @@ export function Button({
     tertiary: { background: 'transparent', color: 'var(--ink)', border: '1px solid transparent' },
     promo: { background: 'var(--accent-magenta)', color: '#fff', border: '1px solid var(--accent-magenta)' },
   }[variant];
-  const cn = `inline-flex min-h-10 items-center justify-center gap-2 rounded-pill px-4 text-[15px] font-[480] transition-opacity hover:opacity-80 active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-40 ${fullWidth ? 'w-full' : ''} ${className}`;
+  const cn = `inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-pill px-4 text-[15px] font-[480] transition-opacity hover:opacity-80 active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-40 ${fullWidth ? 'w-full' : ''} ${className}`;
   if (href) {
     return <Link href={href} className={cn} style={styles}>{children}</Link>;
   }
@@ -375,17 +375,103 @@ export function MediaFrame({
   );
 }
 
+export function VideoPlayer({
+  src,
+  poster,
+  ratio = '16:9',
+  duration,
+  caption,
+  tone = 'soft',
+  className = '',
+  style,
+  videoProps,
+  unavailableMessage = 'Video unavailable',
+  errorMessage = 'This video could not be played.',
+}: {
+  src?: string | null;
+  poster?: string;
+  ratio?: keyof typeof MEDIA_RATIOS | string;
+  duration?: string;
+  caption?: string;
+  tone?: keyof typeof PLACEHOLDER_TONES;
+  className?: string;
+  style?: CSSProperties;
+  videoProps?: Omit<VideoHTMLAttributes<HTMLVideoElement>, 'src' | 'poster' | 'controls' | 'className' | 'style'> & {
+    className?: string;
+    style?: CSSProperties;
+  };
+  unavailableMessage?: string;
+  errorMessage?: string;
+}) {
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const failed = Boolean(src && failedSource === src);
+  const frameStyle: CSSProperties = {
+    position: 'relative',
+    width: '100%',
+    aspectRatio: MEDIA_RATIOS[ratio] ?? ratio,
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-md)',
+    background: PLACEHOLDER_TONES[tone] ?? PLACEHOLDER_TONES.soft,
+    display: 'grid',
+    placeItems: 'center',
+  };
+  const { onError, onLoadedData, className: videoClassName = '', style: videoStyle, ...nativeVideoProps } = videoProps ?? {};
+
+  return (
+    <figure className={`m-0 min-w-0 ${className}`} style={style}>
+      <div style={frameStyle}>
+        {src && !failed ? (
+          <video
+            {...nativeVideoProps}
+            src={src}
+            poster={poster}
+            controls
+            playsInline={nativeVideoProps.playsInline ?? true}
+            preload={nativeVideoProps.preload ?? 'metadata'}
+            className={`absolute inset-0 h-full w-full object-contain ${videoClassName}`}
+            style={videoStyle}
+            onError={(event) => {
+              setFailedSource(src);
+              onError?.(event);
+            }}
+            onLoadedData={(event) => {
+              setFailedSource(null);
+              onLoadedData?.(event);
+            }}
+          />
+        ) : (
+          <div
+            className="grid max-w-sm gap-1 p-4 text-center"
+            role={failed ? 'alert' : 'status'}
+          >
+            <span className="text-sm font-[480]">{failed ? errorMessage : unavailableMessage}</span>
+            <span className="b88-caption">{failed ? 'Check the file or try again.' : 'Add a video source to preview it.'}</span>
+          </div>
+        )}
+        {duration && (
+          <span
+            className="b88-caption absolute right-2 top-2 rounded-sm bg-[var(--canvas-inverse)] px-2 py-[3px] text-[var(--ink-inverse)]"
+          >
+            {duration}
+          </span>
+        )}
+      </div>
+      {caption && <figcaption className="b88-caption mt-2">{caption}</figcaption>}
+    </figure>
+  );
+}
+
 export function AssetTile({
   title,
   meta,
   type = 'image',
-  ratio = '1:1',
   src,
   tone = 'soft',
   duration,
   selected = false,
   usedIn,
   onClick,
+  className = '',
 }: {
   title: string;
   meta?: string;
@@ -397,11 +483,13 @@ export function AssetTile({
   selected?: boolean;
   usedIn?: string;
   onClick?: () => void;
+  className?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      className={className}
       style={{
         display: 'grid',
         gridTemplateColumns: 'minmax(0, 1fr)',
@@ -419,7 +507,7 @@ export function AssetTile({
     >
       <MediaFrame
         type={type}
-        ratio={ratio}
+        ratio="1:1"
         src={src}
         tone={tone}
         duration={duration}
@@ -469,6 +557,7 @@ export function MediaUploader({
   const [over, setOver] = useState(false);
   return (
     <label
+      className="b88-uploader"
       onDragOver={(event) => {
         event.preventDefault();
         setOver(true);
@@ -504,15 +593,44 @@ export function SegmentedTabs({
   onChange?: (value: string) => void;
 }) {
   const active = value ?? items[0];
+  const tabsRef = useRef<(HTMLButtonElement | null)[]>([]);
+  const moveFocus = (index: number) => {
+    if (!items.length) return;
+    tabsRef.current[(index + items.length) % items.length]?.focus();
+  };
   return (
     <div role="tablist" className="flex flex-wrap gap-1">
-      {items.map((item) => (
+      {items.map((item, index) => (
         <button
           key={item}
+          ref={(node) => { tabsRef.current[index] = node; }}
           type="button"
           role="tab"
           aria-selected={item === active}
+          tabIndex={item === active ? 0 : -1}
           onClick={() => onChange?.(item)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+              event.preventDefault();
+              const next = (index + 1) % items.length;
+              onChange?.(items[next]);
+              moveFocus(next);
+            } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+              event.preventDefault();
+              const next = (index - 1 + items.length) % items.length;
+              onChange?.(items[next]);
+              moveFocus(next);
+            } else if (event.key === 'Home') {
+              event.preventDefault();
+              onChange?.(items[0]);
+              moveFocus(0);
+            } else if (event.key === 'End') {
+              event.preventDefault();
+              const last = items.length - 1;
+              onChange?.(items[last]);
+              moveFocus(last);
+            }
+          }}
           className="rounded-pill px-4 py-2 text-[15px] font-[480]"
           style={{
             background: item === active ? 'var(--primary)' : 'transparent',
@@ -544,6 +662,51 @@ export function Dialog({
   onClose?: () => void;
   width?: number;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    const focusable = dialog?.querySelector<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    (focusable ?? dialog)?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose?.();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialog) return;
+      const controls = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => element.getClientRects().length > 0);
+      if (!controls.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      returnFocusRef.current?.focus();
+    };
+  }, [open, onClose]);
+
   if (!open) return null;
   return (
     <div
@@ -560,9 +723,12 @@ export function Dialog({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={title ? undefined : eyebrow ?? 'Dialog'}
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
         style={{
           width: '100%',
@@ -576,7 +742,7 @@ export function Dialog({
         }}
       >
         {eyebrow && <p className="b88-caption">{eyebrow}</p>}
-        {title && <h2 className="b88-heading">{title}</h2>}
+        {title && <h2 id={titleId} className="b88-heading">{title}</h2>}
         {children}
         {actions && <div className="flex flex-wrap justify-end gap-2">{actions}</div>}
       </div>
@@ -625,7 +791,7 @@ export function Checkbox({
         type="checkbox"
         disabled={disabled}
         aria-describedby={describedByIds || undefined}
-        className={className}
+        className={`b88-checkbox ${className ?? ''}`}
         style={{
           ...style,
           width: 'var(--space-20)',
@@ -634,7 +800,6 @@ export function Checkbox({
           // that gets compressed when the text runs out of room.
           flex: '0 0 auto',
           margin: 0,
-          accentColor: 'var(--ink)',
         }}
       />
       <span>

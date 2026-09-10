@@ -7,7 +7,7 @@ import { db } from '@/lib/db';
 import { enqueue } from '@/lib/queue';
 import { audit } from '@/lib/audit';
 import { createImageDerivative, createVideoDerivative } from '@/lib/media/process';
-import { validateMediaUpload } from '@/lib/media/validation';
+import { validateMediaUploads } from '@/lib/media/validation';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
 import { invalid } from '@/lib/errors';
 
@@ -21,7 +21,7 @@ export async function uploadMediaAction(slug: string, formData: FormData): Promi
     if (folderId) await requireFolder(ctx.workspace.id, folderId);
     // Validate the whole batch before storing anything. A bad second file must
     // not leave the first file uploaded while the UI reports a failed batch.
-    const fileTypes = files.map((file) => validateMediaUpload(file));
+    const fileTypes = validateMediaUploads(files);
     for (const [index, file] of files.entries()) {
       const type = fileTypes[index];
       const key = mediaKey(ctx.workspace.id, file.name);

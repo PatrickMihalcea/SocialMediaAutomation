@@ -60,6 +60,8 @@ label:has(>.b88-label){display:block}
    intrinsic height of 41-42px and miss --control-size. */
 .b88-pill-select,.b88-filter-control{height:var(--control-size);padding:0 var(--space-md);background:var(--canvas);color:var(--ink);border:1px solid var(--hairline);border-radius:var(--radius-pill)}
 .b88-filter-control:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.b88-checkbox{appearance:none;border:1px solid var(--hairline);border-radius:var(--radius-sm);background:var(--canvas);background-position:center;background-repeat:no-repeat;background-size:14px 14px}
+.b88-checkbox:checked{border-color:var(--primary);background-color:var(--primary);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='m5 10 3 3 7-7' fill='none' stroke='white' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
 /* Bulk actions follow the viewport instead of scrolling away above a long grid. */
 @keyframes b88-rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 /* Centred with auto margins, not translateX: a fixed box with `left` set resolves

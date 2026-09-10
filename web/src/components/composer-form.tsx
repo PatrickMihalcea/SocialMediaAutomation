@@ -3,12 +3,15 @@
 import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { PostStatus } from '@prisma/client';
-import { CalendarClock, Save, Send, Sparkles, Upload, UserCheck } from 'lucide-react';
+import { ArrowDown, ArrowUp, CalendarClock, Save, Send, Sparkles, Trash2, UserCheck } from 'lucide-react';
 import {
   AssetTile,
   Badge,
   Button,
+  Checkbox,
   Field,
+  MediaUploader,
+  Select,
   StatusMessage,
   TextArea,
 } from '@/bridge88/components';
@@ -75,12 +78,11 @@ export function ComposerForm({
   const [state, submit, isPending] = useActionState(action, {});
   const [aiError, setAiError] = useState('');
   const [uploadError, setUploadError] = useState('');
-  const [aiLoading, setAiLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const hydrated = useRef(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (hydrated.current) return;
@@ -96,10 +98,13 @@ export function ComposerForm({
 
   useEffect(() => {
     if (state.status === 'success') {
+      if (state.savedUpdatedAt) {
+        setDraft((current) => ({ ...current, sourceUpdatedAt: state.savedUpdatedAt ?? current.sourceUpdatedAt }));
+      }
       clearStoredDraft(storageKey);
       if (state.redirectTo) router.push(state.redirectTo);
     }
-  }, [router, state.redirectTo, state.status, storageKey]);
+  }, [router, state.redirectTo, state.savedUpdatedAt, state.status, storageKey]);
 
   useEffect(() => {
     if (!isPending) setPendingIntent(null);
@@ -110,6 +115,8 @@ export function ComposerForm({
   const caps = activeAccount ? CAPABILITIES[activeAccount.platform] : null;
   const fieldErrors = state.fields ?? {};
   const readOnly = postStatus === 'PUBLISHING';
+  const selectedAccounts = accounts.filter((account) => draft.selectedAccountIds.includes(account.id));
+  const demoMode = selectedAccounts.some((account) => account.isDemo);
 
   function updateDraft(patch: Partial<ComposerDraft>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -139,53 +146,100 @@ export function ComposerForm({
     });
   }
 
-  async function adaptForPlatforms() {
+  function toggleAccount(accountId: string, selected: boolean) {
+    setDraft((current) => {
+      if (!selected && current.selectedAccountIds.length === 1) return current;
+      const selectedAccountIds = selected
+        ? [...current.selectedAccountIds, accountId]
+        : current.selectedAccountIds.filter((id) => id !== accountId);
+      return {
+        ...current,
+        selectedAccountIds,
+        activeAccountId: selected
+          ? accountId
+          : current.activeAccountId === accountId
+            ? selectedAccountIds[0]
+            : current.activeAccountId,
+      };
+    });
+  }
+
+  function moveMedia(accountId: string, from: number, to: number) {
+    const currentMedia = draft.versions[accountId]?.media;
+    if (!currentMedia || to < 0 || to >= currentMedia.length) return;
+    const media = [...currentMedia];
+    const [item] = media.splice(from, 1);
+    media.splice(to, 0, item);
+    updateVersion(accountId, { media });
+  }
+
+  async function runAi(operation: 'generate' | 'rewrite' | 'hashtags' | 'cta' | 'adapt') {
     if (!activeVersion) return;
-    const source = activeVersion.text.trim();
-    if (!source) {
-      setAiError('Write a base caption before adapting.');
+    const source = operation === 'generate' ? draft.title.trim() : activeVersion.text.trim();
+    if (source.length < 3) {
+      setAiError(
+        operation === 'generate'
+          ? 'Add an internal title with at least three characters before generating a caption.'
+          : 'Write at least three characters before using this AI action.',
+      );
       return;
     }
-    setAiLoading(true);
+    setAiLoading(operation);
     setAiError('');
     try {
-      const platforms = accounts.map((account) => account.platform);
+      const platforms = selectedAccounts.map((account) => account.platform);
       const response = await fetch(`/api/workspaces/${slug}/ai`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ operation: 'adapt', prompt: source, platforms }),
+        body: JSON.stringify(
+          operation === 'adapt'
+            ? { operation, prompt: source, platforms }
+            : { operation, prompt: source, platform: activeAccount.platform },
+        ),
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? 'Adaptation failed.');
-      const versions = body.data?.versions as Array<{ platform: string; text: string; hashtags: string[] }>;
-      if (!Array.isArray(versions)) throw new Error('Unexpected AI response.');
-      setDraft((current) => {
-        const next = { ...current.versions };
-        for (const account of accounts) {
-          const adapted = versions.find((item) => item.platform === account.platform);
-          if (!adapted) continue;
-          next[account.id] = {
-            ...next[account.id],
-            text: adapted.text,
-            hashtags: adapted.hashtags.join(', '),
-          };
-        }
-        return { ...current, versions: next };
-      });
+      if (!response.ok) throw new Error(body.error ?? 'AI action failed.');
+      if (operation === 'adapt') {
+        const versions = body.data?.versions as Array<{ platform: string; text: string; hashtags: string[] }>;
+        if (!Array.isArray(versions)) throw new Error('Unexpected AI response.');
+        setDraft((current) => {
+          const next = { ...current.versions };
+          for (const account of selectedAccounts) {
+            const adapted = versions.find((item) => item.platform === account.platform);
+            if (!adapted) continue;
+            next[account.id] = {
+              ...next[account.id],
+              text: adapted.text,
+              hashtags: adapted.hashtags.join(', '),
+            };
+          }
+          return { ...current, versions: next };
+        });
+      } else if (operation === 'hashtags') {
+        const hashtags = body.data?.hashtags;
+        if (!Array.isArray(hashtags)) throw new Error('Unexpected AI response.');
+        updateVersion(activeAccount.id, { hashtags: hashtags.join(', ') });
+      } else {
+        if (typeof body.data?.text !== 'string') throw new Error('Unexpected AI response.');
+        updateVersion(activeAccount.id, {
+          text: body.data.text,
+          ...(Array.isArray(body.data.hashtags) ? { hashtags: body.data.hashtags.join(', ') } : {}),
+        });
+      }
     } catch (cause) {
-      setAiError(cause instanceof Error ? cause.message : 'Adaptation failed.');
+      setAiError(cause instanceof Error ? cause.message : 'AI action failed.');
     } finally {
-      setAiLoading(false);
+      setAiLoading(null);
     }
   }
 
-  async function uploadFiles(files: FileList | null) {
-    if (!files?.length) return;
+  async function uploadFiles(files: File[]) {
+    if (!files.length) return;
     setUploading(true);
     setUploadError('');
     try {
       const formData = new FormData();
-      Array.from(files).forEach((file) => formData.append('files', file));
+      files.forEach((file) => formData.append('files', file));
       const result = await uploadMediaAction(slug, formData);
       if (result.status === 'error' && result.error) {
         setUploadError(result.error);
@@ -196,7 +250,6 @@ export function ComposerForm({
       setUploadError(cause instanceof Error ? cause.message : 'Upload failed.');
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
@@ -207,7 +260,8 @@ export function ComposerForm({
     formData.set('title', draft.title);
     formData.set('campaignId', draft.campaignId);
     formData.set('scheduledAt', draft.scheduledAt);
-    formData.set('platforms', JSON.stringify(versionsToPayload(draft.versions, draft.activeAccountId)));
+    if (draft.sourceUpdatedAt) formData.set('expectedUpdatedAt', draft.sourceUpdatedAt);
+    formData.set('platforms', JSON.stringify(versionsToPayload(draft.versions, draft.selectedAccountIds)));
     startTransition(() => submit(formData));
   }
 
@@ -230,6 +284,14 @@ export function ComposerForm({
             This post is publishing and cannot be edited right now.
           </StatusMessage>
         )}
+        <StatusMessage tone="neutral" className="mb-6">
+          Changes are recovered from this browser as you type. Use Save draft to keep the post in your workspace across devices and sign-ins.
+        </StatusMessage>
+        {demoMode && (
+          <StatusMessage tone="neutral" className="mb-6">
+            Demo mode is active. Publish now simulates delivery and does not create a real platform post.
+          </StatusMessage>
+        )}
         {state.error && <StatusMessage tone="error" className="mb-6">{state.error}</StatusMessage>}
         {state.success && <StatusMessage tone="success" className="mb-6">{state.success}</StatusMessage>}
 
@@ -243,40 +305,61 @@ export function ComposerForm({
             disabled={readOnly}
           />
 
-          <label className="block">
-            <span className="b88-label">Campaign</span>
-            <select
-              className="b88-input"
-              value={draft.campaignId}
-              onChange={(event) => updateDraft({ campaignId: event.target.value })}
-              disabled={readOnly}
-            >
-              <option value="">No campaign</option>
-              {campaigns.map((campaign) => (
-                <option key={campaign.id} value={campaign.id}>{campaign.name}</option>
-              ))}
-            </select>
-          </label>
+          <Select
+            label="Campaign"
+            value={draft.campaignId}
+            onChange={(event) => updateDraft({ campaignId: event.target.value })}
+            disabled={readOnly}
+          >
+            <option value="">No campaign</option>
+            {campaigns.map((campaign) => (
+              <option key={campaign.id} value={campaign.id}>{campaign.name}</option>
+            ))}
+          </Select>
 
-          <div className="flex flex-wrap gap-2">
-            {accounts.map((account) => {
-              const selected = account.id === draft.activeAccountId;
-              const issues = fieldErrors[account.id]?.length ?? 0;
-              const handle = account.accountHandle ?? account.accountName;
-              return (
-                <Button
-                  key={account.id}
-                  type="button"
-                  variant={selected ? 'primary' : 'secondary'}
-                  onClick={() => updateDraft({ activeAccountId: account.id })}
-                >
-                  <PlatformGlyph platform={account.platform} size={16} />
-                  <span className="font-[540]">{PLATFORM_LABELS[account.platform]}</span>
-                  <span className="b88-caption">{handle}</span>
-                  {issues > 0 && <Badge tone="coral">{issues}</Badge>}
-                </Button>
-              );
-            })}
+          <div>
+            <p className="b88-label">Publishing channels</p>
+            <p className="mb-3 text-sm">Choose every account that should receive its own editable version.</p>
+            <div className="grid gap-x-4 sm:grid-cols-2">
+              {accounts.map((account) => {
+                const selected = draft.selectedAccountIds.includes(account.id);
+                const handle = account.accountHandle ?? account.accountName;
+                return (
+                  <Checkbox
+                    key={account.id}
+                    label={`${PLATFORM_LABELS[account.platform]} · ${handle}`}
+                    description={account.isDemo ? 'Simulated publishing' : undefined}
+                    checked={selected}
+                    disabled={readOnly || (selected && draft.selectedAccountIds.length === 1)}
+                    onChange={(event) => toggleAccount(account.id, event.target.checked)}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <p className="b88-label">Edit version</p>
+            <div className="flex flex-wrap gap-2">
+              {selectedAccounts.map((account) => {
+                const active = account.id === draft.activeAccountId;
+                const issues = fieldErrors[account.id]?.length ?? 0;
+                const handle = account.accountHandle ?? account.accountName;
+                return (
+                  <Button
+                    key={account.id}
+                    type="button"
+                    variant={active ? 'primary' : 'secondary'}
+                    onClick={() => updateDraft({ activeAccountId: account.id })}
+                  >
+                    <PlatformGlyph platform={account.platform} size={16} />
+                    <span className="font-[540]">{PLATFORM_LABELS[account.platform]}</span>
+                    <span className="b88-caption">{handle}</span>
+                    {issues > 0 && <Badge tone="coral">{issues}</Badge>}
+                  </Button>
+                );
+              })}
+            </div>
           </div>
 
           {accountErrors.length > 0 && (
@@ -291,9 +374,38 @@ export function ComposerForm({
             label={`${PLATFORM_LABELS[activeAccount.platform]} caption`}
             value={activeVersion.text}
             onChange={(event) => updateVersion(activeAccount.id, { text: event.target.value })}
-            hint={caps ? `${activeVersion.text.length} / ${caps.maxTextLength}` : undefined}
+            hint={caps && activeVersion.text.length <= caps.maxTextLength
+              ? `${activeVersion.text.length} / ${caps.maxTextLength}`
+              : undefined}
+            error={caps && activeVersion.text.length > caps.maxTextLength
+              ? `${activeVersion.text.length - caps.maxTextLength} characters over the ${PLATFORM_LABELS[activeAccount.platform]} limit.`
+              : undefined}
             disabled={readOnly}
           />
+
+          <div>
+            <p className="b88-label">AI writing</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} onClick={() => runAi('generate')}>
+                <Sparkles size={16} />{aiLoading === 'generate' ? 'Generating' : 'Generate caption'}
+              </Button>
+              <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} onClick={() => runAi('rewrite')}>
+                {aiLoading === 'rewrite' ? 'Rewriting' : 'Rewrite'}
+              </Button>
+              <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} onClick={() => runAi('hashtags')}>
+                {aiLoading === 'hashtags' ? 'Generating' : 'Generate hashtags'}
+              </Button>
+              <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} onClick={() => runAi('cta')}>
+                {aiLoading === 'cta' ? 'Generating' : 'Generate CTA'}
+              </Button>
+              {selectedAccounts.length > 1 && (
+                <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} onClick={() => runAi('adapt')}>
+                  {aiLoading === 'adapt' ? 'Adapting' : 'Adapt selected channels'}
+                </Button>
+              )}
+            </div>
+            {aiError && <p role="alert" className="mt-3 text-sm text-[var(--accent-magenta)]">{aiError}</p>}
+          </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <Field
@@ -334,27 +446,26 @@ export function ComposerForm({
           <div>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="b88-label">Media for {PLATFORM_LABELS[activeAccount.platform]}</p>
-              <div className="flex flex-wrap gap-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*,video/*"
-                  multiple
-                  className="hidden"
-                  onChange={(event) => uploadFiles(event.target.files)}
-                />
-                <Button type="button" variant="secondary" disabled={uploading || readOnly} onClick={() => fileInputRef.current?.click()}>
-                  <Upload size={16} />
-                  {uploading ? 'Uploading' : 'Upload'}
-                </Button>
-                <Button type="button" variant="secondary" disabled={aiLoading || readOnly} onClick={adaptForPlatforms}>
-                  <Sparkles size={16} />
-                  {aiLoading ? 'Adapting' : 'Adapt for platforms'}
-                </Button>
-              </div>
             </div>
-            {aiError && <p role="alert" className="mt-3 text-sm text-[var(--accent-magenta)]">{aiError}</p>}
+            <fieldset
+              disabled={readOnly || uploading}
+              className={`mt-3 min-w-0 border-0 p-0 ${readOnly ? 'opacity-40' : ''}`}
+              onChange={(event) => {
+                const input = event.nativeEvent.target;
+                if (!(input instanceof HTMLInputElement)) return;
+                if (input.type === 'file' && input.files) void uploadFiles(Array.from(input.files));
+              }}
+            >
+              <MediaUploader
+                compact
+                title={uploading ? 'Uploading media' : 'Drop or choose media'}
+                hint="JPG · PNG · GIF · MP4 · MOV · WEBM · MP3 · WAV"
+              />
+            </fieldset>
             {uploadError && <p role="alert" className="mt-3 text-sm text-[var(--accent-magenta)]">{uploadError}</p>}
+            <p className="mt-3 text-sm">
+              Select assets for this channel. Select an attached asset again to remove it.
+            </p>
             <div className="mt-4 max-h-96 overflow-y-auto pr-2">
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
               {assets.map((asset) => {
@@ -366,7 +477,7 @@ export function ComposerForm({
                   >
                     <AssetTile
                       title={asset.filename}
-                      meta={selected ? 'Selected' : undefined}
+                      meta={`${asset.type.toLowerCase()}${selected ? ' · Selected' : ''}`}
                       type={asset.type === 'VIDEO' ? 'video' : 'image'}
                       ratio="1:1"
                       src={asset.thumbnailUrl}
@@ -384,7 +495,40 @@ export function ComposerForm({
                   const asset = assets.find((entry) => entry.id === item.mediaAssetId);
                   return (
                     <div key={item.mediaAssetId} className="b88-tile space-y-3">
-                      <p className="text-sm font-[540]">{asset?.filename ?? 'Media'}</p>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-[540]">{asset?.filename ?? 'Missing media'}</p>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="tertiary"
+                            disabled={readOnly || index === 0}
+                            onClick={() => moveMedia(activeAccount.id, index, index - 1)}
+                          >
+                            <ArrowUp size={16} />Move up
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="tertiary"
+                            disabled={readOnly || index === activeVersion.media.length - 1}
+                            onClick={() => moveMedia(activeAccount.id, index, index + 1)}
+                          >
+                            <ArrowDown size={16} />Move down
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="tertiary"
+                            disabled={readOnly}
+                            onClick={() => toggleMedia(activeAccount.id, item.mediaAssetId)}
+                          >
+                            <Trash2 size={16} />Remove
+                          </Button>
+                        </div>
+                      </div>
+                      {!asset && (
+                        <StatusMessage tone="error">
+                          This asset is no longer available. Remove it before saving.
+                        </StatusMessage>
+                      )}
                       {caps?.supportsAltText && (
                         <Field
                           label="Alt text"
@@ -432,10 +576,16 @@ export function ComposerForm({
 
           <div className="pb-16">
             <p className="b88-label">What happens next?</p>
-            <div className="b88-selection-bar">
+            <div
+              className="b88-selection-bar"
+              role="region"
+              aria-label="Post actions"
+              style={{ flexWrap: 'nowrap', justifyContent: 'flex-start', overflowX: 'auto' }}
+            >
               <PendingButton
                 type="submit"
                 variant="secondary"
+                className="shrink-0 whitespace-nowrap"
                 pendingLabel="Saving"
                 disabled={readOnly || isPending}
                 aria-busy={pendingIntent === 'draft'}
@@ -443,23 +593,25 @@ export function ComposerForm({
                 <Save size={16} />
                 {pendingIntent === 'draft' ? 'Saving' : 'Save draft'}
               </PendingButton>
-              {canSubmitForApproval && (
+              {canPublish && !isPendingApproval && (
                 <PendingButton
                   type="button"
-                  variant="secondary"
-                  pendingLabel="Submitting"
+                  variant={isPublished ? 'tertiary' : 'promo'}
+                  className="shrink-0 whitespace-nowrap"
+                  pendingLabel="Publishing"
                   disabled={readOnly || isPending}
-                  aria-busy={pendingIntent === 'approval'}
-                  onClick={() => submitWithIntent('approval')}
+                  aria-busy={pendingIntent === 'publish'}
+                  onClick={() => submitWithIntent('publish')}
                 >
-                  <UserCheck size={16} />
-                  {pendingIntent === 'approval' ? 'Submitting' : 'Submit for approval'}
+                  <Send size={16} />
+                  {pendingIntent === 'publish' ? 'Publishing' : 'Publish now'}
                 </PendingButton>
               )}
               {canSchedule && (
                 <PendingButton
                   type="button"
                   variant="secondary"
+                  className="shrink-0 whitespace-nowrap"
                   pendingLabel="Scheduling"
                   disabled={readOnly || isPending}
                   aria-busy={pendingIntent === 'schedule'}
@@ -469,17 +621,18 @@ export function ComposerForm({
                   {pendingIntent === 'schedule' ? 'Scheduling' : 'Schedule'}
                 </PendingButton>
               )}
-              {canPublish && !isPendingApproval && (
+              {canSubmitForApproval && (
                 <PendingButton
                   type="button"
-                  variant={isPublished ? 'tertiary' : 'promo'}
-                  pendingLabel="Publishing"
+                  variant="secondary"
+                  className="shrink-0 whitespace-nowrap"
+                  pendingLabel="Submitting"
                   disabled={readOnly || isPending}
-                  aria-busy={pendingIntent === 'publish'}
-                  onClick={() => submitWithIntent('publish')}
+                  aria-busy={pendingIntent === 'approval'}
+                  onClick={() => submitWithIntent('approval')}
                 >
-                  <Send size={16} />
-                  {pendingIntent === 'publish' ? 'Publishing' : 'Publish now'}
+                  <UserCheck size={16} />
+                  {pendingIntent === 'approval' ? 'Submitting' : 'Submit for approval'}
                 </PendingButton>
               )}
             </div>
@@ -507,13 +660,21 @@ function mergeDraft(base: ComposerDraft, stored: ComposerDraft, preserveInitialP
   for (const [accountId, version] of Object.entries(stored.versions ?? {})) {
     if (versions[accountId]) versions[accountId] = version;
   }
+  const selectedAccountIds = (stored.selectedAccountIds ?? base.selectedAccountIds)
+    .filter((accountId) => Boolean(versions[accountId]));
+  const safeSelectedAccountIds = selectedAccountIds.length ? selectedAccountIds : base.selectedAccountIds;
+  const requestedActiveAccountId = preserveInitialPlatform
+    ? base.activeAccountId
+    : stored.activeAccountId ?? base.activeAccountId;
   return {
     title: stored.title ?? base.title,
     campaignId: stored.campaignId ?? base.campaignId,
     scheduledAt: stored.scheduledAt ?? base.scheduledAt,
-    activeAccountId: preserveInitialPlatform
-      ? base.activeAccountId
-      : stored.activeAccountId ?? base.activeAccountId,
+    activeAccountId: safeSelectedAccountIds.includes(requestedActiveAccountId)
+      ? requestedActiveAccountId
+      : safeSelectedAccountIds[0],
+    selectedAccountIds: safeSelectedAccountIds,
+    sourceUpdatedAt: stored.sourceUpdatedAt ?? base.sourceUpdatedAt,
     versions,
   };
 }

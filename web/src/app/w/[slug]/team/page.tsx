@@ -1,4 +1,4 @@
-import { Avatar, Badge, Button, Select } from '@/bridge88/components';
+import { Avatar, Badge, Button, Select, StatusMessage } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import {
@@ -20,8 +20,15 @@ async function resendInviteFormAction(slug: string, inviteId: string, _state: Ac
   return resendInviteAction(slug, inviteId);
 }
 
-export default async function TeamPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function TeamPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ ownershipTransferred?: string }>;
+}) {
   const { slug } = await params;
+  const query = await searchParams;
   const ctx = await requireWorkspace(slug, 'member:view');
   const [members, invites, reviews] = await Promise.all([
     db.workspaceMember.findMany({
@@ -41,6 +48,11 @@ export default async function TeamPage({ params }: { params: Promise<{ slug: str
   return (
     <>
       <p className="b88-eyebrow">Collaboration</p><h1 className="b88-page-title mt-3">Team and approvals</h1>
+      {query.ownershipTransferred === '1' && (
+        <StatusMessage tone="success" className="mt-6">
+          Ownership transferred. Your role is now Admin.
+        </StatusMessage>
+      )}
       <div className="mt-8 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,.8fr)]">
         <section className="b88-card">
           <p className="b88-caption">Members</p><h2 className="b88-heading mt-2">Workspace access</h2>

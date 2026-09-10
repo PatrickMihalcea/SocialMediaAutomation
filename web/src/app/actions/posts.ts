@@ -25,7 +25,7 @@ import { actionError, actionSuccess, type ActionState } from '@/lib/actions/stat
  * action reports problems as state instead of throwing. `fields` is keyed by
  * social account id to match the per-platform issues from validateDraft().
  */
-export type ComposerState = ActionState & { redirectTo?: string };
+export type ComposerState = ActionState & { redirectTo?: string; savedUpdatedAt?: string };
 export type PostCommandState = ActionState & { redirectTo?: string };
 
 export async function createPostAction(
@@ -85,14 +85,16 @@ async function persistPost(
 
     const post = await savePost(ctx.workspace.id, ctx.user.id, {
       id: postId,
-      expectedUpdatedAt: String(formData.get('expectedUpdatedAt') || '') || undefined,
+      expectedUpdatedAt: formData.get('expectedUpdatedAt')
+        ? new Date(String(formData.get('expectedUpdatedAt')))
+        : undefined,
       title: String(formData.get('title') || '') || null,
       campaignId: String(formData.get('campaignId') || '') || null,
       timezone: ctx.workspace.timezone,
       status,
       scheduledAt,
       platforms,
-    });
+    }, { validateContent: intent !== 'draft' });
     if (intent === 'publish') {
       await assertStoredPostValid(ctx.workspace.id, post.id);
       await db.post.update({
@@ -112,7 +114,12 @@ async function persistPost(
         : intent === 'publish'
           ? 'Publishing started.'
           : 'Post saved.';
-    return { status: 'success', success, redirectTo: destination };
+    return {
+      status: 'success',
+      success,
+      redirectTo: destination,
+      savedUpdatedAt: post.updatedAt.toISOString(),
+    };
   } catch (thrown) {
     if (thrown instanceof z.ZodError) {
       return actionError(thrown, 'That post is not valid yet.');

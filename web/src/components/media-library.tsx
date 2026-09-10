@@ -8,7 +8,7 @@ import {
   Copy, Download, Eye, Folder, Move, Pencil, Plus,
   Tags, Trash2, X,
 } from 'lucide-react';
-import { Badge, Button, EmptyState, Field, IconButton, MediaFrame, MediaUploader, StatusMessage } from '@/bridge88/components';
+import { Badge, Button, EmptyState, Field, IconButton, MediaFrame, MediaUploader, StatusMessage, VideoPlayer } from '@/bridge88/components';
 import { MEDIA_PRESETS } from '@/lib/social/capabilities';
 import {
   createDerivativeAction, createFolderAction, createTagAction, deleteFolderAction,
@@ -56,6 +56,8 @@ export function MediaLibrary({
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
+  const [createdDerivativeId, setCreatedDerivativeId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<MediaLibraryAsset | null>(null);
   const [notice, setNotice] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
   const [pending, startTransition] = useTransition();
@@ -85,7 +87,10 @@ export function MediaLibrary({
     startTransition(async () => {
       try {
         const result = await createDerivativeAction(slug, assetId, data);
-        setNotice({ tone: 'success', message: result.message });
+        setCreatedDerivativeId(result.derivativeId);
+        setPreview(null);
+        setNotice({ tone: 'success', message: `${result.message} The new derivative is highlighted at the top of the library.` });
+        router.refresh();
       } catch (error) {
         setNotice({ tone: 'error', message: error instanceof Error ? error.message : 'The derivative could not be created.' });
       }
@@ -93,6 +98,7 @@ export function MediaLibrary({
   };
   // uploadMediaAction reports failures in its returned state rather than throwing.
   const runUpload = (data: FormData) => {
+    setUploading(true);
     startTransition(async () => {
       try {
         const result = await uploadMediaAction(slug, data);
@@ -105,6 +111,8 @@ export function MediaLibrary({
         }
       } catch (error) {
         setNotice({ tone: 'error', message: error instanceof Error ? error.message : 'The media could not be uploaded.' });
+      } finally {
+        setUploading(false);
       }
     });
   };
@@ -260,6 +268,7 @@ export function MediaLibrary({
             <form
               ref={formRef}
               action={runUpload}
+              onSubmit={() => setUploading(true)}
               onChange={(event) => {
                 if (!(event.target instanceof HTMLInputElement) || event.target.type !== 'file') return;
                 inputRef.current = event.target;
@@ -282,11 +291,15 @@ export function MediaLibrary({
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-soft p-3">
                   <div className="min-w-0">
                     <p className="font-[480]">{queuedFiles.length === 1 ? queuedFiles[0].name : `${queuedFiles.length} files selected`}</p>
-                    <p className="b88-caption mt-1">Review the selection before upload.</p>
+                    <p className="b88-caption mt-1">
+                      {uploading
+                        ? 'Uploading now. Active uploads cannot be canceled; keep this page open until the upload finishes.'
+                        : 'Review the selection before upload.'}
+                    </p>
                   </div>
                   <div className="flex gap-2">
-                    <Button type="button" variant="tertiary" disabled={pending} onClick={clearStagedFiles}>Cancel</Button>
-                    <Button type="submit" disabled={pending}>{pending ? 'Uploading' : 'Upload'}</Button>
+                    {!uploading && <Button type="button" variant="tertiary" onClick={clearStagedFiles}>Cancel</Button>}
+                    <Button type="submit" disabled={uploading}>{uploading ? 'Uploading' : 'Upload'}</Button>
                   </div>
                 </div>
               )}
@@ -301,7 +314,15 @@ export function MediaLibrary({
             // pb-28 keeps the floating selection bar from covering the last row.
             <div className={`mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 ${selected.length ? 'pb-28' : ''}`}>
               {assets.map((asset) => (
-                <article key={asset.id} className={`b88-card relative overflow-hidden p-4 ${selectedSet.has(asset.id) ? 'border-ink bg-surface-soft' : ''}`}>
+                <article
+                  key={asset.id}
+                  ref={(element) => {
+                    if (element && asset.id === createdDerivativeId) {
+                      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                  }}
+                  className={`b88-card relative overflow-hidden p-4 ${selectedSet.has(asset.id) || asset.id === createdDerivativeId ? 'border-ink bg-surface-soft' : ''}`}
+                >
                   <button type="button" className="block w-full text-left transition-opacity hover:opacity-80" onClick={() => toggle(asset.id)} aria-pressed={selectedSet.has(asset.id)}>
                     <AssetPreview asset={asset} />
                     <div className="mt-4 flex items-start justify-between gap-2">
@@ -310,6 +331,7 @@ export function MediaLibrary({
                     </div>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <Badge tone="outline">{asset.assetKind.toLowerCase()}</Badge>
+                      {asset.id === createdDerivativeId && <Badge tone="ink">New derivative</Badge>}
                       {asset.usageCount > 0 && <Badge tone="ink">Post attachment</Badge>}
                     </div>
                     <p className="b88-caption mt-2">{asset.width && asset.height ? `${asset.width}×${asset.height} · ` : ''}{asset.sizeLabel} · {asset.usageCount} posts</p>
@@ -432,12 +454,14 @@ function PreviewDrawer({ asset, slug, canEdit, canDelete, pending, onClose, onDe
         </div>
         <div className="mt-6">
           {asset.type === 'VIDEO'
-            ? (
-              <div>
-                <video className="aspect-video w-full rounded-md bg-ink" controls preload="metadata" poster={asset.previewUrl || undefined} src={asset.downloadUrl} />
-                {asset.duration ? <p className="b88-caption mt-2">{formatDuration(asset.duration)}</p> : null}
-              </div>
-            )
+            ? <VideoPlayer
+                src={asset.downloadUrl || null}
+                poster={asset.previewUrl || undefined}
+                ratio="16:9"
+                duration={asset.duration ? formatDuration(asset.duration) : undefined}
+                caption={`${asset.filename} · video preview`}
+                errorMessage="This asset could not be played."
+              />
             : asset.type === 'AUDIO'
               ? <audio className="w-full" controls preload="metadata" src={asset.downloadUrl} />
               : <AssetPreview asset={asset} />}

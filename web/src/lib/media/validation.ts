@@ -21,3 +21,7 @@ export function validateMediaUpload(file: Pick<File, 'name' | 'type' | 'size'>):
   if (file.size > MAX_MEDIA_BYTES) throw invalid(`${file.name} is larger than 250 MB.`);
   return type;
 }
+
+export function validateMediaUploads(files: Pick<File, 'name' | 'type' | 'size'>[]): MediaType[] {
+  return files.map(validateMediaUpload);
+}

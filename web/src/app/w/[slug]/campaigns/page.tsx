@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Badge, Button, EmptyState, Field, Select, TextArea } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
@@ -47,7 +48,7 @@ export default async function CampaignsPage({
       </div>
 
       {ctx.can('campaign:manage') && (
-        <details className="mt-6 rounded-lg bg-[var(--block-cream)] p-5">
+        <details id="create-campaign" className="mt-6 rounded-lg bg-[var(--block-cream)] p-5">
           <summary className="cursor-pointer font-[540]">Create campaign</summary>
           <ActionForm action={createCampaignFormAction.bind(null, slug)} className="mt-5 grid gap-4 lg:grid-cols-4">
             <Field name="name" label="Name" required containerClassName="lg:col-span-2" />
@@ -80,7 +81,7 @@ export default async function CampaignsPage({
               <div className="flex items-center gap-4">
                 <span className="size-10 shrink-0 rounded-md" style={{ background: `var(--block-${campaign.color})` }}/>
                 <div className="min-w-0 flex-1">
-                  <a className="font-[540] underline-offset-4 hover:underline" href={`/w/${slug}/campaigns/${campaign.id}`}>{campaign.name}</a>
+                  <Link className="font-[540] underline-offset-4 hover:underline" href={`/w/${slug}/campaigns/${campaign.id}`}>{campaign.name}</Link>
                   <p className="mt-1 truncate text-sm">{campaign.description ?? 'No description'} · {campaign._count.posts} post{campaign._count.posts === 1 ? '' : 's'}</p>
                 </div>
                 <Badge tone={campaign.status === 'ACTIVE' ? 'lime' : campaign.status === 'ARCHIVED' ? 'neutral' : 'outline'}>{sentenceCase(campaign.status)}</Badge>

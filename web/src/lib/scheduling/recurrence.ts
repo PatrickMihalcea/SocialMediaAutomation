@@ -17,6 +17,8 @@ const WINDOW_DAYS = 45;
 export interface RecurrenceTemplate {
   title?: string | null;
   campaignId?: string | null;
+  frequency?: 'weekly' | 'weekdays' | 'monthly';
+  monthDay?: number;
   platforms: {
     socialAccountId: string;
     platform: string;
@@ -54,6 +56,8 @@ export async function expandRecurrence(recurringScheduleId: string): Promise<{ c
     hour: series.hour,
     minute: series.minute,
     timezone: series.timezone,
+    frequency: template.frequency,
+    monthDay: template.monthDay,
   });
 
   let created = 0;
@@ -125,11 +129,15 @@ export function occurrencesBetween(input: {
   hour: number;
   minute: number;
   timezone: string;
+  frequency?: 'weekly' | 'weekdays' | 'monthly';
+  monthDay?: number;
 }): Date[] {
-  const { weekdays, hour, minute, timezone } = input;
-  if (weekdays.length === 0) return [];
+  const { hour, minute, timezone } = input;
+  const frequency = input.frequency ?? 'weekly';
+  if (frequency === 'weekly' && input.weekdays.length === 0) return [];
 
-  const wanted = new Set(weekdays.map((d) => (d === 0 ? 7 : d)));
+  const wanted = new Set(input.weekdays.map((d) => (d === 0 ? 7 : d)));
+  const monthDay = Math.min(31, Math.max(1, input.monthDay ?? input.from.setZone(timezone).day));
   const out: Date[] = [];
 
   let day = input.from.setZone(timezone).startOf('day');
@@ -137,7 +145,7 @@ export function occurrencesBetween(input: {
 
   // A hard cap keeps a pathological zone/DST case from looping forever.
   for (let guard = 0; guard < 400 && day <= end; guard++, day = day.plus({ days: 1 })) {
-    if (!wanted.has(day.weekday)) continue;
+    if (frequency === 'monthly' ? day.day !== monthDay : frequency === 'weekdays' ? day.weekday > 5 : !wanted.has(day.weekday)) continue;
     const at = day.set({ hour, minute, second: 0, millisecond: 0 });
     if (at < input.from.setZone(timezone) || at > end) continue;
     out.push(at.toUTC().toJSDate());

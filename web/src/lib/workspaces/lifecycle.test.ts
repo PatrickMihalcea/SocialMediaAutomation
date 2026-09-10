@@ -23,6 +23,7 @@ import {
   availableWorkspaceSlug,
   deleteWorkspaceWithStorage,
   slugifyWorkspace,
+  timezoneChangeNotice,
 } from '@/lib/workspaces/lifecycle';
 
 describe('workspace lifecycle', () => {
@@ -40,6 +41,15 @@ describe('workspace lifecycle', () => {
   it('keeps the current workspace slug during safe updates', async () => {
     mocks.findUnique.mockResolvedValue({ id: 'current' });
     await expect(availableWorkspaceSlug('Northwind', 'current')).resolves.toBe('northwind');
+  });
+
+  it('explains timezone changes without implying stored publication instants moved', () => {
+    expect(timezoneChangeNotice('Europe/Bucharest', 0)).toBe(
+      'Calendar and future scheduling now use Europe/Bucharest.',
+    );
+    expect(timezoneChangeNotice('Europe/Bucharest', 2)).toBe(
+      '2 existing publication instants remain unchanged; calendar times now display in Europe/Bucharest.',
+    );
   });
 
   it('deletes only storage objects referenced by the selected workspace before its cascade', async () => {

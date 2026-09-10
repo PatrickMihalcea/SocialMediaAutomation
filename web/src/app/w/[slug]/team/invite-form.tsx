@@ -38,7 +38,11 @@ export function InviteForm({ slug }: { slug: string }) {
       </Select>
       <Button type="submit" className="relative mt-5" disabled={pending} aria-busy={pending}>
         Create invitation
-        {pending && <span className="b88-spinner-inline" aria-hidden />}
+        {pending && (
+          <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center" aria-hidden>
+            <span className="b88-spinner-inline" />
+          </span>
+        )}
       </Button>
     </form>
   );

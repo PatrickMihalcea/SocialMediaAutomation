@@ -4,6 +4,8 @@ import { getCurrentUser } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { hashSecret } from '@/lib/crypto/tokens';
 import { acceptInviteAction } from '@/app/actions/team';
+import { switchAccountAction } from '@/app/actions/auth';
+import { PendingButton } from '@/components/action-ui';
 
 export default async function InvitePage({
   searchParams,
@@ -29,15 +31,22 @@ export default async function InvitePage({
           <>
             <p className="mt-4">{invite.invitedBy.name ?? invite.invitedBy.email} invited {invite.email} as {invite.role.toLowerCase()}.</p>
             {!user ? (
-              <div className="mt-7 flex gap-3">
+              <div className="mt-7 flex flex-wrap gap-3">
                 <Button href={`/login?next=${encodeURIComponent(`/invite?token=${token}`)}`}>Sign in to accept</Button>
-                <Button href="/signup" variant="secondary">Create account</Button>
+                <Button href={`/signup?next=${encodeURIComponent(`/invite?token=${token}`)}`} variant="secondary">Create account</Button>
               </div>
             ) : user.email.toLowerCase() !== invite.email.toLowerCase() ? (
-              <p className="mt-6 rounded-md bg-canvas p-4">Sign in as {invite.email} to accept this invitation.</p>
+              <div className="mt-6 rounded-md bg-canvas p-4">
+                <p>Sign in as {invite.email} to accept this invitation.</p>
+                <form action={switchAccountAction.bind(null, `/invite?token=${token}`)} className="mt-4">
+                  <PendingButton type="submit" variant="secondary" pendingLabel="Signing out">
+                    Switch account
+                  </PendingButton>
+                </form>
+              </div>
             ) : (
               <form action={acceptInviteAction.bind(null, token)} className="mt-7">
-                <Button type="submit">Accept invitation</Button>
+                <PendingButton type="submit" pendingLabel="Joining workspace">Accept invitation</PendingButton>
               </form>
             )}
           </>

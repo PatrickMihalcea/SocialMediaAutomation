@@ -11,7 +11,12 @@ import { actionError, actionSuccess, type ActionState } from '@/lib/actions/stat
 import { inferBrandVoice } from '@/lib/ai/service';
 import { mediaKey, storage } from '@/lib/storage';
 import { createDemoAccount } from '@/lib/social/accounts';
-import { availableWorkspaceSlug, deleteWorkspaceWithStorage, slugifyWorkspace } from '@/lib/workspaces/lifecycle';
+import {
+  availableWorkspaceSlug,
+  deleteWorkspaceWithStorage,
+  slugifyWorkspace,
+  timezoneChangeNotice,
+} from '@/lib/workspaces/lifecycle';
 import { conflict, invalid } from '@/lib/errors';
 import type { BrandVoiceDraft } from '@/lib/ai/schemas';
 
@@ -124,9 +129,7 @@ export async function updateWorkspaceAction(
           status: { in: ['SCHEDULED', 'PENDING_APPROVAL'] },
         },
       });
-      timezoneNotice = scheduledPosts
-        ? ` ${scheduledPosts} existing publication ${scheduledPosts === 1 ? 'instant remains' : 'instants remain'} unchanged; calendar times now display in ${input.timezone}.`
-        : ` Calendar and future scheduling now use ${input.timezone}.`;
+      timezoneNotice = ` ${timezoneChangeNotice(input.timezone, scheduledPosts)}`;
     }
     const requested = slugifyWorkspace(input.slug || input.name);
     const collision = await db.workspace.findFirst({
@@ -211,7 +214,14 @@ export async function inferBrandVoiceAction(
     return {
       status: 'success',
       success: 'Preview generated. Review and save it below to apply it.',
-      preview: inferred,
+      preview: {
+        ...inferred,
+        wordsToUse: inferred.wordsToUse ?? [],
+        wordsToAvoid: inferred.wordsToAvoid ?? [],
+        emojiPolicy: inferred.emojiPolicy ?? 'SPARING',
+        hashtagPolicy: inferred.hashtagPolicy ?? 'MODERATE',
+        additionalInstructions: inferred.additionalInstructions ?? '',
+      },
     };
   } catch (error) {
     return actionError(error, 'Bridge88 could not infer the brand voice. Edit the preview manually or try again.');
@@ -326,11 +336,11 @@ export async function transferWorkspaceOwnershipAction(
       db.workspaceMember.update({ where: { workspaceId_userId: { workspaceId: ctx.workspace.id, userId: ctx.user.id } }, data: { role: 'ADMIN' } }),
     ]);
     await audit({ workspaceId: ctx.workspace.id, userId: ctx.user.id, action: 'workspace.ownership_transferred', entityType: 'workspace', entityId: ctx.workspace.id, metadata: { newOwnerId: nextOwner.userId } });
-    revalidatePath(`/w/${slug}/settings`);
-    return actionSuccess(`Ownership transferred to ${nextOwner.user.email}.`);
+    revalidatePath(`/w/${slug}/team`);
   } catch (error) {
     return actionError(error, 'Ownership could not be transferred.');
   }
+  redirect(`/w/${slug}/team?ownershipTransferred=1`);
 }
 
 export async function deleteWorkspaceAction(

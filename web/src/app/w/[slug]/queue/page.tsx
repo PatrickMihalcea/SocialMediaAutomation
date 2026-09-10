@@ -15,7 +15,18 @@ export default async function QueuePage({ params }: { params: Promise<{ slug: st
     db.queueItem.findMany({ where: { workspaceId: ctx.workspace.id }, include: { post: { include: { platforms: { take: 1 } } } }, orderBy: { position: 'asc' } }),
     db.post.findMany({ where: { workspaceId: ctx.workspace.id, status: { in: ['DRAFT', 'APPROVED'] }, queueItem: null }, include: { platforms: { take: 1 } }, orderBy: { updatedAt: 'desc' }, take: 12 }),
     listSlots(ctx.workspace.id, 50),
-    db.recurringSchedule.findMany({ where: { workspaceId: ctx.workspace.id }, orderBy: { createdAt: 'desc' } }),
+    db.recurringSchedule.findMany({
+      where: { workspaceId: ctx.workspace.id },
+      include: {
+        posts: {
+          where: { scheduledAt: { gte: new Date() } },
+          select: { id: true, title: true, scheduledAt: true, status: true },
+          orderBy: { scheduledAt: 'asc' },
+          take: 8,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    }),
     db.socialAccount.findMany({ where: { workspaceId: ctx.workspace.id, status: 'ACTIVE' }, select: { id: true, accountName: true, platform: true }, orderBy: { accountName: 'asc' } }),
     db.campaign.findMany({ where: { workspaceId: ctx.workspace.id }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
   ]);
@@ -44,12 +55,19 @@ export default async function QueuePage({ params }: { params: Promise<{ slug: st
             text: template.platforms?.[0]?.text ?? '',
             socialAccountId: template.platforms?.[0]?.socialAccountId ?? '',
             campaignId: template.campaignId ?? '',
+            frequency: template.frequency ?? 'weekly',
             weekdays: recurrence.weekdays,
             hour: recurrence.hour,
             minute: recurrence.minute,
             startDate: formatInZone(recurrence.startDate, ctx.workspace.timezone, 'yyyy-MM-dd'),
             endDate: recurrence.endDate ? formatInZone(recurrence.endDate, ctx.workspace.timezone, 'yyyy-MM-dd') : '',
             status: recurrence.status,
+            occurrences: recurrence.posts.map((post) => ({
+              id: post.id,
+              title: post.title ?? template.title ?? recurrence.name,
+              scheduledAt: post.scheduledAt!.toISOString(),
+              status: post.status,
+            })),
           };
         })}
         accounts={accounts.map((account) => ({ value: account.id, label: `${account.accountName} · ${PLATFORM_LABELS[account.platform]}` }))}

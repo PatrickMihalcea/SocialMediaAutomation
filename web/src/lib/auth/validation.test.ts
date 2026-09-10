@@ -3,6 +3,7 @@ import {
   changePasswordSchema,
   passwordSchema,
   resetPasswordSchema,
+  sanitizeLoginRedirect,
   signUpSchema,
 } from './validation';
 
@@ -38,4 +39,11 @@ describe('authentication validation', () => {
       if (!result.success) expect(result.error.flatten().fieldErrors.confirmPassword).toBeDefined();
     },
   );
+
+  it('keeps local destinations and rejects unsafe redirects', () => {
+    expect(sanitizeLoginRedirect('/invite?token=abc')).toBe('/invite?token=abc');
+    expect(sanitizeLoginRedirect('https://example.com')).toBe('/w');
+    expect(sanitizeLoginRedirect('//example.com')).toBe('/w');
+    expect(sanitizeLoginRedirect('/login?next=/account')).toBe('/w');
+  });
 });

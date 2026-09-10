@@ -42,3 +42,13 @@ export const changePasswordSchema = z
     message: 'Passwords do not match.',
     path: ['confirmPassword'],
   });
+
+export function sanitizeLoginRedirect(
+  value: FormDataEntryValue | string | null | undefined,
+  fallback = '/w',
+): string {
+  const next = String(value || fallback).trim();
+  if (!next.startsWith('/') || next.startsWith('//') || /^\/login(?:[/?#]|$)/.test(next)) return fallback;
+  if (/^\/(?:calendar|queue|compose|media)(?:[/?#]|$)/.test(next)) return fallback;
+  return next;
+}

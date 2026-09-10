@@ -22,7 +22,7 @@ export function ProfileForm({
       encType="multipart/form-data"
     >
       <div className="flex items-center gap-4">
-        <Avatar name={name || 'Account'} src={image ?? undefined} size={56} tone="lilac" />
+        <Avatar name={name || 'Account'} src={image ?? undefined} size={56} />
         <div>
           <h2 className="b88-heading">Profile details</h2>
           <p className="mt-1 text-sm">Shown to workspace collaborators.</p>

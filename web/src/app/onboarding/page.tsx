@@ -34,6 +34,9 @@ export default async function OnboardingPage({
       <div className="mt-4 h-2 overflow-hidden rounded-pill bg-surface-soft" aria-label={`${progress}% complete`}>
         <div className="h-full bg-[var(--primary)]" style={{ width: `${progress}%` }} />
       </div>
+      <div className="mt-4 flex justify-end">
+        <Button href="/account" variant="tertiary">Finish later</Button>
+      </div>
       {step === 2 && <BrandVoiceStep slug={selected.slug} brand={brand} />}
       {step === 3 && <ChannelStep slug={selected.slug} />}
       {step === 4 && <FirstPostStep slug={selected.slug} />}
@@ -45,6 +48,9 @@ function WorkspaceDetails() {
   return (
     <main id="main-content" className="mx-auto max-w-3xl px-6 py-12 md:px-12" tabIndex={-1}>
       <p className="b88-eyebrow">Workspace setup · 1 of 4</p>
+      <div className="mt-2 flex justify-end">
+        <Button href="/account" variant="tertiary">Finish later</Button>
+      </div>
       <h1 className="b88-page-title mt-4">Tell Bridge88 what you publish.</h1>
       <p className="mt-4 max-w-2xl text-lg">These details scope every post and give the writing tools useful context.</p>
       <ActionForm action={createWorkspaceAction} className="b88-card mt-10 grid gap-6">
@@ -69,6 +75,11 @@ function BrandVoiceStep({ slug, brand }: { slug: string; brand: Brand }) {
       <h1 className="b88-page-title mt-6">Review the AI brand voice.</h1>
       <p className="mt-4">Bridge88 inferred this editable preview from your workspace details. Mock mode returns deterministic copy.</p>
       <ActionForm action={advanceOnboardingAction.bind(null, slug, 2)} className="b88-card mt-8 grid gap-6">
+        <div className="flex justify-end">
+          <PendingButton type="submit" className="w-full sm:w-auto" pendingLabel="Saving voice">
+            Save voice and continue
+          </PendingButton>
+        </div>
         <Field name="tone" label="Tone" defaultValue={brand?.tone ?? ''} />
         <Field name="personality" label="Personality" defaultValue={brand?.personality ?? ''} />
         <Field name="targetAudience" label="Audience" defaultValue={brand?.targetAudience ?? ''} />

@@ -18,7 +18,7 @@ import {
   Send,
   Trash2,
 } from 'lucide-react';
-import { Badge, Button, Dialog, EmptyState, Field, IconButton, StatusMessage } from '@/bridge88/components';
+import { Badge, Button, Dialog, EmptyState, Field, IconButton, Select, StatusMessage } from '@/bridge88/components';
 import { postCommandAction } from '@/app/actions/posts';
 import {
   commitBulkScheduleAction,
@@ -277,17 +277,31 @@ export function CalendarShell({
         <Filter label="Platform" value={filters.platform} options={platformOptions} onChange={(value) => navigate({ platform: value })} />
         <Filter label="Status" value={filters.status} options={[
           { value: 'DRAFT', label: 'Draft' }, { value: 'PENDING_APPROVAL', label: 'In review' },
-          { value: 'SCHEDULED', label: 'Scheduled' }, { value: 'PUBLISHED', label: 'Published' },
-          { value: 'FAILED', label: 'Failed' },
+          { value: 'APPROVED', label: 'Approved' }, { value: 'SCHEDULED', label: 'Scheduled' },
+          { value: 'PUBLISHING', label: 'Publishing' }, { value: 'PUBLISHED', label: 'Published' },
+          { value: 'FAILED', label: 'Failed' }, { value: 'CANCELLED', label: 'Cancelled' },
         ]} onChange={(value) => navigate({ status: value })} />
         <Filter label="Campaign" value={filters.campaign} options={campaignOptions} onChange={(value) => navigate({ campaign: value })} />
         <Filter label="Account" value={filters.account} options={accountOptions} onChange={(value) => navigate({ account: value })} />
+      </div>
+      <div className="mt-2 h-10">
+        {Object.keys(filters).length > 0 && (
+          <Button type="button" variant="tertiary" onClick={() => navigate({
+            platform: undefined,
+            status: undefined,
+            campaign: undefined,
+            account: undefined,
+          })}>
+            Clear filters
+          </Button>
+        )}
       </div>
 
       {view === 'list' ? (
         <PostList posts={posts} selected={selected} setSelected={setSelected} slug={slug} timezone={timezone} />
       ) : (
         <div className="mt-6 overflow-x-auto">
+          <p className="b88-caption mb-3 md:hidden">Tap a post to open its details and change the publishing time. Swipe sideways to see the full week.</p>
           <div className="min-w-[720px] overflow-hidden rounded-lg border border-hairline">
             <div className="grid grid-cols-7 border-b border-hairline bg-surface-soft">
               {visibleDays.slice(0, 7).map((day) => (
@@ -435,13 +449,18 @@ export function CalendarShell({
 }
 
 function Filter({ label, value, options, onChange }: { label: string; value?: string; options: Option[]; onChange: (value?: string) => void }) {
-  return <label><span className="b88-label">{label}</span><select className="b88-input" value={value ?? ''} onChange={(event) => onChange(event.target.value || undefined)}><option value="">All</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
+  return (
+    <Select label={label} value={value ?? ''} onChange={(event) => onChange(event.target.value || undefined)}>
+      <option value="">All</option>
+      {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+    </Select>
+  );
 }
 
 function PostList({ posts, selected, setSelected, slug, timezone }: {
   posts: CalendarPost[]; selected: string[]; setSelected: (ids: string[]) => void; slug: string; timezone: string;
 }) {
-  if (!posts.length) return <div className="mt-6"><EmptyState eyebrow="No matching posts" title="The calendar is clear">Change the filters or create a post.</EmptyState></div>;
+  if (!posts.length) return <div className="mt-6"><EmptyState eyebrow="No matching posts" title="The calendar is clear" action={<Button href={`/w/${slug}/compose`}>Create post</Button>}>Clear the filters to see every post, or create a new one.</EmptyState></div>;
   return (
     <section className="b88-card mt-6 overflow-x-auto">
       <table className="b88-table min-w-[760px] [&_td:first-child]:pl-0 [&_th:first-child]:pl-0"><thead><tr><th>Select</th><th>Post</th><th>Channels</th><th>Publishing time</th><th>Status</th><th>Campaign</th></tr></thead>

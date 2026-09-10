@@ -44,6 +44,23 @@ export async function getUsableAccount(accountId: string): Promise<{
   let account = decryptAccount(row);
   const adapter = getAdapterForAccount(row);
 
+  if (row.status === SocialAccountStatus.DISCONNECTED) {
+    throw new PlatformError({
+      platform: row.platform,
+      code: 'DISCONNECTED',
+      message: `${row.accountName} is disconnected. Connect the account again before publishing to it.`,
+    });
+  }
+
+  if (row.status !== SocialAccountStatus.ACTIVE || !account.accessToken) {
+    throw new PlatformError({
+      platform: row.platform,
+      code: 'AUTH',
+      needsReconnect: true,
+      message: `${row.accountName} needs attention. Reconnect it before publishing to this channel.`,
+    });
+  }
+
   const expiringSoon =
     account.tokenExpiresAt != null && account.tokenExpiresAt.getTime() - Date.now() < REFRESH_MARGIN_MS;
 

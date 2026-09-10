@@ -36,6 +36,18 @@ export default async function ChannelsPage({
   const ctx = await requireWorkspace(slug, 'channel:view');
   const accounts = await db.socialAccount.findMany({
     where: { workspaceId: ctx.workspace.id, status: { not: 'DISCONNECTED' } },
+    include: {
+      _count: {
+        select: {
+          postPlatforms: {
+            where: {
+              status: 'PENDING',
+              post: { status: 'SCHEDULED', scheduledAt: { gt: new Date() } },
+            },
+          },
+        },
+      },
+    },
     orderBy: { createdAt: 'asc' },
   });
   const platforms = describePlatforms();
@@ -57,21 +69,41 @@ export default async function ChannelsPage({
 
       <div className="mt-8 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         {accounts.map((account) => {
-          const demo = (account.metadata as { mock?: boolean })?.mock;
+          const metadata = account.metadata as { mock?: boolean; accountType?: string; pageType?: string };
+          const demo = metadata?.mock;
+          const accountType = metadata.accountType ?? metadata.pageType;
+          const scheduledTargets = account._count.postPlatforms;
           const tone = account.status === 'ACTIVE' ? 'mint' : account.status === 'EXPIRED' ? 'coral' : 'cream';
           return (
             <article key={account.id} className="b88-card">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <Avatar name={account.accountName} src={account.avatarUrl} size={44} />
-                  <div><p className="font-[540]">{account.accountName}</p><p className="b88-caption mt-1 flex items-center gap-1.5"><PlatformGlyph platform={account.platform} size={16} />{PLATFORM_LABELS[account.platform]}{demo ? ' · demo' : ''}</p></div>
+                  <div>
+                    <p className="font-[540]">{account.accountName}</p>
+                    <p className="b88-caption mt-1 flex items-center gap-1.5"><PlatformGlyph platform={account.platform} size={16} />{PLATFORM_LABELS[account.platform]}{demo ? ' · demo' : ''}</p>
+                    {account.accountHandle && <p className="mt-1 text-sm">{account.accountHandle}</p>}
+                  </div>
                 </div>
                 <Badge tone={tone}>{sentenceCase(account.status)}</Badge>
               </div>
               {account.statusMessage && <p className="mt-4 rounded-md bg-[var(--block-pink)] p-3 text-sm">{account.statusMessage}</p>}
-              <p className="b88-caption mt-5">Last synchronized</p>
-              <p className="mt-1 text-sm">{account.lastSyncedAt ? relativeLabel(account.lastSyncedAt, ctx.workspace.timezone) : 'Not yet synchronized'}</p>
-              <div className="mt-5 flex gap-2">
+              {scheduledTargets > 0 && (
+                <p className="mt-4 rounded-md bg-[var(--block-cream)] p-3 text-sm">
+                  {scheduledTargets} future post{scheduledTargets === 1 ? '' : 's'} currently target{scheduledTargets === 1 ? 's' : ''} this account. Disconnecting will cancel this channel on those posts without removing published history.
+                </p>
+              )}
+              <dl className="mt-5 grid grid-cols-2 gap-4">
+                <div>
+                  <dt className="b88-caption">Account type</dt>
+                  <dd className="mt-1 text-sm">{accountType ? sentenceCase(accountType) : demo ? 'Demo business account' : 'Not reported'}</dd>
+                </div>
+                <div>
+                  <dt className="b88-caption">Last synchronized</dt>
+                  <dd className="mt-1 text-sm">{account.lastSyncedAt ? relativeLabel(account.lastSyncedAt, ctx.workspace.timezone) : 'Not yet synchronized'}</dd>
+                </div>
+              </dl>
+              <div className="mt-5 flex flex-wrap gap-2">
                 {demo ? (
                   <form action={reconnectDemoChannelAction.bind(null, slug, account.id)} className="shrink-0">
                     <Button type="submit" variant="secondary"><RefreshCw size={16}/> Reconnect</Button>
@@ -90,7 +122,7 @@ export default async function ChannelsPage({
                     <ConfirmationButton
                       type="submit"
                       variant="tertiary"
-                      confirmMessage={`Disconnect ${account.accountName}? Scheduled posts for it will stop publishing.`}
+                      confirmMessage={`Disconnect ${account.accountName}? ${scheduledTargets ? `${scheduledTargets} future channel target${scheduledTargets === 1 ? '' : 's'} will be cancelled. ` : ''}Published history will remain.`}
                       pendingLabel="Disconnecting"
                     >
                       <Unplug size={16}/> Disconnect
@@ -105,14 +137,18 @@ export default async function ChannelsPage({
 
       {!accounts.length && (
         <div className="mt-8">
-          <EmptyState eyebrow="No accounts" title="Connect the first channel">
+          <EmptyState
+            eyebrow="No accounts"
+            title="Connect the first channel"
+            action={<Button href="#connect-account">Connect account</Button>}
+          >
             Pick a demo account below to exercise the complete publishing flow locally.
           </EmptyState>
         </div>
       )}
 
       {ctx.can('channel:connect') && (
-        <section className="mt-12 rounded-lg bg-[var(--block-cream)] p-6">
+        <section id="connect-account" className="mt-12 scroll-mt-20 rounded-lg bg-[var(--block-cream)] p-6">
           <p className="b88-caption">Connect account</p>
           <h2 className="b88-heading mt-2">Choose a platform</h2>
           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

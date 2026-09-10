@@ -4,6 +4,7 @@ import { storage } from '@/lib/storage';
 import { formatBytes } from '@/lib/social/base';
 import { MediaFilters } from '@/components/media-filters';
 import { MediaLibrary } from '@/components/media-library';
+import { classifyMediaAsset, GENERATED_MEDIA_PRESETS } from '@/lib/media/classification';
 
 export default async function MediaPage({
   params,
@@ -22,19 +23,28 @@ export default async function MediaPage({
         workspaceId: ctx.workspace.id,
         folderId: query.folder || undefined,
         type,
-        OR: query.q ? [
-          { filename: { contains: query.q, mode: 'insensitive' } },
-          { tags: { some: { mediaTag: { name: { contains: query.q, mode: 'insensitive' } } } } },
-          { folder: { name: { contains: query.q, mode: 'insensitive' } } },
-        ] : undefined,
         tags: query.tag ? { some: { mediaTagId: query.tag } } : undefined,
-        aiGenerationId: query.filter === 'generated' ? { not: null } : undefined,
-        ...(query.filter === 'uploaded' ? { aiGenerationId: null, derivedFromId: null } : {}),
+        ...(query.filter === 'uploaded' ? { aiGenerationId: null, derivedFromId: null, derivationPreset: null } : {}),
         postMedia: query.filter === 'used'
           ? { some: {} }
           : query.filter === 'unused'
             ? { none: {} }
             : undefined,
+        AND: [
+          ...(query.q ? [{
+            OR: [
+              { filename: { contains: query.q, mode: 'insensitive' as const } },
+              { tags: { some: { mediaTag: { name: { contains: query.q, mode: 'insensitive' as const } } } } },
+              { folder: { name: { contains: query.q, mode: 'insensitive' as const } } },
+            ],
+          }] : []),
+          ...(query.filter === 'generated' ? [{
+            OR: [
+              { aiGenerationId: { not: null } },
+              { derivationPreset: { in: [...GENERATED_MEDIA_PRESETS] } },
+            ],
+          }] : []),
+        ],
       },
       orderBy: query.sort === 'name'
         ? { filename: 'asc' }
@@ -93,7 +103,7 @@ export default async function MediaPage({
       altText: asset.altText,
       derivedFromId: asset.derivedFromId,
       derivationPreset: asset.derivationPreset,
-      assetKind: asset.derivedFromId ? 'DERIVATIVE' as const : asset.aiGenerationId ? 'GENERATED' as const : 'ORIGINAL' as const,
+      assetKind: classifyMediaAsset(asset),
       usages: [...new Map(asset.postMedia.map(({ postPlatform }) => [
         postPlatform.post.id,
         {

@@ -135,6 +135,36 @@ export async function removeCampaignPostsAction(
   }
 }
 
+export async function moveCampaignPostsAction(
+  slug: string,
+  sourceCampaignId: string,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const ctx = await requireWorkspace(slug, 'campaign:manage');
+    const destinationId = String(formData.get('destinationId') || '');
+    const postIds = formData.getAll('postIds').map(String);
+    if (!postIds.length) throw invalid('Select at least one post.');
+    if (!destinationId || destinationId === sourceCampaignId) {
+      throw invalid('Choose a different destination campaign.');
+    }
+    const destination = await db.campaign.findFirst({
+      where: { id: destinationId, workspaceId: ctx.workspace.id },
+      select: { id: true },
+    });
+    if (!destination) throw invalid('The destination campaign is no longer available.');
+    const result = await db.post.updateMany({
+      where: { id: { in: postIds }, workspaceId: ctx.workspace.id, campaignId: sourceCampaignId },
+      data: { campaignId: destinationId },
+    });
+    refreshCampaignViews(slug, sourceCampaignId);
+    refreshCampaignViews(slug, destinationId);
+    return actionSuccess(`${result.count} post${result.count === 1 ? '' : 's'} moved.`);
+  } catch (error) {
+    return actionError(error, 'Posts could not be moved.');
+  }
+}
+
 export async function deleteCampaignAction(
   slug: string,
   campaignId: string,
@@ -187,7 +217,7 @@ export async function duplicateCampaignAction(
     const includeSchedule = formData.get('includeSchedule') === 'on';
     const source = await db.campaign.findFirst({
       where: { id: campaignId, workspaceId: ctx.workspace.id },
-      include: includePosts ? { posts: { include: { platforms: { include: { media: true } } } } } : undefined,
+      include: { posts: { include: { platforms: { include: { media: true } } } } },
     });
     if (!source) throw notFound('That campaign no longer exists.');
     const duplicate = await db.$transaction(async (tx) => {
@@ -202,7 +232,7 @@ export async function duplicateCampaignAction(
           endDate: includeSchedule ? source.endDate : null,
         },
       });
-      if (includePosts && 'posts' in source) {
+      if (includePosts) {
         for (const post of source.posts) {
           await tx.post.create({
             data: {
