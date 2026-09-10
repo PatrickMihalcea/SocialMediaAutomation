@@ -1,7 +1,14 @@
 import { Badge, StatCard, StatusMessage } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
-import { currentMonthUsage, formatBytes, nextMonthlyReset, PLAN_LIMITS } from '@/lib/billing/limits';
+import {
+  arrivalLimitNotice,
+  currentMonthUsage,
+  firstQueryValue,
+  formatBytes,
+  nextMonthlyReset,
+  PLAN_LIMITS,
+} from '@/lib/billing/limits';
 import { billingProvider } from '@/lib/billing/provider';
 import { BillingControls, PaymentDocuments } from './billing-controls';
 
@@ -15,7 +22,7 @@ export default async function BillingPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ billing?: string }>;
+  searchParams: Promise<{ billing?: string | string[]; reason?: string | string[] }>;
 }) {
   const { slug } = await params;
   const query = await searchParams;
@@ -44,7 +51,8 @@ export default async function BillingPage({
     year: 'numeric',
     timeZone: 'UTC',
   });
-  const feedback = billingFeedback(query.billing);
+  const limitNotice = arrivalLimitNotice(query.billing, query.reason);
+  const feedback = limitNotice ? null : billingFeedback(query.billing);
   const statusNotice = subscriptionNotice(subscription?.status, subscription?.cancelAtPeriodEnd ?? false, periodEndLabel);
 
   return (
@@ -52,8 +60,9 @@ export default async function BillingPage({
       <p className="b88-eyebrow">Workspace billing</p>
       <h1 className="b88-page-title mt-3">Plan and usage</h1>
       {feedback && <StatusMessage className="mt-5" tone={feedback.tone}>{feedback.message}</StatusMessage>}
-      {statusNotice && <StatusMessage className="mt-5" tone={statusNotice.tone}>{statusNotice.message}</StatusMessage>}
+      {statusNotice && !limitNotice && <StatusMessage className="mt-5" tone={statusNotice.tone}>{statusNotice.message}</StatusMessage>}
       <section className="b88-card mt-8">
+        {limitNotice && <StatusMessage className="mb-5" tone="error">{limitNotice}</StatusMessage>}
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <Badge tone="ink">{sentenceCase(paidPlan)}</Badge>
@@ -110,7 +119,7 @@ function subscriptionNotice(status: string | undefined, cancelAtPeriodEnd: boole
   return null;
 }
 
-function billingFeedback(value: string | undefined) {
+function billingFeedback(value: string | string[] | undefined) {
   return {
     updated: { tone: 'success' as const, message: 'The simulated subscription is active. No payment method was charged.' },
     'plan-changed': { tone: 'success' as const, message: 'The plan and workspace limits were updated.' },
@@ -119,5 +128,5 @@ function billingFeedback(value: string | undefined) {
     cancelled: { tone: 'neutral' as const, message: 'Checkout was canceled. The workspace plan did not change.' },
     'no-customer': { tone: 'error' as const, message: 'No billing customer is connected. Start a paid subscription first.' },
     'mock-portal': { tone: 'neutral' as const, message: 'The development simulator has no payment portal, invoices or stored payment method.' },
-  }[value ?? ''] ?? null;
+  }[firstQueryValue(value) ?? ''] ?? null;
 }

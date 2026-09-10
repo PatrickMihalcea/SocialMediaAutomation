@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link, { useLinkStatus } from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { Select } from '@/bridge88/components';
 import {
   BarChart3,
   Bot,
@@ -100,16 +101,17 @@ export function AppNavigation({
       >
         <Link href={root} className="mb-6 px-4 py-2 text-xl font-[540]">Bridge88</Link>
         <div className="mb-4 rounded-md bg-surface-soft p-4">
-          <label className="b88-caption" htmlFor="workspace-switcher">Workspace</label>
-          <select
+          <Select
             id="workspace-switcher"
-            className="b88-pill-select mt-2 w-full font-[480]"
+            label="Workspace"
+            variant="pill"
+            className="w-full font-[480]"
             value={slug}
             onChange={(event) => router.push(`/w/${event.target.value}`)}
             aria-label="Switch workspace"
           >
             {workspaces.map((workspace) => <option key={workspace.slug} value={workspace.slug}>{workspace.name}</option>)}
-          </select>
+          </Select>
           <Link href="/w/new" className="mt-2 inline-block text-sm">Create workspace</Link>
         </div>
         <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">

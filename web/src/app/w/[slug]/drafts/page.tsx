@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { Badge, Button, EmptyState } from '@/bridge88/components';
 import { StatusGlyph } from '@/components/visuals';
 import { requireWorkspace } from '@/lib/auth/guard';
@@ -49,6 +50,7 @@ export default async function DraftsPage({
     db.post.count({ where }),
   ]);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (page > pageCount) redirect(`/w/${slug}/drafts?page=${pageCount}`);
 
   return (
     <>

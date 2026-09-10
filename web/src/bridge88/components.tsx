@@ -46,7 +46,7 @@ export function IconButton({
       type="button"
       aria-label={label}
       title={label}
-      className={`inline-flex size-10 shrink-0 items-center justify-center rounded-pill bg-surface-soft transition-opacity hover:opacity-80 active:scale-[.97] ${className ?? ''}`}
+      className={`b88-icon-button inline-flex size-10 shrink-0 items-center justify-center rounded-pill bg-surface-soft transition-opacity hover:opacity-80 active:scale-[.97] ${className ?? ''}`}
       {...props}
     >
       <Icon size={18} strokeWidth={1.75} />
@@ -101,16 +101,28 @@ function inputClass(className?: string) {
   return className ? `b88-input ${className}` : 'b88-input';
 }
 
+function selectClass(variant: 'field' | 'pill' | 'filter', className?: string) {
+  const base = variant === 'pill' ? 'b88-pill-select' : variant === 'filter' ? 'b88-filter-control' : 'b88-input';
+  return className ? `${base} ${className}` : base;
+}
+
 export function Field({
   label,
   hint,
   error,
+  variant = 'field',
   id,
   className,
   containerClassName,
   'aria-describedby': describedBy,
   ...props
-}: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string; error?: string; containerClassName?: string }) {
+}: InputHTMLAttributes<HTMLInputElement> & {
+  label: string;
+  hint?: string;
+  error?: string;
+  containerClassName?: string;
+  variant?: 'field' | 'filter';
+}) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const messageId = `${inputId}-message`;
@@ -119,7 +131,7 @@ export function Field({
       <label className="b88-label" htmlFor={inputId}>{label}</label>
       <input
         id={inputId}
-        className={inputClass(className)}
+        className={variant === 'filter' ? selectClass('filter', className) : inputClass(className)}
         aria-invalid={error ? true : undefined}
         aria-describedby={[describedBy, error || hint ? messageId : null].filter(Boolean).join(' ') || undefined}
         {...props}
@@ -137,13 +149,20 @@ export function Select({
   label,
   hint,
   error,
+  variant = 'field',
   id,
   className,
   containerClassName,
   children,
   'aria-describedby': describedBy,
   ...props
-}: SelectHTMLAttributes<HTMLSelectElement> & { label: string; hint?: string; error?: string; containerClassName?: string }) {
+}: SelectHTMLAttributes<HTMLSelectElement> & {
+  label: string;
+  hint?: string;
+  error?: string;
+  containerClassName?: string;
+  variant?: 'field' | 'pill' | 'filter';
+}) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const messageId = `${inputId}-message`;
@@ -152,7 +171,7 @@ export function Select({
       <label className="b88-label" htmlFor={inputId}>{label}</label>
       <select
         id={inputId}
-        className={inputClass(className)}
+        className={selectClass(variant, className)}
         aria-invalid={error ? true : undefined}
         aria-describedby={[describedBy, error || hint ? messageId : null].filter(Boolean).join(' ') || undefined}
         {...props}
@@ -166,6 +185,39 @@ export function Select({
       )}
     </div>
   );
+}
+
+const HUMAN_MACHINE_VALUES: Record<string, string> = {
+  'ai-image-variation': 'AI image variation',
+  'ai-video-generate': 'Generated video',
+  'ai-audio-tts': 'AI voiceover',
+  'ai-image-variation-edit': 'Edited AI image',
+  'text-to-video': 'Video from text',
+  'text-to-speech': 'Spoken audio',
+  'image-variation': 'AI image variation',
+  'video-generate': 'Generated video',
+  'audio-tts': 'AI voiceover',
+};
+
+/**
+ * Converts provider tokens and generated filenames into user-facing labels.
+ * A sequence can distinguish repeated generated-video fixtures.
+ */
+export function humanizeMachineValue(value: string, options: { sequence?: number } = {}) {
+  const normalized = value.trim().toLowerCase().replaceAll('_', '-');
+  if (/^ai-image-\d+\.(png|jpe?g|webp)$/i.test(normalized)) return 'Generated image';
+  if (normalized === 'ai-video-generate.webm') {
+    return options.sequence ? `Generated video ${options.sequence}` : 'Generated video';
+  }
+  const withoutExtension = normalized.replace(/\.[a-z0-9]{2,5}$/i, '');
+  const mapped = HUMAN_MACHINE_VALUES[withoutExtension];
+  if (mapped) return mapped;
+  const readable = withoutExtension
+    .replace(/\b\d{10,}\b/g, '')
+    .replace(/-+/g, ' ')
+    .trim();
+  if (!readable) return 'Generated asset';
+  return readable.charAt(0).toUpperCase() + readable.slice(1);
 }
 
 export function TextArea({

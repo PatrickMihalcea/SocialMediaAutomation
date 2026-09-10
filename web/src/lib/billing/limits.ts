@@ -46,19 +46,57 @@ export function nextMonthlyReset(from = new Date()): Date {
   return new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 1));
 }
 
+export type LimitMessageAudience = 'refusal' | 'destination';
+
+export const GENERIC_LIMIT_ARRIVAL =
+  'This workspace has reached a plan limit. Disconnect unused capacity or choose a higher plan.';
+
 export function limitMessage(input: {
   plan: Plan;
   feature: LimitedFeature;
   used: number;
   limit: number;
   now?: Date;
+  audience?: LimitMessageAudience;
 }): string {
   const planLabel = input.plan === Plan.FREE ? 'Free' : sentenceCase(input.plan);
   const amount = input.feature === 'storageBytes'
     ? `${formatBytes(input.used)} of ${formatBytes(input.limit)}`
     : `${input.used.toLocaleString()} of ${input.limit.toLocaleString()}`;
   const reset = resetExplanation(input.feature, input.now);
-  return `You are using ${amount} ${label(input.feature)} on the ${planLabel} plan. ${reset} ${nextStep(input.feature)}`;
+  const audience = input.audience ?? 'refusal';
+  return `You are using ${amount} ${label(input.feature)} on the ${planLabel} plan. ${reset} ${nextStep(input.feature, audience)}`;
+}
+
+/**
+ * Query-param `reason` is attacker-controlled. Only a message we ourselves
+ * generate is shown; anything else becomes a generic arrival notice.
+ */
+export function arrivalLimitNotice(billing: unknown, reason: unknown): string | null {
+  try {
+    const text = firstQueryValue(reason);
+    if (text) {
+      const destination = destinationLimitMessage(text);
+      return destination ?? GENERIC_LIMIT_ARRIVAL;
+    }
+    return firstQueryValue(billing) === 'limit-reached' ? GENERIC_LIMIT_ARRIVAL : null;
+  } catch {
+    return GENERIC_LIMIT_ARRIVAL;
+  }
+}
+
+export function destinationLimitMessage(message: string): string | null {
+  if (typeof message !== 'string' || message.length < 40 || message.length > 400) return null;
+  if (/[<>]/.test(message) || /[\r\n]/.test(message)) return null;
+
+  for (const feature of FEATURE_ORDER) {
+    const refusal = nextStep(feature, 'refusal');
+    const destination = nextStep(feature, 'destination');
+    if (!knownLimitBody(message, feature)) continue;
+    if (message.endsWith(refusal)) return `${message.slice(0, -refusal.length)}${destination}`;
+    if (message.endsWith(destination)) return message;
+  }
+  return null;
 }
 
 export async function currentMonthUsage(workspaceId: string, metric: string): Promise<number> {
@@ -87,6 +125,14 @@ export async function incrementUsage(
   return record.value;
 }
 
+const FEATURE_ORDER: LimitedFeature[] = [
+  'socialAccounts',
+  'scheduledPosts',
+  'aiGenerations',
+  'storageBytes',
+  'teamMembers',
+];
+
 function label(feature: LimitedFeature): string {
   return {
     socialAccounts: 'connected social accounts',
@@ -112,7 +158,7 @@ function resetExplanation(feature: LimitedFeature, now = new Date()): string {
   return 'This capacity does not reset automatically.';
 }
 
-function nextStep(feature: LimitedFeature): string {
+function nextStep(feature: LimitedFeature, audience: LimitMessageAudience): string {
   const alternative = {
     socialAccounts: 'Disconnect an account',
     scheduledPosts: 'Cancel a scheduled post',
@@ -120,7 +166,36 @@ function nextStep(feature: LimitedFeature): string {
     storageBytes: 'Delete media',
     teamMembers: 'Remove a workspace member',
   }[feature];
-  return `${alternative} or change plans in Billing.`;
+  return audience === 'destination'
+    ? `${alternative} or choose a higher plan.`
+    : `${alternative} or change plans in Billing.`;
+}
+
+function knownLimitBody(message: string, feature: LimitedFeature): boolean {
+  const amount = feature === 'storageBytes'
+    ? String.raw`\d{1,6}(?:\.\d)? (?:bytes|KB|MB|GB) of \d{1,6}(?:\.\d)? (?:bytes|KB|MB|GB)`
+    : String.raw`\d{1,9}(?:,\d{3})* of \d{1,9}(?:,\d{3})*`;
+  const reset = feature === 'aiGenerations'
+    ? String.raw`This usage resets on (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}\.`
+    : feature === 'scheduledPosts'
+      ? String.raw`This capacity has no fixed reset date; it becomes available when scheduled posts publish or are canceled\.`
+      : String.raw`This capacity does not reset automatically\.`;
+  return new RegExp(
+    `^You are using ${amount} ${label(feature)} on the (?:Free|Pro|Business) plan\\. ${reset} `,
+  ).test(message);
+}
+
+/** A repeated query parameter arrives as an array; every reader takes the first value. */
+export function firstQueryValue(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (Array.isArray(value) && typeof value[0] === 'string') {
+    const trimmed = value[0].trim();
+    return trimmed ? trimmed : null;
+  }
+  return null;
 }
 
 export function formatBytes(bytes: number): string {

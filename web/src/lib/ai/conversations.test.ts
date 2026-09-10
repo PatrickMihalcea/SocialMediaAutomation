@@ -106,10 +106,10 @@ function loadedPost(status = 'DRAFT') {
 describe('assistant capability disclosure', () => {
   it.each([
     ['Publish this post now', 'cannot publish'],
-    ['Move tomorrow’s LinkedIn post to Friday', 'cannot move'],
     ['Create a five-post campaign', 'Campaign creation'],
     ['Find the summer campaign images', 'Media search'],
     ['Generate 12 posts from this idea', 'at most 10'],
+    ['Tell me about the existing draft', 'cannot inspect'],
   ])('returns an honest gap for %s', (prompt, expected) => {
     expect(assistantCapabilityReply(prompt)).toContain(expected);
   });
@@ -119,8 +119,8 @@ describe('assistant capability disclosure', () => {
     expect(assistantCapabilityReply('Create one draft about AI agents')).toBeNull();
     expect(assistantCapabilityReply('Make the Launch post more technical')).toBeNull();
     expect(assistantCapabilityReply('Schedule Launch post tomorrow at 9')).toBeNull();
+    expect(assistantCapabilityReply('Move tomorrow’s LinkedIn post to Friday')).toBeNull();
     expect(assistantCapabilityReply('Generate five posts from this idea')).toBeNull();
-    expect(assistantCapabilityReply('Tell me about the existing draft')).toBeNull();
   });
 });
 
@@ -336,6 +336,24 @@ describe('assistant action executors', () => {
       role: 'OWNER',
       messageId: 'message-1',
     })).resolves.toEqual({ status: 'COMPLETED' });
+    expect(serviceMock.savePost).not.toHaveBeenCalled();
+  });
+
+  it.each(Object.entries(actions))('does not duplicate %s when a concurrent confirmation claimed it', async (_kind, proposal) => {
+    dbMock.aiMessage.findFirst.mockResolvedValue({
+      id: 'message-1',
+      createdAt: new Date(),
+      proposalStatus: 'PENDING',
+      proposal,
+    });
+    dbMock.aiMessage.updateMany.mockResolvedValue({ count: 0 });
+    dbMock.aiMessage.findUnique.mockResolvedValue({ proposalStatus: 'EXECUTING' });
+    await expect(confirmProposal({
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      role: 'OWNER',
+      messageId: 'message-1',
+    })).resolves.toEqual({ status: 'EXECUTING' });
     expect(serviceMock.savePost).not.toHaveBeenCalled();
   });
 });

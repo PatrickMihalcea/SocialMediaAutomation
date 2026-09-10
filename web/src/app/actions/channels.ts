@@ -161,7 +161,7 @@ export async function completeOAuthSelectionAction(
   _previous: ChannelActionState,
   formData: FormData,
 ): Promise<ChannelActionState> {
-  let destination: string | undefined;
+  let destination = `/w/${slug}/channels`;
   try {
     const ctx = await requireWorkspace(slug, 'channel:connect');
     const limited = await rateLimit(`oauth:selection:${ctx.user.id}`, LIMITS.oauth.limit, LIMITS.oauth.window);
@@ -182,7 +182,10 @@ export async function completeOAuthSelectionAction(
         },
       }),
     ]);
-    await assertWithinLimit(ctx.workspace.id, 'socialAccounts', current + selectedResults.length - existing);
+    const additionalAccounts = selectedResults.length - existing;
+    for (let offset = 0; offset < additionalAccounts; offset += 1) {
+      await assertWithinLimit(ctx.workspace.id, 'socialAccounts', current + offset);
+    }
     const consumed = await consumeOAuthSelection(secret, ctx.user.id, selected);
     if (!consumed || consumed.row.workspaceId !== ctx.workspace.id) throw new Error('That selection is invalid or was already used.');
     const saved = await persistConnections({
@@ -205,7 +208,7 @@ export async function completeOAuthSelectionAction(
     return channelActionError(error, slug);
   }
   const { redirect } = await import('next/navigation');
-  redirect(destination);
+  return redirect(destination);
 }
 
 function platformLabel(platform: Platform) {

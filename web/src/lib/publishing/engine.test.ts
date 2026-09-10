@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PlatformError } from '@/lib/social/errors';
 
 const dbMock = vi.hoisted(() => ({
   post: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
@@ -13,6 +14,7 @@ const dbMock = vi.hoisted(() => ({
 }));
 const enqueueMock = vi.hoisted(() => vi.fn());
 const notifyWorkspaceMock = vi.hoisted(() => vi.fn());
+const auditMock = vi.hoisted(() => vi.fn());
 const adapter = vi.hoisted(() => ({
   validatePost: vi.fn(() => []),
   publish: vi.fn(),
@@ -28,7 +30,7 @@ vi.mock('@/lib/social/accounts', () => ({
 vi.mock('@/lib/social/registry', () => ({ getAdapterForAccount: vi.fn(() => adapter) }));
 vi.mock('@/lib/publishing/payload', () => ({ toOutgoingPost: vi.fn(async () => ({})) }));
 vi.mock('@/lib/notifications/service', () => ({ notifyWorkspace: notifyWorkspaceMock }));
-vi.mock('@/lib/audit', () => ({ audit: vi.fn() }));
+vi.mock('@/lib/audit', () => ({ audit: auditMock }));
 vi.mock('@/lib/posts/service', () => ({ assertStoredPostValid: vi.fn() }));
 
 import {
@@ -107,6 +109,46 @@ describe('publishing reliability', () => {
         href: '/w/northwind/calendar?post=post-1',
       }),
     );
+  });
+
+  it('maps expired authorization to a human history reason', async () => {
+    dbMock.postPlatform.findUnique.mockResolvedValue({
+      id: 'platform-1',
+      status: 'PENDING',
+      post: { status: 'PUBLISHING' },
+    });
+    dbMock.postPlatform.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.postPlatform.findUniqueOrThrow.mockResolvedValue({
+      id: 'platform-1',
+      postId: 'post-1',
+      workspaceId: 'workspace-1',
+      socialAccountId: 'account-1',
+      platform: 'LINKEDIN',
+      attempts: 1,
+      idempotencyKey: 'idem-1',
+      platformPostId: null,
+      post: { title: 'Test' },
+      media: [],
+      socialAccount: {},
+    });
+    dbMock.workspace.findUniqueOrThrow.mockResolvedValue({ slug: 'northwind' });
+    dbMock.socialAccount.findUnique.mockResolvedValue({ id: 'account-1' });
+    adapter.publish.mockRejectedValue(new PlatformError({
+      platform: 'LINKEDIN',
+      code: 'AUTH',
+      needsReconnect: true,
+      message: 'LinkedIn authorization expired. Reconnect LinkedIn to continue publishing.',
+    }));
+
+    await expect(publishPostPlatform('platform-1')).rejects.toMatchObject({ code: 'AUTH' });
+
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'post.publish_failed',
+      metadata: expect.objectContaining({
+        platform: 'LINKEDIN',
+        error: 'TOKEN_EXPIRED',
+      }),
+    }));
   });
 
   it('reclaims a publishing row only after its claim becomes stale', async () => {

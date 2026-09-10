@@ -15,7 +15,7 @@ export default async function ComposePage({
   const { slug } = await params;
   const query = await searchParams;
   const ctx = await requireWorkspace(slug, 'post:create');
-  const data = await loadComposerContext(ctx.workspace.id, slug);
+  const data = await loadComposerContext(ctx.workspace.id, slug, undefined, query.asset);
   const context = parseComposerContext(query, {
     assetIds: data.assets.map((asset) => asset.id),
     campaignIds: data.campaigns.map((campaign) => campaign.id),

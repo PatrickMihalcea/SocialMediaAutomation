@@ -130,11 +130,12 @@ function build(schemaName: string, prompt: string, messages: AiMessage[]): unkno
     case 'assistant_reply':
       {
       const context = workspaceContext(messages);
-      const post = referenced(prompt, context.posts, (item) => item.title);
+      const post = referencedPost(prompt, context.posts);
       const campaign = referenced(prompt, context.campaigns, (item) => item.name);
       const asset = referenced(prompt, context.media, (item) => item.filename);
+      const prior = priorProposal(messages);
       const simulated = 'This is simulated output. ';
-      if (/\b(schedule|queue)\b/i.test(prompt)) {
+      if (/\b(schedule|queue|move|reschedule|re-date|change the date)\b/i.test(prompt)) {
         if (!post) return { reply: `${simulated}I could not identify an existing post to schedule, so I did not prepare a proposal. Name the post you want to schedule.`, action: null };
         const posts = selectRequestedPosts(prompt, context.posts, post);
         const { hour, minute } = requestedTime(prompt);
@@ -192,7 +193,32 @@ function build(schemaName: string, prompt: string, messages: AiMessage[]): unkno
           },
         };
       }
-      if (/\b(update|rewrite|shorten|expand|tone|technical|hashtags?)\b/i.test(prompt) && post) {
+      if (
+        /\b(update|rewrite|shorten|expand|tone|technical|hashtags?|call to action|cta)\b/i.test(prompt)
+        && prior?.kind === 'create_drafts'
+      ) {
+        const refined = prior.posts.map((draft, index) => {
+          const text = /\bshorten\b/i.test(prompt)
+            ? shortDraft(draft.title || topic)
+            : /\b(call to action|cta)\b/i.test(prompt)
+              ? `${draft.text}\n\nRead the full release notes.`
+              : draftFor(`${draft.title || topic}, ${/\btechnical\b/i.test(prompt) ? 'with implementation details' : 'refined'}`);
+          return {
+            title: draft.title || `Refined draft ${index + 1}`,
+            text,
+            hashtags: /\bhashtags?\b/i.test(prompt) ? hashtagsFor(draft.title || topic) : draft.hashtags,
+          };
+        });
+        return {
+          reply: `${simulated}I prepared a refined version of the previous ${refined.length === 1 ? 'draft' : 'drafts'}. The earlier proposal remains unchanged; confirm only the version you want to create.`,
+          action: {
+            kind: 'create_drafts',
+            summary: `Create ${refined.length === 1 ? 'the refined draft' : `${refined.length} refined drafts`}`,
+            posts: refined,
+          },
+        };
+      }
+      if (/\b(update|rewrite|shorten|expand|tone|technical|hashtags?|call to action|cta)\b/i.test(prompt) && post) {
         const text = /\bshorten\b/i.test(prompt) ? shortDraft(post.title) : draftFor(`${post.title}, revised`);
         return {
           reply: `${simulated}I prepared revised copy for "${post.title}" across every channel version. Nothing will change until you confirm.`,
@@ -233,7 +259,13 @@ function build(schemaName: string, prompt: string, messages: AiMessage[]): unkno
 }
 
 type WorkspaceContext = {
-  posts: Array<{ id: string; title: string; status: string }>;
+  posts: Array<{
+    id: string;
+    title: string;
+    status: string;
+    scheduledAt?: string | null;
+    platforms?: string[];
+  }>;
   campaigns: Array<{ id: string; name: string }>;
   media: Array<{ id: string; filename: string; type: string }>;
 };
@@ -252,6 +284,45 @@ function workspaceContext(messages: AiMessage[]): WorkspaceContext {
 function referenced<T>(prompt: string, values: T[], label: (value: T) => string): T | undefined {
   const normalized = prompt.toLowerCase();
   return values.find((value) => normalized.includes(label(value).toLowerCase())) ?? values[0];
+}
+
+function referencedPost(prompt: string, posts: WorkspaceContext['posts']) {
+  const normalized = prompt.toLowerCase();
+  const named = posts.find((post) => normalized.includes(post.title.toLowerCase()));
+  if (named) return named;
+  let candidates = posts;
+  const platform = ['INSTAGRAM', 'FACEBOOK', 'LINKEDIN', 'X', 'TIKTOK', 'YOUTUBE']
+    .find((value) => new RegExp(`\\b${value}\\b`, 'i').test(prompt));
+  if (platform) candidates = candidates.filter((post) => post.platforms?.includes(platform));
+  if (/\btomorrow\b/i.test(prompt)) {
+    const tomorrow = new Date();
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    candidates = candidates.filter((post) => {
+      if (!post.scheduledAt) return false;
+      const date = new Date(post.scheduledAt);
+      return date.getUTCFullYear() === tomorrow.getUTCFullYear()
+        && date.getUTCMonth() === tomorrow.getUTCMonth()
+        && date.getUTCDate() === tomorrow.getUTCDate();
+    });
+  }
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
+function priorProposal(messages: AiMessage[]): {
+  kind: 'create_drafts';
+  posts: Array<{ title?: string; text: string; hashtags: string[] }>;
+} | null {
+  for (const message of [...messages].reverse()) {
+    const match = message.content.match(/<prior_proposal>([\s\S]*?)<\/prior_proposal>/);
+    if (!match) continue;
+    try {
+      const value = JSON.parse(match[1]);
+      if (value?.kind === 'create_drafts' && Array.isArray(value.posts)) return value;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 function selectRequestedPosts(

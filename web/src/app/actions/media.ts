@@ -1,6 +1,6 @@
 'use server';
 
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { mediaKey, storage } from '@/lib/storage';
@@ -11,7 +11,12 @@ import { createImageDerivative, createVideoDerivative } from '@/lib/media/proces
 import { validateMediaUploads } from '@/lib/media/validation';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
 import { invalid } from '@/lib/errors';
-import { uploadAssetId } from '@/lib/media/upload-idempotency';
+import { workspacePlan } from '@/lib/billing/limits';
+import {
+  assertStorageUploadWithinPlan,
+  newUploadBytes,
+  uploadAssetId,
+} from '@/lib/media/upload-idempotency';
 
 // Callers must read the returned state; upload failures are never thrown.
 export async function uploadMediaAction(slug: string, formData: FormData): Promise<ActionState> {
@@ -23,36 +28,62 @@ export async function uploadMediaAction(slug: string, formData: FormData): Promi
     if (folderId) await requireFolder(ctx.workspace.id, folderId);
     const suppliedRequestId = nullableString(formData.get('uploadRequestId'));
     if (suppliedRequestId && suppliedRequestId.length > 200) throw invalid('The upload request identifier is invalid.');
-    const uploadRequestId = suppliedRequestId ?? randomUUID();
     // Validate the whole batch before storing anything. A bad second file must
     // not leave the first file uploaded while the UI reports a failed batch.
     const fileTypes = validateMediaUploads(files);
-    for (const [index, file] of files.entries()) {
+    const prepared = await Promise.all(files.map(async (file, index) => {
       const type = fileTypes[index];
+      const bytes = Buffer.from(await file.arrayBuffer());
+      // Older clients do not yet send an identifier. A content-derived fallback
+      // still makes an uncertain retry converge; intentional duplicates remain
+      // available through the library's explicit Copy action.
+      const uploadRequestId = suppliedRequestId
+        ?? `content:${createHash('sha256').update(bytes).digest('hex')}`;
       const id = uploadAssetId(ctx.workspace.id, uploadRequestId, index, file);
-      const candidateKey = mediaKey(ctx.workspace.id, file.name);
-      // The deterministic id is the unique workspace/request/file key. Claim it
-      // before any external write; a replay receives the same row.
-      const asset = await db.mediaAsset.upsert({
-        where: { id },
-        update: {},
-        create: {
-          id,
-          workspaceId: ctx.workspace.id,
-          folderId,
-          uploadedById: ctx.user.id,
-          filename: file.name,
-          mimeType: file.type,
-          type,
-          size: file.size,
-          storageKey: candidateKey,
-          status: 'UPLOADING',
-        },
-      });
+      return { id, size: file.size, file, type, bytes };
+    }));
+    const plan = await workspacePlan(ctx.workspace.id);
+    // Reserve every new row in one serializable transaction. The aggregate and
+    // complete batch are checked together before the first object-store write.
+    const assets = await db.$transaction(async (tx) => {
+      const [usage, existing] = await Promise.all([
+        tx.mediaAsset.aggregate({
+          where: { workspaceId: ctx.workspace.id },
+          _sum: { size: true },
+        }),
+        tx.mediaAsset.findMany({
+          where: { id: { in: prepared.map(({ id }) => id) }, workspaceId: ctx.workspace.id },
+          select: { id: true },
+        }),
+      ]);
+      const existingIds = new Set(existing.map(({ id }) => id));
+      assertStorageUploadWithinPlan(
+        plan,
+        usage._sum.size ?? 0,
+        newUploadBytes(prepared, existingIds),
+      );
+      return Promise.all(prepared.map(({ id, file, type }) => tx.mediaAsset.upsert({
+          where: { id },
+          update: {},
+          create: {
+            id,
+            workspaceId: ctx.workspace.id,
+            folderId,
+            uploadedById: ctx.user.id,
+            filename: file.name,
+            mimeType: file.type,
+            type,
+            size: file.size,
+            storageKey: mediaKey(ctx.workspace.id, file.name),
+            status: 'UPLOADING',
+          },
+        })));
+    }, { isolationLevel: 'Serializable' });
+    for (const [index, asset] of assets.entries()) {
+      const { bytes, file } = prepared[index];
       // PROCESSING/READY means an earlier attempt crossed the durable storage
       // boundary. UPLOADING retries safely overwrite the same object key.
       if (asset.status !== 'UPLOADING') continue;
-      const bytes = Buffer.from(await file.arrayBuffer());
       await storage().put(asset.storageKey, bytes, file.type);
       await db.mediaAsset.updateMany({
         where: { id: asset.id, status: 'UPLOADING' },

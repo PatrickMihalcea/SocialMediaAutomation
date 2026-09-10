@@ -5,8 +5,13 @@ import { storage } from '@/lib/storage';
 import { utcToLocalInput } from '@/lib/scheduling/time';
 import type { ComposerAccount, ComposerAsset, ComposerCampaign, ComposerInitial } from '@/lib/posts/composer';
 
-export async function loadComposerContext(workspaceId: string, slug: string, postId?: string) {
-  const [workspace, accounts, media, campaigns, post] = await Promise.all([
+export async function loadComposerContext(
+  workspaceId: string,
+  slug: string,
+  postId?: string,
+  requestedAssetId?: string,
+) {
+  const [workspace, accounts, campaigns, post] = await Promise.all([
     db.workspace.findUniqueOrThrow({
       where: { id: workspaceId },
       select: { timezone: true },
@@ -15,12 +20,6 @@ export async function loadComposerContext(workspaceId: string, slug: string, pos
       where: { workspaceId, status: 'ACTIVE' },
       orderBy: { createdAt: 'asc' },
       select: { id: true, accountName: true, accountHandle: true, platform: true, metadata: true },
-    }),
-    db.mediaAsset.findMany({
-      where: { workspaceId, status: 'READY' },
-      orderBy: { createdAt: 'desc' },
-      take: 40,
-      select: { id: true, filename: true, thumbnailKey: true, storageKey: true, type: true },
     }),
     db.campaign.findMany({
       where: { workspaceId, status: { in: ['PLANNED', 'ACTIVE'] } },
@@ -43,6 +42,38 @@ export async function loadComposerContext(workspaceId: string, slug: string, pos
   ]);
 
   if (postId && !post) throw notFound('That post no longer exists.');
+
+  const mediaSelect = {
+    id: true,
+    filename: true,
+    thumbnailKey: true,
+    storageKey: true,
+    type: true,
+  } as const;
+  const attachedMediaIds = [
+    ...new Set(post?.platforms.flatMap((platform) =>
+      platform.media.map((item) => item.mediaAssetId)) ?? []),
+  ];
+  if (requestedAssetId) attachedMediaIds.push(requestedAssetId);
+  const [recentMedia, attachedMedia] = await Promise.all([
+    db.mediaAsset.findMany({
+      where: { workspaceId, status: 'READY' },
+      orderBy: { createdAt: 'desc' },
+      take: 12,
+      select: mediaSelect,
+    }),
+    attachedMediaIds.length
+      ? db.mediaAsset.findMany({
+          where: { workspaceId, id: { in: attachedMediaIds }, status: 'READY' },
+          select: mediaSelect,
+        })
+      : Promise.resolve([]),
+  ]);
+  const media = [
+    ...new Map(
+      [...attachedMedia, ...recentMedia].map((asset) => [asset.id, asset]),
+    ).values(),
+  ];
 
   const postAccountIds = post?.platforms.map((p) => p.socialAccountId) ?? [];
   const missingAccounts = postAccountIds.length
@@ -68,12 +99,13 @@ export async function loadComposerContext(workspaceId: string, slug: string, pos
     ),
   }));
 
+  const mediaStorage = storage();
   const assets: ComposerAsset[] = await Promise.all(
     media.map(async (asset) => ({
       id: asset.id,
       filename: asset.filename,
       type: asset.type,
-      thumbnailUrl: await storage().signedUrl(asset.thumbnailKey ?? asset.storageKey),
+      thumbnailUrl: await mediaStorage.signedUrl(asset.thumbnailKey ?? asset.storageKey),
     })),
   );
 

@@ -58,6 +58,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   try {
+    // Refuse before exchanging the authorization code when this is clearly a
+    // new connection at capacity. This avoids storing another provider token
+    // and preserves the plan-limit reason even when the provider is unavailable.
+    if (!attempt.reconnectAccountId) {
+      const connected = await db.socialAccount.count({
+        where: { workspaceId: ctx.workspace.id, status: { not: 'DISCONNECTED' } },
+      });
+      await assertWithinLimit(ctx.workspace.id, 'socialAccounts', connected);
+    }
     const results = await getAdapter(platform).exchangeCode({
       code,
       redirectUri: attempt.redirectUri,
@@ -79,7 +88,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           },
         }),
       ]);
-      await assertWithinLimit(ctx.workspace.id, 'socialAccounts', current + (existing ? 0 : 1));
+      if (!existing) await assertWithinLimit(ctx.workspace.id, 'socialAccounts', current);
       const saved = await persistConnections({
         workspaceId: ctx.workspace.id,
         platform,
@@ -118,7 +127,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       metadata: {
         platform,
         code: error instanceof PlatformError ? error.code : appError.code,
-        message: error instanceof PlatformError ? error.message : appError.message,
+        error: connectionAuditReason(error, appError.code),
       },
     });
     const billingUrl = billingLimitRedirect(error, request.url, ctx.workspace.slug);
@@ -126,4 +135,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     channelsUrl.searchParams.set('oauth', error instanceof PlatformError ? 'platform_error' : 'failed');
     return NextResponse.redirect(channelsUrl);
   }
+}
+
+function connectionAuditReason(error: unknown, code: string): string {
+  if (code === 'LIMIT_REACHED') {
+    return 'The workspace reached its social account limit. Open Billing or disconnect an account';
+  }
+  if (error instanceof PlatformError && error.needsReconnect) return 'TOKEN_EXPIRED';
+  return 'The social network did not complete the connection';
 }

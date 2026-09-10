@@ -47,4 +47,26 @@ describe('mock AI structured output', () => {
       expect(new Set(result.object.action.posts.map((post) => post.text)).size).toBe(expectedItems);
     }
   });
+
+  it('refines a previous generated draft without mutating an existing post', async () => {
+    const provider = new MockAiProvider();
+    const prior = {
+      kind: 'create_drafts',
+      summary: 'Create one draft',
+      posts: [{ title: 'Queues', text: 'Original generated copy', hashtags: [] }],
+    };
+    const result = await provider.completeObject({
+      schema: assistantReplySchema,
+      schemaName: 'assistant_reply',
+      messages: [
+        { role: 'system', content: 'WORKSPACE_CONTEXT_BEGIN{"posts":[],"campaigns":[],"media":[]}WORKSPACE_CONTEXT_END' },
+        { role: 'assistant', content: `I prepared a draft.\n<prior_proposal>${JSON.stringify(prior)}</prior_proposal>` },
+        { role: 'user', content: 'Make this more technical' },
+      ],
+    });
+    expect(result.object.action?.kind).toBe('create_drafts');
+    if (result.object.action?.kind === 'create_drafts') {
+      expect(result.object.action.posts[0].text).not.toBe('Original generated copy');
+    }
+  });
 });

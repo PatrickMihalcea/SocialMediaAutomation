@@ -73,13 +73,30 @@ every time.
   only be hard-deleted.
 - **No undo token or deletion history**, so US-496, US-497 and US-500 are blocked:
   deletion is permanent and rescheduling cannot be undone.
-- **Rejection has no distinct state**, so an author cannot tell a rejected post from a
-  pending one.
-- **Approval comments cannot be threaded**, so a conversation about a post has nowhere
-  to live.
+The workspace agent confirmed the remaining two do genuinely need schema, and
+specified them:
 
-The last two are being re-examined by the workspace agent to confirm they genuinely
-need schema rather than being expressible with existing fields.
+**Rejection has no distinct state.** A rejected post is set back to `DRAFT`, so its
+author cannot tell rejection from a post they simply never submitted. Add `REJECTED`
+to `PostStatus`, have rejection set it instead of `DRAFT`, and update every exhaustive
+status map, filter, lifecycle action and badge — the post-state action matrix must
+gain a row for it.
+
+**Approval comments cannot be threaded**, so a conversation about a post has nowhere
+to live:
+
+```prisma
+model ApprovalComment {
+  parentId String? @db.Uuid
+  parent   ApprovalComment?  @relation("ApprovalReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  ApprovalComment[] @relation("ApprovalReplies")
+
+  @@index([parentId])
+}
+```
+
+Replies use `decision = COMMENT`, and parent and reply must be validated to share the
+same post and workspace.
 
 ## 6. Skipped queue slots (US-239)
 

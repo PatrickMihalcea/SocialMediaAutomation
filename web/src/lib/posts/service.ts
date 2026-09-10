@@ -92,6 +92,7 @@ export async function savePost(
         include: { platforms: { select: { status: true } } },
       })
     : null;
+  const originalSource = source;
   if (input.id && !source) throw notFound('That post no longer exists.');
   if (source?.status === PostStatus.PUBLISHING) {
     throw conflict('This post is currently publishing and cannot be edited.');
@@ -157,6 +158,7 @@ export async function savePost(
           where: {
             id: input.id,
             workspaceId,
+            status: source!.status,
             ...(input.expectedUpdatedAt ? { updatedAt: input.expectedUpdatedAt } : {}),
           },
           data: {
@@ -217,7 +219,6 @@ export async function savePost(
   } catch (error) {
     if (
       input.id &&
-      input.expectedUpdatedAt &&
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2025'
     ) {
@@ -226,16 +227,50 @@ export async function savePost(
     throw error;
   }
 
-  await audit({
+  const auditEvents: Array<{ action: string; entityType: string }> = [];
+  if (!input.id) {
+    auditEvents.push({
+      action: duplicateInstead ? 'post.duplicated' : 'post.created',
+      entityType: 'post',
+    });
+  } else {
+    const campaignChanged = (originalSource?.campaignId ?? null) !== input.campaignId;
+    const scheduleChanged =
+      (originalSource?.scheduledAt?.getTime() ?? null) !== (input.scheduledAt?.getTime() ?? null);
+    if (campaignChanged) {
+      auditEvents.push({ action: 'post.campaign_changed', entityType: 'post' });
+    }
+    if (input.status === PostStatus.SCHEDULED && scheduleChanged) {
+      auditEvents.push({
+        action: originalSource?.scheduledAt ? 'post.rescheduled' : 'post.scheduled',
+        entityType: 'post',
+      });
+    }
+    if (!campaignChanged && !(input.status === PostStatus.SCHEDULED && scheduleChanged)) {
+      auditEvents.push({ action: 'post.edited', entityType: 'post' });
+    }
+  }
+  await Promise.all(auditEvents.map((event) => audit({
     workspaceId,
     userId: authorId,
-    action: input.id ? 'post.updated' : duplicateInstead ? 'post.duplicated' : 'post.created',
-    entityType: 'post',
+    action: event.action,
+    entityType: event.entityType,
     entityId: result.id,
     metadata: { status: result.status, platformCount: input.platforms.length },
-  });
+  })));
 
-  if (result.status === PostStatus.PENDING_APPROVAL) {
+  if (
+    result.status === PostStatus.PENDING_APPROVAL &&
+    originalSource?.status !== PostStatus.PENDING_APPROVAL
+  ) {
+    await audit({
+      workspaceId,
+      userId: authorId,
+      action: 'approval.requested',
+      entityType: 'approval',
+      entityId: result.id,
+      metadata: { postId: result.id },
+    });
     const workspace = await db.workspace.findUniqueOrThrow({
       where: { id: workspaceId },
       select: { slug: true },
@@ -316,7 +351,16 @@ export async function deletePost(workspaceId: string, postId: string) {
     ...new Set(post.platforms.flatMap((platform) => platform.media.map((media) => media.mediaAssetId))),
   ];
   await db.$transaction(async (tx) => {
-    await tx.post.delete({ where: { id: post.id, workspaceId } });
+    const result = await tx.post.deleteMany({
+      where: {
+        id: post.id,
+        workspaceId,
+        status: { not: PostStatus.PUBLISHING },
+      },
+    });
+    if (result.count !== 1) {
+      throw conflict('This post started publishing before it could be deleted.');
+    }
     await syncMediaUsage(tx, mediaIds);
   });
 }

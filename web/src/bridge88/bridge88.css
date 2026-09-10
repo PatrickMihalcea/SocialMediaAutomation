@@ -61,6 +61,9 @@ label:has(>.b88-label){display:block}
    intrinsic height of 41-42px and miss --control-size. */
 .b88-pill-select,.b88-filter-control{height:var(--control-size);padding:0 var(--space-md);background:var(--canvas);color:var(--ink);border:1px solid var(--hairline);border-radius:var(--radius-pill)}
 .b88-filter-control:focus-visible{outline:3px solid var(--ink);outline-offset:3px;box-shadow:0 0 0 2px var(--canvas)}
+/* Icon buttons keep their 40px desktop geometry and meet the documented
+   44px minimum only when the primary pointer is touch-capable. */
+@media (pointer:coarse){.b88-icon-button{min-width:var(--touch-min);min-height:var(--touch-min)}}
 .b88-checkbox{appearance:none;border:1px solid var(--hairline);border-radius:var(--radius-sm);background:var(--canvas);background-position:center;background-repeat:no-repeat;background-size:14px 14px}
 .b88-checkbox:checked{border-color:var(--primary);background-color:var(--primary);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='m5 10 3 3 7-7' fill='none' stroke='white' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
 .b88-uploader:has(input:focus-visible){outline:3px solid var(--ink);outline-offset:3px;box-shadow:0 0 0 2px var(--canvas)}

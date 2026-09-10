@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, ImageIcon, Mic2, RefreshCw, Trash2, Video, X } from 'lucide-react';
-import { Badge, Button, Dialog, EmptyState, Select, StatusMessage, TextArea } from '@/bridge88/components';
+import { Badge, Button, Dialog, EmptyState, Select, StatusMessage, TextArea, humanizeMachineValue } from '@/bridge88/components';
 import {
   cancelAiMediaJobAction,
   createAiMediaJobAction,
@@ -158,7 +158,7 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
         outputAssetId: null,
         createdAt: new Date().toISOString(),
       }, ...current]);
-      setNotice(`${sentenceCase(kind)} queued. You can leave this page; processing continues on the server.`);
+      setNotice(`${humanizeMachineValue(kind)} queued. You can leave this page; processing continues on the server.`);
     }, 'The media job could not be queued.');
   }
 
@@ -272,7 +272,7 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
             <div className="mt-3 space-y-3" aria-live="polite">
               {recentJobs.map((job) => (
                 <div key={job.id} className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="text-sm font-[480]">{sentenceCase(job.kind)}</span>
+                  <span className="text-sm font-[480]">{humanizeMachineValue(job.kind)}</span>
                   <span className="flex items-center gap-2">
                     {ACTIVE_STATUSES.includes(job.status) && <span className="b88-caption">{elapsed(job)}</span>}
                     <Badge tone={statusTone(job.status)}>{sentenceCase(job.status)}</Badge>
@@ -309,7 +309,7 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
               <button key={asset.id} type="button" onClick={() => setSelected(asset.id)} className="relative rounded-[24px] border bg-canvas p-4 text-left transition-opacity hover:opacity-80" style={{ borderColor: selected === asset.id ? 'var(--ink)' : 'var(--hairline)' }}>
                 {selected === asset.id && <span className="absolute right-6 top-6 z-10 flex size-7 items-center justify-center rounded-full bg-ink text-canvas" aria-label="Selected"><Check size={16} /></span>}
                 {asset.type === 'IMAGE' ? (
-                  <img src={asset.url} alt={asset.filename} className="aspect-square w-full rounded-md bg-surface-soft object-contain" />
+                  <img src={asset.url} alt={humanizeMachineValue(asset.filename)} className="aspect-square w-full rounded-md bg-surface-soft object-contain" />
                 ) : asset.type === 'VIDEO' && !simulated ? (
                   <video src={asset.url} controls className="aspect-video w-full rounded-md bg-surface-soft object-contain" onClick={(event) => event.stopPropagation()} />
                 ) : asset.type === 'VIDEO' ? (
@@ -321,7 +321,11 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
                     <audio src={asset.url} controls className="w-full" />
                   </div>
                 )}
-                <p className="mt-4 truncate font-[480]">{asset.filename}</p>
+                <p className="mt-4 truncate font-[480]">
+                  {humanizeMachineValue(asset.filename, {
+                    sequence: assets.filter((entry, index) => index <= assets.indexOf(asset) && entry.filename === asset.filename).length,
+                  })}
+                </p>
                 <p className="b88-caption mt-2">{asset.generated ? (simulated ? 'Simulated generation' : 'AI generated') : 'Source asset'}</p>
               </button>
             ))}
@@ -348,7 +352,7 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
           {visibleJobs.map((job) => (
             <div key={job.id} className="py-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <span className="font-[480]">{sentenceCase(job.kind)}</span>
+                <span className="font-[480]">{humanizeMachineValue(job.kind)}</span>
                 <Badge tone={statusTone(job.status)}>{sentenceCase(job.status)}</Badge>
               </div>
               <p className="mt-2 line-clamp-2 text-sm">{job.prompt}</p>
@@ -395,8 +399,8 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
         <p className="b88-eyebrow">Available in this build</p>
         <h2 className="b88-heading mt-2">Generation scope</h2>
         <p className="mt-3">
-          Image prompts, three image formats, source-image variations, text-to-video,
-          image animation, and text-to-speech are connected. Advanced editing,
+          Image prompts, three image formats, AI image variation, Video from text,
+          image animation, and Spoken audio are connected. Advanced editing,
           background and object removal, outpainting, upscaling, trimming, thumbnails,
           captions, translation, dubbing, transcription, voice selection, and multi-result
           batches are not implemented yet, so this studio does not present inactive controls for them.

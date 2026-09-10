@@ -19,13 +19,18 @@ import { postPlatformInputSchema } from '@/lib/posts/schemas';
 import {
   applyCancelledRestore,
   applyGuardedReschedule,
+  composerTargetStatus,
   friendlyPublishFailure,
+  isComposerIntentLegal,
   isPostActionLegal,
+  type ComposerIntent,
 } from '@/lib/posts/lifecycle';
 import { formatInZone, localInputToUtc } from '@/lib/scheduling/time';
 import { enqueue } from '@/lib/queue';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
 import { PLATFORM_LABELS } from '@/lib/social/labels';
+import { storage } from '@/lib/storage';
+import type { ComposerAsset } from '@/lib/posts/composer';
 
 /**
  * The composer keeps the user on the page when a post cannot be saved, so this
@@ -58,11 +63,23 @@ async function persistPost(
   formData: FormData,
 ): Promise<ComposerState> {
   try {
-    const intent = String(formData.get('intent') || 'draft');
+    const intent = String(formData.get('intent') || 'draft') as ComposerIntent;
     if (!['draft', 'approval', 'schedule', 'publish'].includes(intent)) {
       throw invalid('Choose a valid post action.');
     }
     const ctx = await requireWorkspace(slug, postId ? 'post:update' : 'post:create');
+    const source = postId
+      ? await db.post.findFirst({
+          where: { id: postId, workspaceId: ctx.workspace.id },
+          select: { status: true },
+        })
+      : null;
+    if (postId && !source) throw invalid('That post no longer exists.');
+    if (source && !isComposerIntentLegal(source.status, intent)) {
+      throw invalid(
+        `This post is ${source.status.toLowerCase().replaceAll('_', ' ')}. ${composerIntentLabel(intent)} is not available in this state. Refresh to see the current actions.`,
+      );
+    }
     if (intent === 'approval') assertCan(ctx, 'post:submit_for_approval');
     if (intent === 'schedule') assertCan(ctx, 'post:schedule');
     if (intent === 'publish') assertCan(ctx, 'post:publish');
@@ -76,12 +93,7 @@ async function persistPost(
     }
     const platforms = z.array(postPlatformInputSchema).min(1).parse(decoded);
     const scheduledLocal = String(formData.get('scheduledAt') || '');
-    const status =
-      intent === 'approval'
-        ? PostStatus.PENDING_APPROVAL
-        : intent === 'schedule'
-          ? PostStatus.SCHEDULED
-          : PostStatus.DRAFT;
+    const status = composerTargetStatus(source?.status, intent);
     if (status === PostStatus.SCHEDULED && !scheduledLocal) {
       throw invalid(`Pick a date and time (${ctx.workspace.timezone}) before scheduling.`);
     }
@@ -138,6 +150,15 @@ async function persistPost(
   }
 }
 
+function composerIntentLabel(intent: ComposerIntent) {
+  return {
+    draft: 'Saving changes',
+    approval: 'Submitting for approval',
+    schedule: 'Scheduling',
+    publish: 'Publishing',
+  }[intent];
+}
+
 export async function postCommandAction(
   slug: string,
   postId: string,
@@ -187,11 +208,23 @@ export async function postCommandAction(
       redirect(`/w/${slug}/compose/${copy.id}`);
     }
     if (command === 'cancel') {
-      if (!['SCHEDULED', 'FAILED'].includes(post.status)) {
-        throw invalid('Only scheduled or failed posts can be cancelled.');
-      }
-      await db.post.update({ where: { id: post.id, workspaceId: ctx.workspace.id }, data: { status: 'CANCELLED' } });
-      await db.postPlatform.updateMany({ where: { postId, workspaceId: ctx.workspace.id }, data: { status: 'CANCELLED' } });
+      await db.$transaction(async (tx) => {
+        const result = await tx.post.updateMany({
+          where: {
+            id: post.id,
+            workspaceId: ctx.workspace.id,
+            status: post.status,
+          },
+          data: { status: 'CANCELLED' },
+        });
+        if (result.count !== 1) {
+          throw invalid('This post changed before it could be cancelled. Refresh to see its current status.');
+        }
+        await tx.postPlatform.updateMany({
+          where: { postId, workspaceId: ctx.workspace.id },
+          data: { status: 'CANCELLED' },
+        });
+      });
     }
     if (command === 'restore') {
       await db.$transaction((tx) => applyCancelledRestore(tx, {
@@ -220,10 +253,22 @@ export async function postCommandAction(
       // a stale tab must not re-date it to now and queue a second send.
       assertPostNotLive(post, 'publish');
       await assertStoredPostValid(ctx.workspace.id, post.id);
-      await db.post.update({ where: { id: post.id, workspaceId: ctx.workspace.id }, data: { status: 'SCHEDULED', scheduledAt: new Date() } });
-      await db.postPlatform.updateMany({
-        where: { postId, workspaceId: ctx.workspace.id, status: { in: ['PENDING', 'FAILED', 'CANCELLED'] } },
-        data: { status: 'PENDING', errorMessage: null, errorCode: null },
+      await db.$transaction(async (tx) => {
+        const result = await tx.post.updateMany({
+          where: {
+            id: post.id,
+            workspaceId: ctx.workspace.id,
+            status: post.status,
+          },
+          data: { status: 'SCHEDULED', scheduledAt: new Date() },
+        });
+        if (result.count !== 1) {
+          throw invalid('This post changed before publishing started. Refresh to see its current status.');
+        }
+        await tx.postPlatform.updateMany({
+          where: { postId, workspaceId: ctx.workspace.id, status: { in: ['PENDING', 'FAILED', 'CANCELLED'] } },
+          data: { status: 'PENDING', errorMessage: null, errorCode: null },
+        });
       });
       await enqueue('publish-post', { postId }, { workspaceId: ctx.workspace.id, dedupeKey: `publish:${post.id}` });
       if (!clientManaged) {
@@ -296,4 +341,30 @@ export async function listAttachableDraftsAction(
     id: post.id,
     label: `${post.title || 'Untitled post'} · ${post.status === 'PENDING_APPROVAL' ? 'In review' : post.status.charAt(0) + post.status.slice(1).toLowerCase()}`,
   }));
+}
+
+export async function loadMoreComposerAssetsAction(
+  slug: string,
+  offset: number,
+): Promise<{ assets: ComposerAsset[]; hasMore: boolean }> {
+  const ctx = await requireWorkspace(slug, 'post:view');
+  const safeOffset = Number.isInteger(offset) && offset >= 0 ? Math.min(offset, 1_000) : 0;
+  const rows = await db.mediaAsset.findMany({
+    where: { workspaceId: ctx.workspace.id, status: 'READY' },
+    orderBy: { createdAt: 'desc' },
+    skip: safeOffset,
+    take: 13,
+    select: { id: true, filename: true, thumbnailKey: true, storageKey: true, type: true },
+  });
+  const mediaStorage = storage();
+  const page = rows.slice(0, 12);
+  return {
+    hasMore: rows.length > page.length,
+    assets: await Promise.all(page.map(async (asset) => ({
+      id: asset.id,
+      filename: asset.filename,
+      type: asset.type,
+      thumbnailUrl: await mediaStorage.signedUrl(asset.thumbnailKey ?? asset.storageKey),
+    }))),
+  };
 }

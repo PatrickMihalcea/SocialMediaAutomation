@@ -139,7 +139,7 @@ describe('savePost', () => {
     expect(mocks.tx.post.update).toHaveBeenCalled();
     expect(mocks.tx.postPlatform.deleteMany).toHaveBeenCalled();
     expect(mocks.audit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'post.updated' }),
+      expect.objectContaining({ action: 'post.edited' }),
     );
   });
 
@@ -204,6 +204,71 @@ describe('savePost', () => {
     await expect(savePost(workspaceId, authorId, baseInput)).rejects.toMatchObject({
       fields: { [accountId]: ['That social account is not connected to this workspace.'] },
     });
+  });
+
+  it('emits the mapped approval request event with the author as actor', async () => {
+    mocks.tx.post.create.mockResolvedValue({
+      id: postId,
+      status: PostStatus.PENDING_APPROVAL,
+      title: 'Launch note',
+      workspaceId,
+    });
+    await savePost(workspaceId, authorId, {
+      ...baseInput,
+      status: PostStatus.PENDING_APPROVAL,
+    });
+    expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'approval.requested',
+      entityType: 'approval',
+      entityId: postId,
+      workspaceId,
+      userId: authorId,
+    }));
+  });
+
+  it('emits post.rescheduled instead of a generic edit when the date changes', async () => {
+    const previous = new Date('2026-09-15T09:00:00.000Z');
+    const next = new Date('2026-09-16T09:00:00.000Z');
+    mocks.findFirstPost.mockResolvedValue({
+      id: postId,
+      status: PostStatus.SCHEDULED,
+      scheduledAt: previous,
+      campaignId: null,
+      updatedAt: new Date('2026-09-10T12:00:00.000Z'),
+      platforms: [{ status: 'PENDING' }],
+    });
+    mocks.tx.post.update.mockResolvedValue({
+      id: postId,
+      status: PostStatus.SCHEDULED,
+      workspaceId,
+    });
+    await savePost(workspaceId, authorId, {
+      ...baseInput,
+      id: postId,
+      status: PostStatus.SCHEDULED,
+      scheduledAt: next,
+    });
+    expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({ action: 'post.rescheduled' }));
+    expect(mocks.audit).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'post.edited' }));
+  });
+
+  it('emits post.campaign_changed instead of a generic edit', async () => {
+    mocks.findFirstPost.mockResolvedValue({
+      id: postId,
+      status: PostStatus.DRAFT,
+      scheduledAt: null,
+      campaignId: null,
+      updatedAt: new Date('2026-09-10T12:00:00.000Z'),
+      platforms: [{ status: 'PENDING' }],
+    });
+    mocks.findFirstCampaign.mockResolvedValue({ id: mediaId });
+    await savePost(workspaceId, authorId, {
+      ...baseInput,
+      id: postId,
+      campaignId: mediaId,
+    });
+    expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({ action: 'post.campaign_changed' }));
+    expect(mocks.audit).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'post.edited' }));
   });
 });
 

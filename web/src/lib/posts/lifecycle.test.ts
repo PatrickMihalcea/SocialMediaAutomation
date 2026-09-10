@@ -4,6 +4,7 @@ import {
   applyCancelledRestore,
   applyGuardedReschedule,
   friendlyPublishFailure,
+  isComposerIntentLegal,
   legalPostActions,
   parseComposerContext,
 } from '@/lib/posts/lifecycle';
@@ -16,15 +17,30 @@ const postId = '44444444-4444-4444-8444-444444444444';
 describe('post lifecycle matrix', () => {
   it.each([
     [PostStatus.DRAFT, ['edit', 'submitForApproval', 'schedule', 'publish', 'duplicate', 'delete']],
-    [PostStatus.PENDING_APPROVAL, ['edit', 'duplicate', 'delete']],
+    [PostStatus.PENDING_APPROVAL, ['edit', 'withdrawApproval', 'duplicate', 'delete']],
     [PostStatus.APPROVED, ['edit', 'schedule', 'publish', 'duplicate', 'delete']],
     [PostStatus.SCHEDULED, ['edit', 'publish', 'reschedule', 'cancel', 'duplicate', 'delete']],
-    [PostStatus.PUBLISHING, ['duplicate']],
+    [PostStatus.PUBLISHING, []],
     [PostStatus.PUBLISHED, ['edit', 'duplicate', 'delete']],
     [PostStatus.FAILED, ['edit', 'retry', 'reschedule', 'cancel', 'duplicate', 'delete']],
     [PostStatus.CANCELLED, ['restore', 'publish', 'duplicate', 'delete']],
   ])('offers exactly the legal actions for %s', (status, actions) => {
     expect(legalPostActions(status)).toEqual(actions);
+  });
+
+  it.each([
+    [PostStatus.DRAFT, { draft: true, approval: true, schedule: true, publish: true }],
+    [PostStatus.PENDING_APPROVAL, { draft: true, approval: false, schedule: false, publish: false }],
+    [PostStatus.APPROVED, { draft: true, approval: false, schedule: true, publish: true }],
+    [PostStatus.SCHEDULED, { draft: true, approval: false, schedule: true, publish: true }],
+    [PostStatus.PUBLISHING, { draft: false, approval: false, schedule: false, publish: false }],
+    [PostStatus.PUBLISHED, { draft: true, approval: false, schedule: false, publish: false }],
+    [PostStatus.FAILED, { draft: true, approval: false, schedule: true, publish: false }],
+    [PostStatus.CANCELLED, { draft: false, approval: false, schedule: false, publish: true }],
+  ] as const)('enforces composer intents for %s', (status, expected) => {
+    for (const [intent, legal] of Object.entries(expected)) {
+      expect(isComposerIntentLegal(status, intent as keyof typeof expected)).toBe(legal);
+    }
   });
 });
 

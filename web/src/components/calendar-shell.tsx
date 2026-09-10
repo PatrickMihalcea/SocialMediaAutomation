@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { DateTime } from 'luxon';
 import type { PostStatus } from '@prisma/client';
 import {
@@ -20,7 +21,7 @@ import {
   Send,
   Trash2,
 } from 'lucide-react';
-import { Badge, Button, Dialog, EmptyState, Field, IconButton, Select, StatusMessage } from '@/bridge88/components';
+import { Badge, Button, Checkbox, Dialog, EmptyState, Field, IconButton, Select, StatusMessage } from '@/bridge88/components';
 import {
   getPostPublishOutcomesAction,
   postCommandAction,
@@ -127,6 +128,9 @@ export function CalendarShell({
   const [outcomes, setOutcomes] = useState<PostPublishOutcome[]>([]);
   const [outcomeError, setOutcomeError] = useState('');
   const [outcomesLoading, setOutcomesLoading] = useState(false);
+  const [moveLocal, setMoveLocal] = useState('');
+  const [focusedDayKey, setFocusedDayKey] = useState('');
+  const dayRefs = useMemo(() => new Map<string, HTMLDivElement>(), []);
   // Resolved after hydration so the server render never disagrees about the date.
   const [todayKey, setTodayKey] = useState<string | null>(null);
   useEffect(() => setTodayKey(DateTime.now().setZone(timezone).toISODate()), [timezone]);
@@ -195,6 +199,21 @@ export function CalendarShell({
     return [];
   }, [anchor, timezone, view]);
 
+  useEffect(() => {
+    const first = visibleDays[0]?.toISODate() ?? '';
+    if (first && !visibleDays.some((day) => day.toISODate() === focusedDayKey)) {
+      setFocusedDayKey(first);
+    }
+  }, [focusedDayKey, visibleDays]);
+
+  useEffect(() => {
+    setMoveLocal(
+      selectedPost?.scheduledAt
+        ? DateTime.fromISO(selectedPost.scheduledAt).setZone(timezone).toFormat("yyyy-MM-dd'T'HH:mm")
+        : '',
+    );
+  }, [selectedPost, timezone]);
+
   const byDay = useMemo(() => {
     const map = new Map<string, CalendarPost[]>();
     for (const post of posts) {
@@ -229,6 +248,10 @@ export function CalendarShell({
       return;
     }
     const local = target.toFormat("yyyy-MM-dd'T'HH:mm");
+    movePostToLocal(postId, local, `Post moved to ${day.toFormat('d LLL')}.`);
+  }
+
+  function movePostToLocal(postId: string, local: string, success: string) {
     startTransition(async () => {
       try {
         const result = await reschedulePostAction(slug, postId, local);
@@ -237,12 +260,28 @@ export function CalendarShell({
           setMessage({ text: error, tone: 'error' });
           return;
         }
-        setMessage({ text: `Post moved to ${day.toFormat('d LLL')}.`, tone: 'success' });
+        setMessage({ text: success, tone: 'success' });
         router.refresh();
       } catch (error) {
         setMessage({ text: errorMessage(error), tone: 'error' });
       }
     });
+  }
+
+  function moveGridFocus(index: number, event: React.KeyboardEvent<HTMLDivElement>) {
+    const delta = {
+      ArrowLeft: -1,
+      ArrowRight: 1,
+      ArrowUp: -7,
+      ArrowDown: 7,
+    }[event.key];
+    if (delta == null) return;
+    event.preventDefault();
+    const next = Math.max(0, Math.min(visibleDays.length - 1, index + delta));
+    const key = visibleDays[next]?.toISODate();
+    if (!key) return;
+    setFocusedDayKey(key);
+    dayRefs.get(key)?.focus();
   }
 
   function command(postId: string, action: 'duplicate' | 'delete' | 'publish' | 'retry' | 'cancel' | 'restore') {
@@ -336,14 +375,17 @@ export function CalendarShell({
       ) : (
         <div className="mt-6 overflow-x-auto">
           <p className="b88-caption mb-3 md:hidden">Tap a post to open its details and change the publishing time. Swipe sideways to see the full week.</p>
-          <div className="min-w-[720px] overflow-hidden rounded-lg border border-hairline">
-            <div className="grid grid-cols-7 border-b border-hairline bg-surface-soft">
+          <div role="grid" aria-label={`${view === 'month' ? 'Month' : 'Week'} calendar`} className="min-w-[720px] overflow-hidden rounded-lg border border-hairline">
+            <div role="row" className="grid grid-cols-7 border-b border-hairline bg-surface-soft">
               {visibleDays.slice(0, 7).map((day) => (
-                <p key={day.weekday} className="b88-caption px-2 py-3">{day.toFormat('cccc')}</p>
+                <p role="columnheader" key={day.weekday} className="b88-caption px-2 py-3">{day.toFormat('cccc')}</p>
               ))}
             </div>
-            <section className="grid grid-cols-7">
-              {visibleDays.map((day) => {
+            <section role="rowgroup" className="grid grid-cols-7">
+              {Array.from({ length: Math.ceil(visibleDays.length / 7) }, (_, rowIndex) => (
+                <div role="row" className="contents" key={rowIndex}>
+              {visibleDays.slice(rowIndex * 7, rowIndex * 7 + 7).map((day, dayIndex) => {
+                const index = rowIndex * 7 + dayIndex;
                 const key = day.toISODate()!;
                 const dayPosts = byDay.get(key) ?? [];
                 const isToday = key === todayKey;
@@ -356,13 +398,20 @@ export function CalendarShell({
                 return (
                   <div
                     key={key}
+                    ref={(element) => {
+                      if (element) dayRefs.set(key, element);
+                      else dayRefs.delete(key);
+                    }}
+                    role="gridcell"
                     aria-current={isToday ? 'date' : undefined}
-                    role={canCreateHere ? 'link' : undefined}
-                    tabIndex={canCreateHere ? 0 : undefined}
-                    aria-label={canCreateHere ? `Create a post for ${day.toFormat('d LLL yyyy')} at 09:00` : undefined}
+                    tabIndex={focusedDayKey === key ? 0 : -1}
+                    aria-label={canCreateHere
+                      ? `${day.toFormat('cccc d LLL yyyy')}. Empty. Press Enter to create a post at 09:00.`
+                      : `${day.toFormat('cccc d LLL yyyy')}. ${dayPosts.length} ${dayPosts.length === 1 ? 'post' : 'posts'}.`}
                     className={`min-h-36 h-36 overflow-y-auto border-b border-r border-hairline-soft p-2 ${canCreateHere ? 'cursor-pointer transition-opacity hover:opacity-80' : ''} ${day.month !== anchorDate.month && view === 'month' ? 'bg-surface-soft' : ''}`}
                     onClick={openComposer}
                     onKeyDown={(event) => {
+                      moveGridFocus(index, event);
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
                         openComposer();
@@ -407,15 +456,17 @@ export function CalendarShell({
                   </div>
                 );
               })}
+                </div>
+              ))}
             </section>
           </div>
         </div>
       )}
 
       {view === 'list' && selected.length > 0 && (
-        <section className="b88-card mt-6">
-          <p className="b88-eyebrow">Bulk schedule · {selected.length} posts</p>
-          <div className="mt-4 flex flex-wrap items-end gap-3">
+        <>
+          <div className="b88-selection-bar" role="region" aria-label={`Bulk schedule ${selected.length} posts`}>
+            <span className="px-2 text-sm font-[480]">{selected.length} selected</span>
             <Field label={`Start time (${timezone})`} type="datetime-local" value={bulkStart} onChange={(event) => setBulkStart(event.target.value)} />
             <Button type="button" disabled={pending} onClick={() => startTransition(async () => {
               try {
@@ -428,7 +479,8 @@ export function CalendarShell({
             })}>Preview schedule</Button>
           </div>
           {bulkSlots.length > 0 && (
-            <div className="mt-6">
+            <section className="b88-card mt-6 mb-28">
+              <p className="b88-eyebrow">Bulk schedule preview</p>
               <ol className="space-y-2">
                 {bulkSlots.map((slot, index) => <li key={slot} className="b88-caption">{posts.find((p) => p.id === selected[index])?.title} · {DateTime.fromISO(slot).setZone(timezone).toFormat('ccc d LLL, HH:mm')}</li>)}
               </ol>
@@ -449,18 +501,21 @@ export function CalendarShell({
                   setMessage({ text: errorMessage(error), tone: 'error' });
                 }
               })}>Confirm schedule</Button>
-            </div>
+            </section>
           )}
-        </section>
+        </>
       )}
 
-      {selectedPost && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={() => navigate({ post: undefined })}>
-          <aside className="h-full w-full max-w-lg overflow-y-auto bg-canvas p-6" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3">
-              <div><p className="b88-eyebrow">Post detail</p><h2 className="b88-heading mt-2">{selectedPost.title}</h2></div>
-              <Button type="button" variant="tertiary" onClick={() => navigate({ post: undefined })}>Close</Button>
-            </div>
+      <Dialog
+        open={Boolean(selectedPost)}
+        eyebrow="Post detail"
+        title={selectedPost?.title}
+        width={760}
+        onClose={() => navigate({ post: undefined })}
+        actions={<Button type="button" variant="secondary" onClick={() => navigate({ post: undefined })}>Close</Button>}
+      >
+        {selectedPost && (
+          <div className="max-h-[65vh] overflow-y-auto pr-2">
             {message?.tone === 'error' && <StatusMessage tone="error" className="mt-6">{message.text}</StatusMessage>}
             <div className="mt-6 flex flex-wrap gap-2"><Badge tone={tones[selectedPost.status] ?? 'outline'}>{statusLabel(selectedPost.status)}</Badge>{selectedPost.platforms.map((p) => <Badge key={p} tone="outline">{p}</Badge>)}</div>
             {selectedPost.status === 'PUBLISHED' && (
@@ -474,6 +529,26 @@ export function CalendarShell({
               <div><dt className="b88-caption">Accounts</dt><dd>{selectedPost.accounts.join(', ') || 'No account'}</dd></div>
               <div><dt className="b88-caption">Campaign</dt><dd>{selectedPost.campaign ?? 'No campaign'}</dd></div>
             </dl>
+            {legalPostActions(selectedPost.status).includes('reschedule') && (
+              <section className="mt-6 rounded-lg border border-hairline p-4">
+                <p className="b88-eyebrow">Move post</p>
+                <div className="mt-3 flex flex-wrap items-end gap-3">
+                  <Field
+                    label={`New publishing time (${timezone})`}
+                    type="datetime-local"
+                    value={moveLocal}
+                    onChange={(event) => setMoveLocal(event.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    disabled={pending || !moveLocal}
+                    onClick={() => movePostToLocal(selectedPost.id, moveLocal, 'Post publishing time updated.')}
+                  >
+                    Move post
+                  </Button>
+                </div>
+              </section>
+            )}
             <section className="mt-6 border-t border-hairline pt-6" aria-busy={outcomesLoading}>
               <p className="b88-eyebrow">Channel results</p>
               {outcomesLoading && <p className="mt-3 text-sm">Loading channel results.</p>}
@@ -502,10 +577,13 @@ export function CalendarShell({
               {legalPostActions(selectedPost.status).includes('duplicate') && <Button type="button" variant="secondary" disabled={pending} onClick={() => command(selectedPost.id, 'duplicate')}><Copy size={16} strokeWidth={1.75} /> Duplicate</Button>}
               {legalPostActions(selectedPost.status).includes('cancel') && <Button type="button" variant="secondary" disabled={pending} onClick={() => setCancelConfirmation(selectedPost.id)}><CalendarX size={16} strokeWidth={1.75} /> Cancel</Button>}
               {canDelete && legalPostActions(selectedPost.status).includes('delete') && <Button type="button" variant="tertiary" disabled={pending} onClick={() => setDeleteOpen(true)}><Trash2 size={16} strokeWidth={1.75} /> Delete</Button>}
+              <Link href={`/w/${slug}/history?post=${selectedPost.id}`} className="inline-flex min-h-10 items-center px-3 font-[480] underline underline-offset-4">
+                View post history
+              </Link>
             </div>
-          </aside>
-        </div>
-      )}
+          </div>
+        )}
+      </Dialog>
       <Dialog
         open={deleteOpen}
         eyebrow="Confirm"
@@ -588,7 +666,14 @@ function PostList({ posts, selected, setSelected, slug, timezone }: {
     <section className="b88-card mt-6 overflow-x-auto">
       <table className="b88-table min-w-[760px] [&_td:first-child]:pl-0 [&_th:first-child]:pl-0"><thead><tr><th>Select</th><th>Post</th><th>Channels</th><th>Publishing time</th><th>Status</th><th>Campaign</th></tr></thead>
         <tbody>{posts.map((post) => <tr key={post.id}>
-          <td><input aria-label={`Select ${post.title}`} type="checkbox" checked={selected.includes(post.id)} onChange={(event) => setSelected(event.target.checked ? [...selected, post.id] : selected.filter((id) => id !== post.id))} /></td>
+          <td>
+            <Checkbox
+              label={`Select ${post.title}`}
+              containerClassName="[&>span]:sr-only"
+              checked={selected.includes(post.id)}
+              onChange={(event) => setSelected(event.target.checked ? [...selected, post.id] : selected.filter((id) => id !== post.id))}
+            />
+          </td>
           <td><Button type="button" variant="tertiary" href={`/w/${slug}/compose/${post.id}`}><PenLine size={15} strokeWidth={1.75} /> {post.title}</Button></td>
           <td>{post.platforms.join(', ') || '—'}</td>
           <td>{post.scheduledAt ? DateTime.fromISO(post.scheduledAt).setZone(timezone).toFormat('ccc d LLL, HH:mm') : 'Not scheduled'}</td>

@@ -96,7 +96,9 @@ export async function sendAssistantMessage(input: {
       { role: 'system', content: system },
       ...previous.filter((message) => message.role === 'USER' || message.role === 'ASSISTANT').map((message) => ({
         role: message.role === 'USER' ? 'user' as const : 'assistant' as const,
-        content: message.content,
+        content: message.proposal
+          ? `${message.content}\n<prior_proposal>${JSON.stringify(message.proposal)}</prior_proposal>`
+          : message.content,
       })),
       { role: 'user', content },
     ],
@@ -157,20 +159,17 @@ export function assistantCapabilityReply(content: string): string | null {
   if (/\b(publish|delete|remove)\b/i.test(content)) {
     return 'I cannot publish or delete posts from this assistant. Open the post in Composer, where Bridge88 checks your current permission and asks for the required confirmation.';
   }
-  if (/\b(move|reschedule|re-date|change the date)\b/i.test(content)) {
-    return 'I cannot move an existing post from this assistant. Open Calendar and move a future post there. Published and publishing posts cannot be re-dated.';
-  }
   if (
     /\b(generate|create|find|search|make)\b.*\b(image|images|media|asset|video|clips?)\b/i.test(content)
     && !/\battach\b/i.test(content)
   ) {
-    return 'Media search, reuse, image generation, and video workflows are not connected to this assistant yet. Open Media to find existing assets or AI studio to start a simulated media job.';
+    return 'Media search, image generation, and video workflows are not connected to this assistant yet. Open Media to find an existing filename you can ask me to attach, or open AI studio to start a simulated media job.';
   }
   if (/\b(create|make|start)\b.*\bcampaign\b/i.test(content)) {
     return 'Campaign creation is not connected to this assistant yet. Open Campaigns to create the campaign, then use Composer to add its posts.';
   }
   if (
-    /\b(translate|platform-specific|captions?|call to action|cta)\b/i.test(content)
+    /\b(translate|platform-specific|captions?)\b/i.test(content)
     || /\b(?:into|to)\s+(?:an?\s+)?(?:x|instagram|linkedin|tiktok|facebook|youtube)\s+(?:post|caption)\b/i.test(content)
   ) {
     return 'This text transformation is not wired into the assistant conversation yet. Open Composer to rewrite copy, generate hashtags or a call to action, and adapt selected channels.';
@@ -178,6 +177,9 @@ export function assistantCapabilityReply(content: string): string | null {
   const requestedPosts = requestedPostCount(content);
   if (requestedPosts && requestedPosts > 10) {
     return `This assistant can propose at most 10 drafts at once. You asked for ${requestedPosts}, so no workspace change was proposed. Split the request into smaller sets.`;
+  }
+  if (/\b(ask|tell|show|read|about)\b.*\b(existing|current)\s+draft\b/i.test(content)) {
+    return 'I cannot inspect the copy inside an existing draft from this conversation yet. Open Drafts to review it, or name the post and ask me for a specific proposed change.';
   }
   return null;
 }
@@ -264,7 +266,7 @@ export async function executeProposal(workspaceId: string, userId: string, propo
           mentions: [],
           media: [],
         })),
-      });
+      }, { validateContent: false });
     }
     return;
   }
@@ -346,7 +348,7 @@ export async function executeProposal(workspaceId: string, userId: string, propo
         thumbnailOffset: media.thumbnailOffset,
       })),
     })),
-  });
+  }, { validateContent: false });
 }
 
 type LoadedMutablePost = Awaited<ReturnType<typeof loadMutablePost>>;
@@ -400,12 +402,13 @@ async function saveLoadedPost(
     };
   },
 ) {
+  const nextStatus = changes.status ?? post.status;
   return savePost(workspaceId, userId, {
     id: post.id,
     expectedUpdatedAt: post.updatedAt,
     title: changes.title === undefined ? post.title : changes.title,
     campaignId: changes.campaignId === undefined ? post.campaignId : changes.campaignId,
-    status: changes.status ?? post.status,
+    status: nextStatus,
     scheduledAt: changes.scheduledAt === undefined ? post.scheduledAt : changes.scheduledAt,
     timezone: post.timezone,
     platforms: post.platforms.map((platform) => {
@@ -425,7 +428,7 @@ async function saveLoadedPost(
         })),
       };
     }),
-  });
+  }, { validateContent: nextStatus !== PostStatus.DRAFT });
 }
 
 function assertUnique(values: string[], message: string) {
@@ -438,7 +441,13 @@ async function assistantWorkspaceContext(workspaceId: string): Promise<string> {
       where: { workspaceId },
       orderBy: { updatedAt: 'desc' },
       take: 50,
-      select: { id: true, title: true, status: true },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        scheduledAt: true,
+        platforms: { select: { platform: true } },
+      },
     }),
     db.campaign.findMany({
       where: { workspaceId },
@@ -458,6 +467,8 @@ async function assistantWorkspaceContext(workspaceId: string): Promise<string> {
       id: post.id,
       title: post.title || 'Untitled post',
       status: post.status,
+      scheduledAt: post.scheduledAt?.toISOString() ?? null,
+      platforms: [...new Set(post.platforms.map((platform) => platform.platform))],
     })),
     campaigns,
     media,

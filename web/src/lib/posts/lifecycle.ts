@@ -9,16 +9,17 @@ export type PostLifecycleAction =
   | 'retry'
   | 'reschedule'
   | 'cancel'
+  | 'withdrawApproval'
   | 'restore'
   | 'duplicate'
   | 'delete';
 
 const ACTIONS_BY_STATUS: Record<PostStatus, readonly PostLifecycleAction[]> = {
   DRAFT: ['edit', 'submitForApproval', 'schedule', 'publish', 'duplicate', 'delete'],
-  PENDING_APPROVAL: ['edit', 'duplicate', 'delete'],
+  PENDING_APPROVAL: ['edit', 'withdrawApproval', 'duplicate', 'delete'],
   APPROVED: ['edit', 'schedule', 'publish', 'duplicate', 'delete'],
   SCHEDULED: ['edit', 'publish', 'reschedule', 'cancel', 'duplicate', 'delete'],
-  PUBLISHING: ['duplicate'],
+  PUBLISHING: [],
   PUBLISHED: ['edit', 'duplicate', 'delete'],
   FAILED: ['edit', 'retry', 'reschedule', 'cancel', 'duplicate', 'delete'],
   CANCELLED: ['restore', 'publish', 'duplicate', 'delete'],
@@ -30,6 +31,35 @@ export function legalPostActions(status: PostStatus): readonly PostLifecycleActi
 
 export function isPostActionLegal(status: PostStatus, action: PostLifecycleAction): boolean {
   return ACTIONS_BY_STATUS[status].includes(action);
+}
+
+export type ComposerIntent = 'draft' | 'approval' | 'schedule' | 'publish';
+
+export function composerActionForIntent(
+  status: PostStatus,
+  intent: ComposerIntent,
+): PostLifecycleAction {
+  if (intent === 'draft') return 'edit';
+  if (intent === 'approval') return 'submitForApproval';
+  if (intent === 'schedule') {
+    return status === 'SCHEDULED' || status === 'FAILED' ? 'reschedule' : 'schedule';
+  }
+  return 'publish';
+}
+
+export function isComposerIntentLegal(status: PostStatus, intent: ComposerIntent): boolean {
+  return isPostActionLegal(status, composerActionForIntent(status, intent));
+}
+
+export function composerTargetStatus(
+  sourceStatus: PostStatus | undefined,
+  intent: ComposerIntent,
+): 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'SCHEDULED' {
+  if (intent === 'approval') return 'PENDING_APPROVAL';
+  if (intent === 'schedule') return 'SCHEDULED';
+  if (intent === 'publish') return 'DRAFT';
+  if (sourceStatus === 'PENDING_APPROVAL' || sourceStatus === 'SCHEDULED') return sourceStatus;
+  return 'DRAFT';
 }
 
 export type ComposerContextDefaults = {

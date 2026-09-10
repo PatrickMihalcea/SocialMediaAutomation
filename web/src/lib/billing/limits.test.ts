@@ -9,8 +9,11 @@ const dbMock = vi.hoisted(() => ({
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
+  arrivalLimitNotice,
   assertWithinLimit,
+  firstQueryValue,
   formatBytes,
+  GENERIC_LIMIT_ARRIVAL,
   limitMessage,
   nextMonthlyReset,
 } from './limits';
@@ -55,5 +58,43 @@ describe('billing limits', () => {
   it('formats storage usage against a legible ceiling', () => {
     expect(formatBytes(247_257)).toBe('241.5 KB');
     expect(formatBytes(10 * 1024 ** 3)).toBe('10 GB');
+  });
+
+  it('rewrites the next step when the same message is shown on Billing', () => {
+    const refusal = limitMessage({
+      plan: Plan.PRO,
+      feature: 'socialAccounts',
+      used: 10,
+      limit: 10,
+    });
+    expect(refusal).toBe(
+      'You are using 10 of 10 connected social accounts on the Pro plan. This capacity does not reset automatically. Disconnect an account or change plans in Billing.',
+    );
+    expect(arrivalLimitNotice('limit-reached', refusal)).toBe(
+      'You are using 10 of 10 connected social accounts on the Pro plan. This capacity does not reset automatically. Disconnect an account or choose a higher plan.',
+    );
+  });
+
+  it('reads the first value when a query parameter is repeated', () => {
+    const refusal = limitMessage({ plan: Plan.PRO, feature: 'socialAccounts', used: 10, limit: 10 });
+    expect(arrivalLimitNotice(['limit-reached', 'limit-reached'], [refusal, 'second'])).toBe(
+      'You are using 10 of 10 connected social accounts on the Pro plan. This capacity does not reset automatically. Disconnect an account or choose a higher plan.',
+    );
+    expect(arrivalLimitNotice(['limit-reached', 'updated'], undefined)).toBe(GENERIC_LIMIT_ARRIVAL);
+    expect(arrivalLimitNotice(['updated', 'limit-reached'], undefined)).toBeNull();
+    expect(firstQueryValue(['  spaced  ', 'ignored'])).toBe('spaced');
+    expect(firstQueryValue([])).toBeNull();
+    expect(firstQueryValue(['', 'limit-reached'])).toBeNull();
+  });
+
+  it('never renders a hostile or unknown reason value', () => {
+    expect(arrivalLimitNotice('limit-reached', '<script>alert(1)</script>')).toBe(GENERIC_LIMIT_ARRIVAL);
+    expect(arrivalLimitNotice(undefined, 'LIMIT_REACHED')).toBe(GENERIC_LIMIT_ARRIVAL);
+    expect(arrivalLimitNotice(undefined, 'javascript:alert(1)')).toBe(GENERIC_LIMIT_ARRIVAL);
+    expect(arrivalLimitNotice(undefined, 'You are using 10 of 10 connected social accounts on the Pro plan. <img src=x onerror=alert(1)>')).toBe(GENERIC_LIMIT_ARRIVAL);
+    expect(arrivalLimitNotice(undefined, ['<script>', 'also hostile'])).toBe(GENERIC_LIMIT_ARRIVAL);
+    expect(arrivalLimitNotice(undefined, { toString: () => 'hack' })).toBeNull();
+    expect(arrivalLimitNotice('limit-reached', undefined)).toBe(GENERIC_LIMIT_ARRIVAL);
+    expect(arrivalLimitNotice('updated', undefined)).toBeNull();
   });
 });

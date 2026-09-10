@@ -244,7 +244,7 @@ async function handleFailure(
     metadata: {
       platform,
       code: platformError?.code ?? 'UNKNOWN',
-      message,
+      error: auditFailureReason(platformError),
       retryable: platformError?.retryable ?? false,
     },
   });
@@ -254,6 +254,14 @@ async function handleFailure(
     body: message,
     href: `/w/${workspaceSlug}/calendar?post=${encodeURIComponent(postId)}`,
   });
+}
+
+function auditFailureReason(error: PlatformError | null): string {
+  if (error?.code === 'AUTH') return 'TOKEN_EXPIRED';
+  if (error?.code === 'RATE_LIMIT') return 'RATE_LIMITED';
+  if (error?.code === 'REJECTED') return 'VALIDATION_FAILED';
+  if (error?.retryable) return 'The social network was unavailable, so another attempt was scheduled';
+  return 'The social network did not accept this publishing attempt';
 }
 
 /**

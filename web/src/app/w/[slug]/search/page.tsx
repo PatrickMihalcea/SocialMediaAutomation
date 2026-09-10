@@ -109,7 +109,7 @@ export default async function SearchPage({
       {/* next/form keeps the GET filter submit a client-side navigation, which a
           plain <form> cannot do without a client component. */}
       <Form action={`/w/${slug}/search`} className="mt-8 grid max-w-5xl gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Field name="q" label="Search posts, media, campaigns and accounts" defaultValue={q} autoFocus containerClassName="sm:col-span-2 lg:col-span-3" />
+        <Field id="workspace-search" name="q" label="Search posts, media, campaigns and accounts" defaultValue={q} autoFocus containerClassName="sm:col-span-2 lg:col-span-3" />
         <Select name="type" label="Type" className={ROW_CONTROL} defaultValue={raw.type ?? ''}><option value="">All</option><option value="post">Posts</option><option value="media">Media</option><option value="campaign">Campaigns</option><option value="account">Accounts</option></Select>
         <Button type="submit" className="self-end">Search</Button>
         {hasSearchCriteria(filters) && <Button href={`/w/${slug}/search`} variant="tertiary" className="self-end">Clear filters</Button>}
@@ -147,7 +147,9 @@ export default async function SearchPage({
       ) : (
         <div className="mt-6 max-w-5xl">
           <EmptyState eyebrow={shouldSearch ? 'No matches' : 'Nothing searched yet'} title={shouldSearch ? 'No matching workspace items' : 'Enter a search term or choose a filter'}>
-            {shouldSearch ? 'Try a shorter term, clear a filter, or widen the date range.' : 'Search post copy, titles, campaigns, platforms, media and connected accounts in this workspace.'}
+            {shouldSearch
+              ? 'Use the focused search field above to try a shorter term, clear a filter, or widen the date range.'
+              : 'The search field above is focused and ready. Search post copy, titles, campaigns, platforms, media and connected accounts.'}
           </EmptyState>
         </div>
       )}

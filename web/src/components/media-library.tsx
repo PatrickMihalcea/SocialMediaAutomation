@@ -300,7 +300,12 @@ export function MediaLibrary({
                   </div>
                   <div className="flex gap-2">
                     {!uploading && <Button type="button" variant="tertiary" onClick={clearStagedFiles}>Cancel</Button>}
-                    <Button type="submit" disabled={uploading}>{uploading ? 'Uploading' : 'Upload'}</Button>
+                    <Button type="submit" disabled={uploading} aria-busy={uploading} aria-label={uploading ? 'Uploading' : 'Upload'}>
+                      <span className="grid">
+                        <span className={`[grid-area:1/1] ${uploading ? '' : 'invisible'}`} aria-hidden>Uploading</span>
+                        <span className={`[grid-area:1/1] ${uploading ? 'invisible' : ''}`} aria-hidden>Upload</span>
+                      </span>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -313,7 +318,7 @@ export function MediaLibrary({
 
           {assets.length ? (
             // pb-28 keeps the floating selection bar from covering the last row.
-            <div className={`mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 ${selected.length ? 'pb-28' : ''}`}>
+            <div className={`mt-6 grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 2xl:grid-cols-4 ${selected.length ? 'pb-28' : ''}`}>
               {assets.map((asset) => (
                 <article
                   key={asset.id}
@@ -322,7 +327,7 @@ export function MediaLibrary({
                       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
                   }}
-                  className={`b88-card relative overflow-hidden p-4 ${selectedSet.has(asset.id) || asset.id === createdDerivativeId ? 'border-ink bg-surface-soft' : ''}`}
+                  className={`b88-card relative overflow-hidden p-3 sm:p-4 ${selectedSet.has(asset.id) || asset.id === createdDerivativeId ? 'border-ink bg-surface-soft' : ''}`}
                 >
                   <button type="button" className="block w-full text-left transition-opacity hover:opacity-80" onClick={() => toggle(asset.id)} aria-pressed={selectedSet.has(asset.id)}>
                     <AssetPreview asset={asset} />
@@ -330,7 +335,7 @@ export function MediaLibrary({
                       <p className="min-w-0 truncate font-[480]">{asset.filename}</p>
                       <Badge tone={asset.status === 'READY' ? 'mint' : asset.status === 'FAILED' ? 'coral' : 'cream'}>{asset.status.toLowerCase()}</Badge>
                     </div>
-                    <div className="mt-2 flex flex-wrap gap-2">
+                    <div className="mt-2 hidden flex-wrap gap-2 sm:flex">
                       <Badge tone="outline">{asset.assetKind.toLowerCase()}</Badge>
                       {asset.id === createdDerivativeId && <Badge tone="ink">New derivative</Badge>}
                       {asset.usageCount > 0 && <Badge tone="ink">Post attachment</Badge>}

@@ -8,6 +8,7 @@ import { parseComposerContext } from '@/lib/posts/lifecycle';
 import { legalPostActions } from '@/lib/posts/lifecycle';
 import { PLATFORM_LABELS } from '@/lib/social/labels';
 import { postCommandAction, updatePostAction, type ComposerState } from '@/app/actions/posts';
+import { cancelApprovalRequestAction } from '@/app/actions/team';
 
 const statusTone = {
   DRAFT: 'outline',
@@ -30,7 +31,7 @@ export default async function EditComposePage({
   const { slug, postId } = await params;
   const query = await searchParams;
   const ctx = await requireWorkspace(slug, 'post:view');
-  const data = await loadComposerContext(ctx.workspace.id, slug, postId);
+  const data = await loadComposerContext(ctx.workspace.id, slug, postId, query.asset);
   if (!data.post) return null;
   const context = parseComposerContext(query, {
     assetIds: data.assets.map((asset) => asset.id),
@@ -121,17 +122,27 @@ function PostCommands({
       {actions.includes('duplicate') && <form action={async () => { 'use server'; await postCommandAction(slug, postId, 'duplicate'); }}>
         <PendingButton type="submit" variant="secondary" pendingLabel="Duplicating">Duplicate</PendingButton>
       </form>}
-      {(actions.includes('publish') || actions.includes('retry')) && canPublish && (
-        <form action={async () => { 'use server'; await postCommandAction(slug, postId, status === 'FAILED' ? 'retry' : 'publish'); }}>
+      {actions.includes('retry') && canPublish && (
+        <form action={async () => { 'use server'; await postCommandAction(slug, postId, 'retry'); }}>
           <ConfirmationButton
             type="submit"
             variant="secondary"
             pendingLabel="Publishing"
-            confirmMessage={status === 'FAILED'
-              ? `Retry publishing only to the unsuccessful channels: ${channelLabels.join(', ')}?`
-              : `Publish immediately to ${channelLabels.join(', ')}? Publishing cannot be undone from Bridge88.`}
+            confirmMessage={`Retry publishing only to the unsuccessful channels: ${channelLabels.join(', ')}?`}
           >
-            {status === 'FAILED' ? 'Retry publish' : 'Publish now'}
+            Retry publish
+          </ConfirmationButton>
+        </form>
+      )}
+      {actions.includes('withdrawApproval') && (
+        <form action={async () => { 'use server'; await cancelApprovalRequestAction(slug, postId); }}>
+          <ConfirmationButton
+            type="submit"
+            variant="secondary"
+            pendingLabel="Withdrawing"
+            confirmMessage="Withdraw this approval request and return the post to drafts?"
+          >
+            Withdraw approval request
           </ConfirmationButton>
         </form>
       )}

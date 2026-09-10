@@ -17,7 +17,7 @@ import {
   TextArea,
 } from '@/bridge88/components';
 import { uploadMediaAction } from '@/app/actions/media';
-import type { ComposerState } from '@/app/actions/posts';
+import { loadMoreComposerAssetsAction, type ComposerState } from '@/app/actions/posts';
 import { PendingButton } from '@/components/action-ui';
 import { ComposerPreview } from '@/components/composer-preview';
 import { PlatformGlyph } from '@/components/visuals';
@@ -81,14 +81,20 @@ export function ComposerForm({
   const [draft, setDraft] = useState<ComposerDraft>(baseDraft);
   const [state, submit, isPending] = useActionState(action, {});
   const [aiError, setAiError] = useState('');
+  const [aiAnnouncement, setAiAnnouncement] = useState('');
   const [uploadError, setUploadError] = useState('');
   const [aiLoading, setAiLoading] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
   const [replacement, setReplacement] = useState<{ accountId: string; index: number } | null>(null);
+  const [libraryAssets, setLibraryAssets] = useState(assets);
+  const [assetOffset, setAssetOffset] = useState(12);
+  const [hasMoreAssets, setHasMoreAssets] = useState(assets.length >= 12);
+  const [loadingMoreAssets, setLoadingMoreAssets] = useState(false);
   const [, startTransition] = useTransition();
   const hydrated = useRef(false);
+  const errorSummaryRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (hydrated.current) return;
@@ -123,11 +129,22 @@ export function ComposerForm({
     if (!isPending) setPendingIntent(null);
   }, [isPending]);
 
+  useEffect(() => {
+    setLibraryAssets((current) => [
+      ...new Map([...current, ...assets].map((asset) => [asset.id, asset])).values(),
+    ]);
+  }, [assets]);
+
+  useEffect(() => {
+    if (state.status === 'error') errorSummaryRef.current?.focus();
+  }, [state.status]);
+
+  const lifecycleActions = legalPostActions(postStatus ?? 'DRAFT');
   const activeAccount = accounts.find((account) => account.id === draft.activeAccountId) ?? accounts[0];
   const activeVersion = activeAccount ? draft.versions[activeAccount.id] : undefined;
   const caps = activeAccount ? CAPABILITIES[activeAccount.platform] : null;
   const fieldErrors = state.fields ?? {};
-  const readOnly = postStatus === 'PUBLISHING';
+  const readOnly = !lifecycleActions.includes('edit');
   const selectedAccounts = accounts.filter((account) => draft.selectedAccountIds.includes(account.id));
   const demoMode = selectedAccounts.some((account) => account.isDemo);
 
@@ -220,6 +237,7 @@ export function ComposerForm({
     }
     setAiLoading(operation);
     setAiError('');
+    setAiAnnouncement('');
     try {
       const platforms = selectedAccounts.map((account) => account.platform);
       const response = await fetch(`/api/workspaces/${slug}/ai`, {
@@ -260,8 +278,17 @@ export function ComposerForm({
           ...(Array.isArray(body.data.hashtags) ? { hashtags: body.data.hashtags.join(', ') } : {}),
         });
       }
+      setAiAnnouncement({
+        generate: 'Caption generated.',
+        rewrite: 'Caption rewritten.',
+        hashtags: 'Hashtags generated.',
+        cta: 'Call to action generated.',
+        adapt: 'Selected channel versions adapted.',
+      }[operation]);
     } catch (cause) {
-      setAiError(cause instanceof Error ? cause.message : 'AI action failed.');
+      const message = cause instanceof Error ? cause.message : 'AI action failed.';
+      setAiError(message);
+      setAiAnnouncement(message);
     } finally {
       setAiLoading(null);
     }
@@ -287,6 +314,22 @@ export function ComposerForm({
     }
   }
 
+  async function loadMoreAssets() {
+    setLoadingMoreAssets(true);
+    try {
+      const result = await loadMoreComposerAssetsAction(slug, assetOffset);
+      setLibraryAssets((current) => [
+        ...new Map([...current, ...result.assets].map((asset) => [asset.id, asset])).values(),
+      ]);
+      setAssetOffset((current) => current + 12);
+      setHasMoreAssets(result.hasMore);
+    } catch (cause) {
+      setUploadError(cause instanceof Error ? cause.message : 'More media could not be loaded.');
+    } finally {
+      setLoadingMoreAssets(false);
+    }
+  }
+
   function submitWithIntent(intent: string) {
     setPendingIntent(intent);
     const formData = new FormData();
@@ -303,9 +346,6 @@ export function ComposerForm({
 
   const accountErrors = fieldErrors[activeAccount.id] ?? [];
   const isPendingApproval = postStatus === 'PENDING_APPROVAL';
-  const isPublished = postStatus === 'PUBLISHED';
-  const lifecycleActions = legalPostActions(postStatus ?? 'DRAFT');
-
   return (
     <>
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)]">
@@ -328,7 +368,11 @@ export function ComposerForm({
             Demo mode is active. Publish now simulates delivery and does not create a real platform post.
           </StatusMessage>
         )}
-        {state.error && <StatusMessage tone="error" className="mb-6">{state.error}</StatusMessage>}
+        {state.error && (
+          <div ref={errorSummaryRef} tabIndex={-1}>
+            <StatusMessage tone="error" className="mb-6">{state.error}</StatusMessage>
+          </div>
+        )}
         {state.success && <StatusMessage tone="success" className="mb-6">{state.success}</StatusMessage>}
 
         <form className="grid gap-6" onSubmit={(event) => { event.preventDefault(); submitWithIntent('draft'); }}>
@@ -422,25 +466,26 @@ export function ComposerForm({
           <div>
             <p className="b88-label">AI writing</p>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} onClick={() => runAi('generate')}>
-                <Sparkles size={16} />{aiLoading === 'generate' ? 'Generating' : 'Generate caption'}
+              <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} aria-busy={aiLoading === 'generate'} onClick={() => runAi('generate')}>
+                <Sparkles size={16} />Generate caption
               </Button>
-              <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} onClick={() => runAi('rewrite')}>
-                {aiLoading === 'rewrite' ? 'Rewriting' : 'Rewrite'}
+              <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} aria-busy={aiLoading === 'rewrite'} onClick={() => runAi('rewrite')}>
+                Rewrite
               </Button>
-              <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} onClick={() => runAi('hashtags')}>
-                {aiLoading === 'hashtags' ? 'Generating' : 'Generate hashtags'}
+              <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} aria-busy={aiLoading === 'hashtags'} onClick={() => runAi('hashtags')}>
+                Generate hashtags
               </Button>
-              <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} onClick={() => runAi('cta')}>
-                {aiLoading === 'cta' ? 'Generating' : 'Generate CTA'}
+              <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} aria-busy={aiLoading === 'cta'} onClick={() => runAi('cta')}>
+                Generate CTA
               </Button>
               {selectedAccounts.length > 1 && (
-                <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} onClick={() => runAi('adapt')}>
-                  {aiLoading === 'adapt' ? 'Adapting' : 'Adapt selected channels'}
+                <Button type="button" variant="secondary" disabled={Boolean(aiLoading) || readOnly} aria-busy={aiLoading === 'adapt'} onClick={() => runAi('adapt')}>
+                  Adapt selected channels
                 </Button>
               )}
             </div>
             {aiError && <p role="alert" className="mt-3 text-sm text-[var(--accent-magenta)]">{aiError}</p>}
+            <p role="status" aria-live="polite" className="sr-only">{aiAnnouncement}</p>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -509,7 +554,7 @@ export function ComposerForm({
             )}
             <div className="mt-4 max-h-96 overflow-y-auto pr-2">
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
-              {assets.map((asset) => {
+              {libraryAssets.map((asset) => {
                 const selected = activeVersion.media.some((item) => item.mediaAssetId === asset.id);
                 return (
                   <div
@@ -530,15 +575,27 @@ export function ComposerForm({
               })}
               </div>
             </div>
+            {hasMoreAssets && (
+              <Button
+                type="button"
+                variant="secondary"
+                className="mt-4"
+                disabled={loadingMoreAssets}
+                aria-busy={loadingMoreAssets}
+                onClick={loadMoreAssets}
+              >
+                Load more media
+              </Button>
+            )}
             {activeVersion.media.length > 0 && (
               <div className="mt-4 space-y-4">
                 {activeVersion.media.map((item, index) => {
-                  const asset = assets.find((entry) => entry.id === item.mediaAssetId);
+                  const asset = libraryAssets.find((entry) => entry.id === item.mediaAssetId);
                   return (
                     <div key={item.mediaAssetId} className="b88-tile space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-sm font-[540]">{asset?.filename ?? 'Missing media'}</p>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <Button
                             type="button"
                             variant="tertiary"
@@ -631,7 +688,7 @@ export function ComposerForm({
               aria-label="Post actions"
               style={{ flexWrap: 'nowrap', justifyContent: 'flex-start', overflowX: 'auto' }}
             >
-              <PendingButton
+              {lifecycleActions.includes('edit') && <PendingButton
                 type="submit"
                 variant="secondary"
                 className="shrink-0 whitespace-nowrap"
@@ -640,12 +697,12 @@ export function ComposerForm({
                 aria-busy={pendingIntent === 'draft'}
               >
                 <Save size={16} />
-                {pendingIntent === 'draft' ? 'Saving' : 'Save draft'}
-              </PendingButton>
+                Save draft
+              </PendingButton>}
               {canPublish && lifecycleActions.includes('publish') && !isPendingApproval && (
                 <PendingButton
                   type="button"
-                  variant={isPublished ? 'tertiary' : 'promo'}
+                  variant="promo"
                   className="shrink-0 whitespace-nowrap"
                   pendingLabel="Publishing"
                   disabled={readOnly || isPending}
@@ -653,7 +710,7 @@ export function ComposerForm({
                   onClick={() => setPublishConfirmOpen(true)}
                 >
                   <Send size={16} />
-                  {pendingIntent === 'publish' ? 'Publishing' : 'Publish now'}
+                  Publish now
                 </PendingButton>
               )}
               {canSchedule && (lifecycleActions.includes('schedule') || lifecycleActions.includes('reschedule')) && (
@@ -667,7 +724,7 @@ export function ComposerForm({
                   onClick={() => submitWithIntent('schedule')}
                 >
                   <CalendarClock size={16} />
-                  {pendingIntent === 'schedule' ? 'Scheduling' : 'Schedule'}
+                  Schedule
                 </PendingButton>
               )}
               {canSubmitForApproval && lifecycleActions.includes('submitForApproval') && (
@@ -681,7 +738,7 @@ export function ComposerForm({
                   onClick={() => submitWithIntent('approval')}
                 >
                   <UserCheck size={16} />
-                  {pendingIntent === 'approval' ? 'Submitting' : 'Submit for approval'}
+                  Submit for approval
                 </PendingButton>
               )}
             </div>
@@ -695,7 +752,7 @@ export function ComposerForm({
       </section>
 
       <aside className="space-y-3 self-start">
-        <ComposerPreview account={activeAccount} version={activeVersion} assets={assets} />
+        <ComposerPreview account={activeAccount} version={activeVersion} assets={libraryAssets} />
         <p className="b88-caption">
           Draft autosaved locally · {postId ? `Post ${postId.slice(0, 8)}` : 'New post'}
         </p>

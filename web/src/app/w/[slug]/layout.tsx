@@ -62,7 +62,7 @@ export default async function WorkspaceLayout({
     <div className="b88-app">
       <AppNavigation slug={slug} workspaces={workspaces.map(({ slug: workspaceSlug, name }) => ({ slug: workspaceSlug, name }))} />
       <header className="b88-topbar">
-        <Link href={`/w/${slug}/search`} aria-label="Search workspace" className="flex min-h-10 items-center gap-2 rounded-pill px-3 text-sm">
+        <Link href={`/w/${slug}/search`} aria-label="Search workspace" className="flex min-h-11 min-w-11 items-center gap-2 rounded-pill px-3 text-sm">
           <Search size={17} /> <span className="hidden sm:inline">Search workspace</span>
         </Link>
         <div className="flex items-center gap-3">
