@@ -5,10 +5,10 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Copy, Download, Eye, Folder, Move, Pencil, Plus,
+  Copy, Download, Eye, Folder, MoreHorizontal, Move, Pencil, Plus,
   Tags, Trash2, X,
 } from 'lucide-react';
-import { Badge, Button, EmptyState, Field, IconButton, MediaFrame, MediaUploader, Select, StatusMessage, VideoPlayer } from '@/bridge88/components';
+import { Badge, Button, EmptyState, Field, humanizeMachineValue, IconButton, MediaFrame, MediaUploader, Select, StatusMessage, VideoPlayer } from '@/bridge88/components';
 import { listAttachableDraftsAction } from '@/app/actions/posts';
 import { MEDIA_PRESETS } from '@/lib/social/capabilities';
 import {
@@ -60,6 +60,7 @@ export function MediaLibrary({
   const [createdDerivativeId, setCreatedDerivativeId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<MediaLibraryAsset | null>(null);
+  const [visibleAssetCount, setVisibleAssetCount] = useState(12);
   const [notice, setNotice] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
   const [pending, startTransition] = useTransition();
   // Folder changes run as a transition so only the asset grid dims; a plain
@@ -71,6 +72,7 @@ export function MediaLibrary({
   const formRef = useRef<HTMLFormElement>(null);
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const visibleAssets = assets.slice(0, visibleAssetCount);
   const toggle = (id: string) => setSelected((value) =>
     value.includes(id) ? value.filter((item) => item !== id) : [...value, id]);
   const stageFiles = (files: FileList | File[]) => {
@@ -142,14 +144,15 @@ export function MediaLibrary({
     });
   };
   const runDelete = (asset: MediaLibraryAsset, closePreview = false) => {
+    const displayName = assetDisplayName(assets, asset.id);
     if (asset.usages.length > 0) {
       setNotice({
         tone: 'error',
-        message: `${asset.filename} is attached to ${asset.usages.length} ${asset.usages.length === 1 ? 'post' : 'posts'}. Open the asset preview to review them before removing media from those posts.`,
+        message: `${displayName} is attached to ${asset.usages.length} ${asset.usages.length === 1 ? 'post' : 'posts'}. Open the asset preview to review them before removing media from those posts.`,
       });
       return;
     }
-    if (!window.confirm(`Delete ${asset.filename}? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${displayName}? This cannot be undone.`)) return;
     startTransition(async () => {
       try {
         const result = await deleteMediaAction(slug, asset.id);
@@ -291,7 +294,7 @@ export function MediaLibrary({
               {queuedFiles.length > 0 && (
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-soft p-3">
                   <div className="min-w-0">
-                    <p className="font-[480]">{queuedFiles.length === 1 ? queuedFiles[0].name : `${queuedFiles.length} files selected`}</p>
+                    <p className="font-[480]">{queuedFiles.length === 1 ? humanizeMachineValue(queuedFiles[0].name) : `${queuedFiles.length} files selected`}</p>
                     <p className="b88-caption mt-1">
                       {uploading
                         ? 'Uploading now. Active uploads cannot be canceled; keep this page open until the upload finishes.'
@@ -318,8 +321,11 @@ export function MediaLibrary({
 
           {assets.length ? (
             // pb-28 keeps the floating selection bar from covering the last row.
-            <div className={`mt-6 grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 2xl:grid-cols-4 ${selected.length ? 'pb-28' : ''}`}>
-              {assets.map((asset) => (
+            <>
+            <div className={`mt-6 space-y-3 sm:grid sm:grid-cols-2 sm:gap-6 sm:space-y-0 lg:grid-cols-3 2xl:grid-cols-4 ${selected.length ? 'pb-28' : ''}`}>
+              {visibleAssets.map((asset) => {
+                const displayName = assetDisplayName(assets, asset.id);
+                return (
                 <article
                   key={asset.id}
                   ref={(element) => {
@@ -327,16 +333,52 @@ export function MediaLibrary({
                       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
                   }}
-                  className={`b88-card relative overflow-hidden p-3 sm:p-4 ${selectedSet.has(asset.id) || asset.id === createdDerivativeId ? 'border-ink bg-surface-soft' : ''}`}
+                  className={`b88-card relative h-28 overflow-visible p-2 sm:h-auto sm:overflow-hidden sm:p-4 ${selectedSet.has(asset.id) || asset.id === createdDerivativeId ? 'border-ink bg-surface-soft' : ''}`}
                 >
+                  <div className="flex h-full min-w-0 gap-3 sm:hidden">
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 gap-3 pr-9 text-left transition-opacity hover:opacity-80"
+                      onClick={() => toggle(asset.id)}
+                      aria-pressed={selectedSet.has(asset.id)}
+                    >
+                      <div className="size-24 shrink-0 overflow-hidden rounded-md">
+                        <AssetPreview asset={asset} />
+                      </div>
+                      <span className="min-w-0 self-center">
+                        <span className="block truncate text-sm font-[540]">{displayName}</span>
+                        <Badge tone={asset.status === 'READY' ? 'mint' : asset.status === 'FAILED' ? 'coral' : 'cream'}>
+                          {humanizeMachineValue(asset.status)}
+                        </Badge>
+                        <span className="b88-caption mt-2 block">
+                          {asset.usageCount} {asset.usageCount === 1 ? 'post' : 'posts'} · {asset.sizeLabel}
+                        </span>
+                      </span>
+                    </button>
+                    <details className="absolute right-2 top-2 z-10">
+                      <summary
+                        aria-label={`Actions for ${displayName}`}
+                        className="flex size-10 cursor-pointer list-none items-center justify-center rounded-full bg-canvas shadow-sm [&::-webkit-details-marker]:hidden"
+                      >
+                        <MoreHorizontal size={18} />
+                      </summary>
+                      <div className="absolute right-0 top-11 grid min-w-40 gap-1 rounded-md border border-hairline bg-canvas p-2 shadow-lg">
+                        <Button type="button" variant="tertiary" onClick={() => setPreview(asset)}><Eye size={15} /> Preview</Button>
+                        <Button type="button" variant="tertiary" onClick={() => downloadAsset(asset)}><Download size={15} /> Download</Button>
+                        {asset.status === 'FAILED' && canEdit && <Button type="button" variant="tertiary" disabled={pending} onClick={() => runRetry(asset.id)}>Retry</Button>}
+                        {asset.status === 'FAILED' && canDelete && <Button type="button" variant="tertiary" disabled={pending} onClick={() => runDelete(asset)}><Trash2 size={15} /> Remove</Button>}
+                      </div>
+                    </details>
+                  </div>
+                  <div className="hidden sm:block">
                   <button type="button" className="block w-full text-left transition-opacity hover:opacity-80" onClick={() => toggle(asset.id)} aria-pressed={selectedSet.has(asset.id)}>
                     <AssetPreview asset={asset} />
                     <div className="mt-4 flex items-start justify-between gap-2">
-                      <p className="min-w-0 truncate font-[480]">{asset.filename}</p>
-                      <Badge tone={asset.status === 'READY' ? 'mint' : asset.status === 'FAILED' ? 'coral' : 'cream'}>{asset.status.toLowerCase()}</Badge>
+                      <p className="min-w-0 truncate font-[480]">{displayName}</p>
+                      <Badge tone={asset.status === 'READY' ? 'mint' : asset.status === 'FAILED' ? 'coral' : 'cream'}>{humanizeMachineValue(asset.status)}</Badge>
                     </div>
                     <div className="mt-2 hidden flex-wrap gap-2 sm:flex">
-                      <Badge tone="outline">{asset.assetKind.toLowerCase()}</Badge>
+                      <Badge tone="outline">{humanizeMachineValue(asset.assetKind)}</Badge>
                       {asset.id === createdDerivativeId && <Badge tone="ink">New derivative</Badge>}
                       {asset.usageCount > 0 && <Badge tone="ink">Post attachment</Badge>}
                     </div>
@@ -352,12 +394,24 @@ export function MediaLibrary({
                     </div>
                   )}
                   <div className="absolute right-6 top-6 flex gap-2">
-                    <IconButton icon={Eye} label={`Preview ${asset.filename}`} onClick={() => setPreview(asset)} />
-                    <IconButton icon={Download} label={`Download ${asset.filename}`} onClick={() => downloadAsset(asset)} />
+                    <IconButton icon={Eye} label={`Preview ${displayName}`} onClick={() => setPreview(asset)} />
+                    <IconButton icon={Download} label={`Download ${displayName}`} onClick={() => downloadAsset(asset)} />
+                  </div>
                   </div>
                 </article>
-              ))}
+              )})}
             </div>
+            {visibleAssetCount < assets.length && (
+              <Button
+                type="button"
+                variant="secondary"
+                className="mt-6"
+                onClick={() => setVisibleAssetCount((count) => Math.min(count + 12, assets.length))}
+              >
+                Load more
+              </Button>
+            )}
+            </>
           ) : (
             <div className="mt-6">
               <EmptyState eyebrow="No matching assets" title="The library is clear">
@@ -371,6 +425,7 @@ export function MediaLibrary({
       {preview && (
         <PreviewDrawer
           asset={preview}
+          displayName={assetDisplayName(assets, preview.id)}
           slug={slug}
           canEdit={canEdit}
           canDelete={canDelete}
@@ -407,7 +462,7 @@ function AssetPreview({ asset }: { asset: MediaLibraryAsset }) {
       type={asset.previewUrl ? 'image' : placeholderType}
       src={asset.previewUrl || null}
       alt={asset.altText ?? ''}
-      label={asset.type.toLowerCase()}
+      label={humanizeMachineValue(asset.type)}
       showAltWarning={asset.type !== 'AUDIO'}
     />
   );
@@ -443,8 +498,8 @@ function BulkBar({ ids, folders, tags, canDelete, pending, onSubmit, onClear }: 
   );
 }
 
-function PreviewDrawer({ asset, slug, canEdit, canDelete, pending, onClose, onDerivative, onDetails, onRetry, onDelete }: {
-  asset: MediaLibraryAsset; slug: string; canEdit: boolean; canDelete: boolean; pending: boolean;
+function PreviewDrawer({ asset, displayName, slug, canEdit, canDelete, pending, onClose, onDerivative, onDetails, onRetry, onDelete }: {
+  asset: MediaLibraryAsset; displayName: string; slug: string; canEdit: boolean; canDelete: boolean; pending: boolean;
   onClose: () => void; onDerivative: (id: string, data: FormData) => void;
   onDetails: (id: string, data: FormData) => void; onRetry: () => void; onDelete: () => void;
 }) {
@@ -475,7 +530,7 @@ function PreviewDrawer({ asset, slug, canEdit, canDelete, pending, onClose, onDe
       <aside className="ml-auto flex h-full w-full max-w-xl flex-col bg-canvas" onMouseDown={(event) => event.stopPropagation()}>
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="flex items-start justify-between gap-4">
-          <div><p className="b88-caption">Asset preview</p><h2 className="b88-heading mt-2 break-all">{asset.filename}</h2></div>
+          <div><p className="b88-caption">Asset preview</p><h2 className="b88-heading mt-2 break-all">{displayName}</h2></div>
           <button type="button" aria-label="Close preview" className="flex size-10 items-center justify-center rounded-full bg-surface-soft" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="mt-6">
@@ -485,7 +540,7 @@ function PreviewDrawer({ asset, slug, canEdit, canDelete, pending, onClose, onDe
                 poster={asset.previewUrl || undefined}
                 ratio="16:9"
                 duration={asset.duration ? formatDuration(asset.duration) : undefined}
-                caption={`${asset.filename} · video preview`}
+                caption={`${displayName} · video preview`}
                 errorMessage="This asset could not be played."
               />
             : asset.type === 'AUDIO'
@@ -493,7 +548,7 @@ function PreviewDrawer({ asset, slug, canEdit, canDelete, pending, onClose, onDe
               : <AssetPreview asset={asset} />}
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Badge tone="outline">{asset.assetKind}</Badge>
+          <Badge tone="outline">{humanizeMachineValue(asset.assetKind)}</Badge>
           {asset.usageCount > 0 && <Badge tone="ink">Post attachment</Badge>}
           <span className="b88-caption">{asset.mimeType} · {asset.sizeLabel}</span>
         </div>
@@ -536,7 +591,7 @@ function PreviewDrawer({ asset, slug, canEdit, canDelete, pending, onClose, onDe
               {asset.usages.map((usage) => (
                 <Link key={usage.id} href={`/w/${slug}/posts/${usage.id}`} className="flex min-h-10 items-center justify-between gap-3 rounded-md bg-surface-soft px-3 text-sm transition-opacity hover:opacity-80">
                   <span className="min-w-0 truncate">{usage.title}</span>
-                  <span className="b88-caption shrink-0">{usage.status.toLowerCase()} · {usage.platform.toLowerCase()}</span>
+                  <span className="b88-caption shrink-0">{humanizeMachineValue(usage.status)} · {humanizeMachineValue(usage.platform)}</span>
                 </Link>
               ))}
               <p className="text-sm">Remove or replace this attachment in every post before deleting the library asset. Published posts on external platforms are not changed by library edits.</p>
@@ -557,7 +612,7 @@ function PreviewDrawer({ asset, slug, canEdit, canDelete, pending, onClose, onDe
           <>
             <form action={(data) => onDetails(asset.id, data)} className="mt-8">
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field name="filename" label="Filename" defaultValue={asset.filename} required />
+                <Field name="filename" label="Filename" defaultValue={editableAssetFilename(asset.filename, displayName)} required />
                 <Field name="altText" label="Alt text" defaultValue={asset.altText ?? ''} placeholder="Describe the image" />
               </div>
               <Button type="submit" variant="secondary" className="mt-3" disabled={pending}><Pencil size={15} /> Save details</Button>
@@ -645,6 +700,26 @@ function FolderLink({
 
 function FolderSelect({ folders, name, label, defaultValue }: { folders: FolderItem[]; name: string; label: string; defaultValue?: string }) {
   return <select className="b88-input" name={name} defaultValue={defaultValue}><option value="">{label}</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.label}</option>)}</select>;
+}
+
+function assetDisplayName(assets: MediaLibraryAsset[], assetId: string) {
+  const index = assets.findIndex((asset) => asset.id === assetId);
+  const asset = assets[index];
+  if (!asset) return 'Media asset';
+  const generatedVideo =
+    asset.filename.trim().toLowerCase() === 'ai-video-generate.webm';
+  const sequence = generatedVideo
+    ? assets
+        .slice(0, index + 1)
+        .filter((item) => item.filename.trim().toLowerCase() === 'ai-video-generate.webm')
+        .length
+    : undefined;
+  return humanizeMachineValue(asset.filename, { sequence });
+}
+
+function editableAssetFilename(filename: string, displayName: string) {
+  const extension = filename.match(/\.[a-z0-9]{2,5}$/i)?.[0] ?? '';
+  return `${displayName}${extension}`;
 }
 
 function errorMessage(error: unknown, fallback: string) {

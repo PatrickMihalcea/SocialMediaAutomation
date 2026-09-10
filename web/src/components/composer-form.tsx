@@ -11,6 +11,7 @@ import {
   Checkbox,
   Dialog,
   Field,
+  humanizeMachineValue,
   MediaUploader,
   Select,
   StatusMessage,
@@ -554,16 +555,19 @@ export function ComposerForm({
             )}
             <div className="mt-4 max-h-96 overflow-y-auto pr-2">
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
-              {libraryAssets.map((asset) => {
+              {libraryAssets.map((asset, assetIndex) => {
                 const selected = activeVersion.media.some((item) => item.mediaAssetId === asset.id);
+                const displayName = humanizeMachineValue(asset.filename, {
+                  sequence: generatedVideoSequence(libraryAssets, assetIndex),
+                });
                 return (
                   <div
                     key={asset.id}
                     className={`transition-opacity hover:opacity-80 ${readOnly ? 'pointer-events-none opacity-40' : ''}`}
                   >
                     <AssetTile
-                      title={asset.filename}
-                      meta={`${asset.type.toLowerCase()}${selected ? ' · Selected' : ''}`}
+                      title={displayName}
+                      meta={`${humanizeMachineValue(asset.type)}${selected ? ' · Selected' : ''}`}
                       type={asset.type === 'VIDEO' ? 'video' : 'image'}
                       ratio="1:1"
                       src={asset.thumbnailUrl}
@@ -590,11 +594,17 @@ export function ComposerForm({
             {activeVersion.media.length > 0 && (
               <div className="mt-4 space-y-4">
                 {activeVersion.media.map((item, index) => {
-                  const asset = libraryAssets.find((entry) => entry.id === item.mediaAssetId);
+                  const assetIndex = libraryAssets.findIndex((entry) => entry.id === item.mediaAssetId);
+                  const asset = libraryAssets[assetIndex];
+                  const displayName = asset
+                    ? humanizeMachineValue(asset.filename, {
+                        sequence: generatedVideoSequence(libraryAssets, assetIndex),
+                      })
+                    : 'Missing media';
                   return (
                     <div key={item.mediaAssetId} className="b88-tile space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-[540]">{asset?.filename ?? 'Missing media'}</p>
+                        <p className="text-sm font-[540]">{displayName}</p>
                         <div className="flex flex-wrap gap-2">
                           <Button
                             type="button"
@@ -785,6 +795,14 @@ export function ComposerForm({
     </Dialog>
     </>
   );
+}
+
+function generatedVideoSequence(assets: ComposerAsset[], index: number): number | undefined {
+  if (assets[index]?.filename.trim().toLowerCase() !== 'ai-video-generate.webm') return undefined;
+  return assets
+    .slice(0, index + 1)
+    .filter((asset) => asset.filename.trim().toLowerCase() === 'ai-video-generate.webm')
+    .length;
 }
 
 function mergeDraft(base: ComposerDraft, stored: ComposerDraft, preserveInitialPlatform: boolean): ComposerDraft {

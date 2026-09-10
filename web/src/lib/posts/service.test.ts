@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Platform, PostStatus } from '@prisma/client';
+import { Platform, PostStatus, Prisma } from '@prisma/client';
 
 const mocks = vi.hoisted(() => {
   const tx = {
@@ -177,6 +177,28 @@ describe('savePost', () => {
       message: expect.stringContaining('no longer available'),
     });
     expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
+  it('turns a conditional-update P2025 into a readable save conflict', async () => {
+    mocks.findFirstPost.mockResolvedValue({
+      id: postId,
+      status: PostStatus.DRAFT,
+      updatedAt: new Date('2026-09-10T12:01:00.000Z'),
+      platforms: [{ status: 'PENDING' }],
+    });
+    mocks.tx.post.update.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Conditional update missed', {
+        code: 'P2025',
+        clientVersion: 'test',
+      }),
+    );
+    await expect(
+      savePost(workspaceId, authorId, { ...baseInput, id: postId }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'This post changed in another session. Reload it before saving so those changes are not overwritten.',
+    });
+    expect(mocks.tx.postPlatform.deleteMany).not.toHaveBeenCalled();
   });
 
   it('duplicates a published post as a new draft instead of mutating it', async () => {
