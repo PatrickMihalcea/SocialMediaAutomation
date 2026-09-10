@@ -1,0 +1,42 @@
+import Link from 'next/link';
+import { Field, MediaUploader, Select, TextArea } from '@/bridge88/components';
+import { createWorkspaceAction } from '@/app/actions/workspace';
+import { ActionForm } from '@/components/action-form';
+import { PendingButton } from '@/components/action-ui';
+import { COMMON_TIMEZONES } from '@/lib/scheduling/time';
+import { requireUser } from '@/lib/auth/guard';
+
+export default async function NewWorkspacePage() {
+  await requireUser();
+  return (
+    <main id="main-content" className="mx-auto max-w-3xl px-6 py-14" tabIndex={-1}>
+      <Link href="/w" className="text-xl font-[540]">Bridge88</Link>
+      <p className="b88-eyebrow mt-14">New workspace</p>
+      <h1 className="b88-page-title mt-3">Create another workspace.</h1>
+      <p className="mt-3">Each workspace keeps its channels, posts, members, and brand voice isolated.</p>
+      <ActionForm action={createWorkspaceAction} className="b88-card mt-8 grid gap-5" encType="multipart/form-data">
+        <Field name="name" label="Workspace name" required />
+        <Field name="website" label="Website" type="url" placeholder="https://" />
+        <TextArea name="description" label="What does the business do?" rows={4} required />
+        <Field name="industry" label="Industry" />
+        <Field name="targetAudience" label="Target audience" />
+        <Select name="timezone" label="Timezone" defaultValue="UTC">
+          {COMMON_TIMEZONES.map((zone) => <option key={zone}>{zone}</option>)}
+        </Select>
+        <div>
+          <p className="b88-label">Workspace logo</p>
+          <MediaUploader
+            name="logo"
+            title="Drop your logo here"
+            hint="JPG, PNG, or WebP · up to 2 MB"
+            accept="image/jpeg,image/png,image/webp"
+            multiple={false}
+            compact
+          />
+        </div>
+        <input type="hidden" name="defaultLanguage" value="en" />
+        <div className="flex justify-end"><PendingButton type="submit" className="w-full sm:w-auto" pendingLabel="Creating workspace">Create workspace</PendingButton></div>
+      </ActionForm>
+    </main>
+  );
+}

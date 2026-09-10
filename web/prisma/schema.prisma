@@ -1,0 +1,1014 @@
+// Bridge88 — schema.
+// Every tenant-scoped row carries workspaceId and is indexed on it; authorization
+// is derived from the session server-side (see src/lib/auth/guard.ts), never from
+// a client-supplied workspace id.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- enums
+
+enum Platform {
+  INSTAGRAM
+  FACEBOOK
+  LINKEDIN
+  X
+  TIKTOK
+  YOUTUBE
+  MOCK
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum SocialAccountStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  ERROR
+  DISCONNECTED
+}
+
+enum PostStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
+enum PostPlatformStatus {
+  PENDING
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  GIF
+  AUDIO
+}
+
+enum MediaStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum CampaignStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AiMediaJobKind {
+  IMAGE_GENERATE
+  IMAGE_EDIT
+  IMAGE_VARIATION
+  VIDEO_GENERATE
+  VIDEO_ANIMATE
+  AUDIO_TTS
+  AUDIO_TRANSCRIBE
+  AUDIO_TRANSLATE
+}
+
+enum QueueName {
+  POST_PUBLISHING
+  MEDIA_PROCESSING
+  THUMBNAIL_GENERATION
+  ANALYTICS_SYNC
+  NOTIFICATION
+  AI_GENERATION
+  RECURRENCE_EXPANSION
+}
+
+enum NotificationType {
+  POST_PUBLISHED
+  POST_FAILED
+  OAUTH_EXPIRED
+  APPROVAL_REQUESTED
+  APPROVAL_COMPLETED
+  MEDIA_PROCESSING_COMPLETE
+  MEMBER_JOINED
+  LIMIT_REACHED
+}
+
+enum ApprovalDecision {
+  COMMENT
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+enum AiOperation {
+  CAPTION
+  REWRITE
+  HASHTAGS
+  IDEAS
+  IMAGE
+  IMAGE_EDIT
+  VIDEO
+  AUDIO
+  PLATFORM_ADAPTATION
+  CHAT
+  CALENDAR
+}
+
+enum AiRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+enum Plan {
+  FREE
+  PRO
+  BUSINESS
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+  UNPAID
+}
+
+enum RecurrenceStatus {
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+// ---------------------------------------------------------------- identity
+
+model User {
+  id             String    @id @default(uuid()) @db.Uuid
+  email          String    @unique
+  name           String?
+  image          String?
+  passwordHash   String?   @map("password_hash")
+  emailVerified  DateTime? @map("email_verified")
+  isPlatformAdmin Boolean  @default(false) @map("is_platform_admin")
+  notificationEmailEnabled Boolean @default(true) @map("notification_email_enabled")
+  lastLoginAt    DateTime? @map("last_login_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  accounts          Account[]
+  sessions          Session[]
+  memberships       WorkspaceMember[]
+  posts             Post[]
+  mediaAssets       MediaAsset[]
+  notifications     Notification[]
+  approvalComments  ApprovalComment[]
+  aiConversations   AiConversation[]
+  aiGenerations     AiGeneration[]
+  auditLogs         AuditLog[]
+  invitesSent       WorkspaceInvite[] @relation("InviteInviter")
+  oauthAttempts     OAuthAttempt[]
+  oauthSelections   OAuthSelection[]
+
+  @@index([createdAt])
+  @@map("users")
+}
+
+/// Auth.js OAuth account linkage (Google). Distinct from SocialAccount, which is
+/// a publishing target rather than a sign-in identity.
+model Account {
+  id                String  @id @default(uuid()) @db.Uuid
+  userId            String  @map("user_id") @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid()) @db.Uuid
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id") @db.Uuid
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+/// Single-use tokens for email verification and password reset. Stored hashed.
+model AuthToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  tokenHash String   @unique @map("token_hash")
+  email     String
+  purpose   String
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([email, purpose])
+  @@map("auth_tokens")
+}
+
+// ---------------------------------------------------------------- tenancy
+
+model Workspace {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String
+  slug            String   @unique
+  description     String?
+  website         String?
+  logoUrl         String?  @map("logo_url")
+  industry        String?
+  targetAudience  String?  @map("target_audience")
+  timezone        String   @default("UTC")
+  defaultLanguage String   @default("en") @map("default_language")
+  onboardingStep  Int      @default(1) @map("onboarding_step")
+  onboardedAt     DateTime? @map("onboarded_at")
+  logoStorageKey  String?  @map("logo_storage_key")
+  /// Pausing holds the queue: existing slots keep their times, nothing new is
+  /// assigned, and due posts are not published until it resumes.
+  queuePaused     Boolean  @default(false) @map("queue_paused")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  members           WorkspaceMember[]
+  invites           WorkspaceInvite[]
+  brandSettings     BrandSettings?
+  socialAccounts    SocialAccount[]
+  posts             Post[]
+  mediaAssets       MediaAsset[]
+  mediaFolders      MediaFolder[]
+  mediaTags         MediaTag[]
+  campaigns         Campaign[]
+  schedulingRules   SchedulingRule[]
+  queueItems        QueueItem[]
+  recurringSchedules RecurringSchedule[]
+  analyticsSnapshots AnalyticsSnapshot[]
+  notifications     Notification[]
+  aiConversations   AiConversation[]
+  aiGenerations     AiGeneration[]
+  aiMediaJobs       AiMediaJob[]
+  subscription      Subscription?
+  usageRecords      UsageRecord[]
+  jobs              Job[]
+  auditLogs         AuditLog[]
+  oauthAttempts     OAuthAttempt[]
+  oauthSelections   OAuthSelection[]
+
+  @@index([createdAt])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String        @id @default(uuid()) @db.Uuid
+  workspaceId String        @map("workspace_id") @db.Uuid
+  userId      String        @map("user_id") @db.Uuid
+  role        WorkspaceRole @default(EDITOR)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+model WorkspaceInvite {
+  id          String        @id @default(uuid()) @db.Uuid
+  workspaceId String        @map("workspace_id") @db.Uuid
+  email       String
+  role        WorkspaceRole @default(EDITOR)
+  tokenHash   String        @unique @map("token_hash")
+  invitedById String        @map("invited_by_id") @db.Uuid
+  expiresAt   DateTime      @map("expires_at")
+  acceptedAt  DateTime?     @map("accepted_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation("InviteInviter", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId])
+  @@map("workspace_invites")
+}
+
+model BrandSettings {
+  id                    String   @id @default(uuid()) @db.Uuid
+  workspaceId           String   @unique @map("workspace_id") @db.Uuid
+  tone                  String?
+  personality           String?
+  targetAudience        String?  @map("target_audience")
+  writingStyle          String?  @map("writing_style")
+  wordsToUse            String[] @default([]) @map("words_to_use")
+  wordsToAvoid          String[] @default([]) @map("words_to_avoid")
+  emojiPolicy           String   @default("SPARING") @map("emoji_policy")
+  hashtagPolicy         String   @default("MODERATE") @map("hashtag_policy")
+  ctaStyle              String?  @map("cta_style")
+  additionalInstructions String? @map("additional_instructions")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("brand_settings")
+}
+
+// ---------------------------------------------------------------- channels
+
+model SocialAccount {
+  id                   String              @id @default(uuid()) @db.Uuid
+  workspaceId          String              @map("workspace_id") @db.Uuid
+  platform             Platform
+  accountName          String              @map("account_name")
+  accountHandle        String?             @map("account_handle")
+  /// The platform's own id for this account/page/channel.
+  externalAccountId    String              @map("external_account_id")
+  avatarUrl            String?             @map("avatar_url")
+  /// AES-256-GCM ciphertext. Never leaves the server; see src/lib/crypto/tokens.ts.
+  accessTokenEncrypted String?             @map("access_token_encrypted")
+  refreshTokenEncrypted String?            @map("refresh_token_encrypted")
+  tokenExpiresAt       DateTime?           @map("token_expires_at")
+  scopes               String[]            @default([])
+  status               SocialAccountStatus @default(ACTIVE)
+  statusMessage        String?             @map("status_message")
+  lastSyncedAt         DateTime?           @map("last_synced_at")
+  metadata             Json                @default("{}")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+
+  workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  postPlatforms PostPlatform[]
+  snapshots     AnalyticsSnapshot[]
+
+  @@unique([workspaceId, platform, externalAccountId])
+  @@index([workspaceId])
+  @@index([platform])
+  @@index([status])
+  @@index([createdAt])
+  @@map("social_accounts")
+}
+
+/// Short-lived, single-use OAuth handshake. Only a SHA-256 state hash is stored.
+model OAuthAttempt {
+  id                    String    @id @default(uuid()) @db.Uuid
+  stateHash             String    @unique @map("state_hash")
+  userId                String    @map("user_id") @db.Uuid
+  workspaceId           String    @map("workspace_id") @db.Uuid
+  platform              Platform
+  redirectUri           String    @map("redirect_uri")
+  codeVerifierEncrypted String?   @map("code_verifier_encrypted")
+  reconnectAccountId    String?   @map("reconnect_account_id") @db.Uuid
+  expiresAt             DateTime  @map("expires_at")
+  consumedAt            DateTime? @map("consumed_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([workspaceId, platform])
+  @@index([expiresAt])
+  @@map("oauth_attempts")
+}
+
+/// Encrypted callback results awaiting an explicit account/page choice.
+model OAuthSelection {
+  id                 String    @id @default(uuid()) @db.Uuid
+  secretHash         String    @unique @map("secret_hash")
+  userId             String    @map("user_id") @db.Uuid
+  workspaceId        String    @map("workspace_id") @db.Uuid
+  platform           Platform
+  resultsEncrypted   String    @db.Text @map("results_encrypted")
+  reconnectAccountId String?   @map("reconnect_account_id") @db.Uuid
+  expiresAt          DateTime  @map("expires_at")
+  consumedAt         DateTime? @map("consumed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([workspaceId, platform])
+  @@index([expiresAt])
+  @@map("oauth_selections")
+}
+
+// ---------------------------------------------------------------- content
+
+model Campaign {
+  id          String         @id @default(uuid()) @db.Uuid
+  workspaceId String         @map("workspace_id") @db.Uuid
+  name        String
+  description String?
+  startDate   DateTime?      @map("start_date")
+  endDate     DateTime?      @map("end_date")
+  color       String         @default("lime")
+  status      CampaignStatus @default(PLANNED)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  posts     Post[]
+
+  @@index([workspaceId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("campaigns")
+}
+
+model Post {
+  id          String     @id @default(uuid()) @db.Uuid
+  workspaceId String     @map("workspace_id") @db.Uuid
+  authorId    String?    @map("author_id") @db.Uuid
+  campaignId  String?    @map("campaign_id") @db.Uuid
+  status      PostStatus @default(DRAFT)
+  title       String?
+  /// Instant the post should publish, always stored UTC.
+  scheduledAt DateTime?  @map("scheduled_at")
+  publishedAt DateTime?  @map("published_at")
+  /// IANA zone the author picked the wall-clock time in.
+  timezone    String     @default("UTC")
+  recurringScheduleId String? @map("recurring_schedule_id") @db.Uuid
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  author            User?              @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  campaign          Campaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  recurringSchedule RecurringSchedule? @relation(fields: [recurringScheduleId], references: [id], onDelete: SetNull)
+  platforms         PostPlatform[]
+  queueItem         QueueItem?
+  approvalComments  ApprovalComment[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@index([workspaceId, scheduledAt])
+  @@index([scheduledAt])
+  @@index([status])
+  @@index([campaignId])
+  @@index([createdAt])
+  @@map("posts")
+}
+
+/// One logical post fans out to one row per target channel, each with its own
+/// copy, media and publish result.
+model PostPlatform {
+  id              String             @id @default(uuid()) @db.Uuid
+  postId          String             @map("post_id") @db.Uuid
+  workspaceId     String             @map("workspace_id") @db.Uuid
+  socialAccountId String             @map("social_account_id") @db.Uuid
+  platform        Platform
+  text            String             @default("")
+  firstComment    String?            @map("first_comment")
+  hashtags        String[]           @default([])
+  mentions        String[]           @default([])
+  link            String?
+  status          PostPlatformStatus @default(PENDING)
+  platformPostId  String?            @map("platform_post_id")
+  platformUrl     String?            @map("platform_url")
+  publishedAt     DateTime?          @map("published_at")
+  errorMessage    String?            @map("error_message")
+  errorCode       String?            @map("error_code")
+  attempts        Int                @default(0)
+  /// Stable key that makes republish attempts safe: the adapter is asked to
+  /// publish this key at most once. See src/lib/publishing/idempotency.ts.
+  idempotencyKey  String             @unique @map("idempotency_key")
+  responseMeta    Json               @default("{}") @map("response_meta")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  post          Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  socialAccount SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  media         PostMedia[]
+  analytics     PostAnalytics?
+
+  @@unique([postId, socialAccountId])
+  @@index([postId])
+  @@index([workspaceId])
+  @@index([socialAccountId])
+  @@index([platform])
+  @@index([status])
+  @@index([createdAt])
+  @@map("post_platforms")
+}
+
+model PostMedia {
+  id             String   @id @default(uuid()) @db.Uuid
+  postPlatformId String   @map("post_platform_id") @db.Uuid
+  mediaAssetId   String   @map("media_asset_id") @db.Uuid
+  position       Int      @default(0)
+  altText        String?  @map("alt_text")
+  /// Frame offset (seconds) chosen as the video cover.
+  thumbnailOffset Float?  @map("thumbnail_offset")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  postPlatform PostPlatform @relation(fields: [postPlatformId], references: [id], onDelete: Cascade)
+  mediaAsset   MediaAsset   @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([postPlatformId, position])
+  @@index([postPlatformId])
+  @@index([mediaAssetId])
+  @@map("post_media")
+}
+
+// ---------------------------------------------------------------- media
+
+model MediaFolder {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  parentId    String?  @map("parent_id") @db.Uuid
+  name        String
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent    MediaFolder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  MediaFolder[] @relation("FolderTree")
+  assets    MediaAsset[]
+
+  @@unique([workspaceId, parentId, name])
+  @@index([workspaceId])
+  @@index([parentId])
+  @@map("media_folders")
+}
+
+model MediaTag {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  name        String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assets    MediaAssetTag[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@map("media_tags")
+}
+
+model MediaAssetTag {
+  mediaAssetId String   @map("media_asset_id") @db.Uuid
+  mediaTagId   String   @map("media_tag_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  mediaAsset MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  mediaTag   MediaTag   @relation(fields: [mediaTagId], references: [id], onDelete: Cascade)
+
+  @@id([mediaAssetId, mediaTagId])
+  @@index([mediaTagId])
+  @@map("media_asset_tags")
+}
+
+model MediaAsset {
+  id           String      @id @default(uuid()) @db.Uuid
+  workspaceId  String      @map("workspace_id") @db.Uuid
+  folderId     String?     @map("folder_id") @db.Uuid
+  uploadedById String?     @map("uploaded_by_id") @db.Uuid
+  filename     String
+  mimeType     String      @map("mime_type")
+  type         MediaType
+  size         Int
+  width        Int?
+  height       Int?
+  /// Seconds, video only.
+  duration     Float?
+  storageKey   String      @map("storage_key")
+  thumbnailKey String?     @map("thumbnail_key")
+  altText      String?     @map("alt_text")
+  status       MediaStatus @default(READY)
+  usageCount   Int         @default(0) @map("usage_count")
+  /// Set when this asset was produced by the editor from another asset.
+  derivedFromId String?    @map("derived_from_id") @db.Uuid
+  derivationPreset String? @map("derivation_preset")
+  /// Set when the asset came out of AI image generation.
+  aiGenerationId String?   @map("ai_generation_id") @db.Uuid
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  folder      MediaFolder?    @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  uploadedBy  User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  derivedFrom MediaAsset?     @relation("Derivation", fields: [derivedFromId], references: [id], onDelete: SetNull)
+  derivatives MediaAsset[]    @relation("Derivation")
+  tags        MediaAssetTag[]
+  postMedia   PostMedia[]
+
+  @@index([workspaceId])
+  @@index([folderId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+  @@map("media_assets")
+}
+
+// ---------------------------------------------------------------- scheduling
+
+/// A weekly posting slot: local weekday + wall-clock time in the workspace zone.
+model SchedulingRule {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  /// 0 = Sunday … 6 = Saturday, in the workspace timezone.
+  weekday     Int
+  hour        Int
+  minute      Int      @default(0)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, weekday, hour, minute])
+  @@index([workspaceId])
+  @@map("scheduling_rules")
+}
+
+model QueueItem {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  postId      String   @unique @map("post_id") @db.Uuid
+  position    Int
+  /// Slot this item currently holds, mirrored onto post.scheduledAt.
+  slotAt      DateTime @map("slot_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, position])
+  @@index([slotAt])
+  @@map("queue_items")
+}
+
+model RecurringSchedule {
+  id          String           @id @default(uuid()) @db.Uuid
+  workspaceId String           @map("workspace_id") @db.Uuid
+  name        String
+  /// Template post content, cloned into each generated instance.
+  template    Json             @default("{}")
+  weekdays    Int[]            @default([])
+  hour        Int
+  minute      Int              @default(0)
+  timezone    String           @default("UTC")
+  startDate   DateTime         @map("start_date")
+  endDate     DateTime?        @map("end_date")
+  status      RecurrenceStatus @default(ACTIVE)
+  /// Instances are materialised only up to this point; a background job rolls
+  /// the window forward so the series never expands infinitely.
+  expandedUntil DateTime?      @map("expanded_until")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  posts     Post[]
+
+  @@index([workspaceId])
+  @@index([status])
+  @@map("recurring_schedules")
+}
+
+// ---------------------------------------------------------------- analytics
+
+/// Point-in-time account metrics pulled from a platform API.
+model AnalyticsSnapshot {
+  id              String   @id @default(uuid()) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  socialAccountId String   @map("social_account_id") @db.Uuid
+  platform        Platform
+  capturedOn      DateTime @map("captured_on") @db.Date
+  followers       Int?
+  following       Int?
+  impressions     Int?
+  reach           Int?
+  profileViews    Int?     @map("profile_views")
+  postsPublished  Int      @default(0) @map("posts_published")
+  engagements     Int?
+  raw             Json     @default("{}")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  socialAccount SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([socialAccountId, capturedOn])
+  @@index([workspaceId])
+  @@index([socialAccountId])
+  @@index([platform])
+  @@index([capturedOn])
+  @@map("analytics_snapshots")
+}
+
+/// Per-post metrics. Null means the platform does not expose the metric — the
+/// UI renders those as "not reported" rather than zero.
+model PostAnalytics {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  postPlatformId String   @unique @map("post_platform_id") @db.Uuid
+  platform       Platform
+  impressions    Int?
+  reach          Int?
+  likes          Int?
+  comments       Int?
+  shares         Int?
+  saves          Int?
+  clicks         Int?
+  videoViews     Int?     @map("video_views")
+  engagementRate Float?   @map("engagement_rate")
+  fetchedAt      DateTime @map("fetched_at")
+  raw            Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  postPlatform PostPlatform @relation(fields: [postPlatformId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([platform])
+  @@index([fetchedAt])
+  @@map("post_analytics")
+}
+
+// ---------------------------------------------------------------- collaboration
+
+model Notification {
+  id          String           @id @default(uuid()) @db.Uuid
+  workspaceId String           @map("workspace_id") @db.Uuid
+  userId      String           @map("user_id") @db.Uuid
+  type        NotificationType
+  title       String
+  body        String?
+  /// In-app destination, e.g. /w/northwind/calendar?post=…
+  href        String?
+  readAt      DateTime?        @map("read_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([userId, readAt])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model ApprovalComment {
+  id        String           @id @default(uuid()) @db.Uuid
+  postId    String           @map("post_id") @db.Uuid
+  workspaceId String         @map("workspace_id") @db.Uuid
+  authorId  String?          @map("author_id") @db.Uuid
+  body      String
+  decision  ApprovalDecision @default(COMMENT)
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  post   Post  @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([postId])
+  @@index([workspaceId])
+  @@index([createdAt])
+  @@map("approval_comments")
+}
+
+// ---------------------------------------------------------------- ai
+
+model AiConversation {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  title       String   @default("New conversation")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  AiMessage[]
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  role           AiRole
+  content        String   @db.Text
+  /// Proposed action awaiting the user's confirmation, if any.
+  proposal       Json?
+  proposalStatus String?  @map("proposal_status")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([workspaceId])
+  @@index([createdAt])
+  @@map("ai_messages")
+}
+
+model AiGeneration {
+  id           String      @id @default(uuid()) @db.Uuid
+  workspaceId  String      @map("workspace_id") @db.Uuid
+  userId       String?     @map("user_id") @db.Uuid
+  provider     String
+  model        String
+  operation    AiOperation
+  promptTokens Int?        @map("prompt_tokens")
+  completionTokens Int?    @map("completion_tokens")
+  totalTokens  Int?        @map("total_tokens")
+  /// USD, six decimal places.
+  estimatedCost Decimal?   @map("estimated_cost") @db.Decimal(12, 6)
+  succeeded    Boolean     @default(true)
+  errorMessage String?     @map("error_message")
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([workspaceId, createdAt])
+  @@index([operation])
+  @@index([createdAt])
+  @@map("ai_generations")
+}
+
+/// Asynchronous image, video and audio generation. The HTTP request only creates
+/// this row and enqueues work; the worker writes the resulting MediaAsset.
+model AiMediaJob {
+  id            String         @id @default(uuid()) @db.Uuid
+  workspaceId   String         @map("workspace_id") @db.Uuid
+  userId        String?        @map("user_id") @db.Uuid
+  kind          AiMediaJobKind
+  status        JobStatus      @default(QUEUED)
+  provider      String
+  model         String
+  prompt        String         @db.Text
+  inputAssetIds String[]       @default([]) @map("input_asset_ids")
+  outputAssetId String?        @map("output_asset_id") @db.Uuid
+  error         String?
+  durationMs    Int?           @map("duration_ms")
+  estimatedCost Decimal?       @map("estimated_cost") @db.Decimal(12, 6)
+  metadata      Json           @default("{}")
+  startedAt     DateTime?      @map("started_at")
+  completedAt   DateTime?      @map("completed_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@index([createdAt])
+  @@map("ai_media_jobs")
+}
+
+// ---------------------------------------------------------------- billing
+
+model Subscription {
+  id                   String             @id @default(uuid()) @db.Uuid
+  workspaceId          String             @unique @map("workspace_id") @db.Uuid
+  plan                 Plan               @default(FREE)
+  status               SubscriptionStatus @default(ACTIVE)
+  stripeCustomerId     String?            @unique @map("stripe_customer_id")
+  stripeSubscriptionId String?            @unique @map("stripe_subscription_id")
+  stripePriceId        String?            @map("stripe_price_id")
+  currentPeriodStart   DateTime?          @map("current_period_start")
+  currentPeriodEnd     DateTime?          @map("current_period_end")
+  cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
+  canceledAt           DateTime?          @map("canceled_at")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("subscriptions")
+}
+
+/// Monthly counters that plan limits are enforced against.
+model UsageRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  metric      String
+  /// First day of the billing month, UTC.
+  period      DateTime @db.Date
+  value       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, metric, period])
+  @@index([workspaceId])
+  @@map("usage_records")
+}
+
+// ---------------------------------------------------------------- operations
+
+model Job {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String?   @map("workspace_id") @db.Uuid
+  queue       QueueName
+  type        String
+  /// Present only while a deduplicated job is active. Cleared on terminal state
+  /// so the same logical operation can be queued again later.
+  dedupeKey   String?   @map("dedupe_key")
+  status      JobStatus @default(QUEUED)
+  payload     Json      @default("{}")
+  result      Json?
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5) @map("max_attempts")
+  error       String?
+  /// Earliest time a retry may run — backoff is expressed here.
+  runAt       DateTime  @default(now()) @map("run_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  /// External queue id (BullMQ) when the Redis driver is active.
+  externalId  String?   @map("external_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([queue, dedupeKey])
+  @@index([workspaceId])
+  @@index([queue, status, runAt])
+  @@index([status])
+  @@index([createdAt])
+  @@map("jobs")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String?  @map("workspace_id") @db.Uuid
+  userId      String?  @map("user_id") @db.Uuid
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  metadata    Json     @default("{}")
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

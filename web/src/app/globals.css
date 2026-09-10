@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.marketing-shell{max-width:var(--container-max);margin:0 auto;padding-inline:var(--gutter-desktop)}
+/* The sticky bar bleeds into the shell gutters so nothing scrolls past its edges. */
+.marketing-nav{min-height:var(--nav-height);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-sm);margin-inline:calc(var(--gutter-desktop) * -1);padding:var(--space-xs) var(--gutter-desktop);border-bottom:1px solid var(--hairline-soft);position:sticky;top:0;z-index:20;background:var(--canvas)}
+/* minmax(0,…) rather than bare fr: an fr track keeps a min-content floor, which
+   let the hero copy and mock push the page wider than the viewport. */
+.hero-block{margin:var(--space-xxl) 0 96px;background:var(--block-lime);border-radius:var(--radius-lg);padding:var(--space-xxl) var(--space-xl);display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:var(--space-xxl);align-items:center}
+.product-mock{background:var(--canvas);border:1px solid var(--hairline);border-radius:var(--radius-lg);padding:var(--space-lg);min-height:360px}
+.auth-shell{min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.auth-story{background:var(--block-lilac);padding:var(--space-xxl);display:flex;flex-direction:column;justify-content:space-between;gap:var(--space-xl)}
+.auth-form{display:flex;align-items:center;justify-content:center;padding:var(--space-xl)}
+.auth-card{width:min(100%,460px)}
+@media(max-width:760px){
+  .marketing-shell{padding-inline:var(--gutter-mobile)}
+  .marketing-nav{margin-inline:calc(var(--gutter-mobile) * -1);padding-inline:var(--gutter-mobile)}
+  .hero-block{margin:var(--space-lg) calc(var(--gutter-mobile) * -1) var(--space-3xl);border-radius:0;padding:var(--space-xxl) var(--space-lg);grid-template-columns:minmax(0,1fr)}
+  .product-mock{min-height:260px}
+  .auth-shell{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr}
+  .auth-story{flex-direction:row;flex-wrap:wrap;align-items:center;gap:var(--space-xs) var(--space-md);padding:var(--space-md) var(--gutter-mobile)}
+  .auth-story-lede{display:none}
+  .auth-form{padding:var(--space-lg)}
+}

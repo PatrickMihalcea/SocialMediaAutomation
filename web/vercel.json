@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/publish",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/analytics",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/recurrence",
+      "schedule": "15 0 * * *"
+    }
+  ]
+}
