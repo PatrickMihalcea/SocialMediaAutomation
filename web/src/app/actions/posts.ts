@@ -16,9 +16,16 @@ import {
   savePost,
 } from '@/lib/posts/service';
 import { postPlatformInputSchema } from '@/lib/posts/schemas';
+import {
+  applyCancelledRestore,
+  applyGuardedReschedule,
+  friendlyPublishFailure,
+  isPostActionLegal,
+} from '@/lib/posts/lifecycle';
 import { formatInZone, localInputToUtc } from '@/lib/scheduling/time';
 import { enqueue } from '@/lib/queue';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
+import { PLATFORM_LABELS } from '@/lib/social/labels';
 
 /**
  * The composer keeps the user on the page when a post cannot be saved, so this
@@ -78,10 +85,11 @@ async function persistPost(
     if (status === PostStatus.SCHEDULED && !scheduledLocal) {
       throw invalid(`Pick a date and time (${ctx.workspace.timezone}) before scheduling.`);
     }
-    const scheduledAt =
-      status === PostStatus.SCHEDULED && scheduledLocal
-        ? localInputToUtc(scheduledLocal, ctx.workspace.timezone)
-        : null;
+    // Preserve a contextual calendar slot on drafts and approval submissions;
+    // scheduling is still the only intent that requires the value.
+    const scheduledAt = scheduledLocal
+      ? localInputToUtc(scheduledLocal, ctx.workspace.timezone)
+      : null;
 
     const post = await savePost(ctx.workspace.id, ctx.user.id, {
       id: postId,
@@ -133,7 +141,7 @@ async function persistPost(
 export async function postCommandAction(
   slug: string,
   postId: string,
-  command: 'cancel' | 'delete' | 'duplicate' | 'publish' | 'retry' | 'reschedule',
+  command: 'cancel' | 'delete' | 'duplicate' | 'publish' | 'retry' | 'reschedule' | 'restore',
   formData?: FormData,
 ): Promise<PostCommandState> {
   try {
@@ -151,6 +159,9 @@ export async function postCommandAction(
     const ctx = await requireWorkspace(slug, capability);
     const post = await db.post.findFirst({ where: { id: postId, workspaceId: ctx.workspace.id } });
     if (!post) throw invalid('That post no longer exists.');
+    if (!isPostActionLegal(post.status, command)) {
+      throw invalid('That action is no longer available for this post. Refresh to see its current status.');
+    }
     if (command === 'delete') {
       await deletePost(ctx.workspace.id, post.id);
       revalidatePath(`/w/${slug}/calendar`);
@@ -182,6 +193,12 @@ export async function postCommandAction(
       await db.post.update({ where: { id: post.id, workspaceId: ctx.workspace.id }, data: { status: 'CANCELLED' } });
       await db.postPlatform.updateMany({ where: { postId, workspaceId: ctx.workspace.id }, data: { status: 'CANCELLED' } });
     }
+    if (command === 'restore') {
+      await db.$transaction((tx) => applyCancelledRestore(tx, {
+        postId: post.id,
+        workspaceId: ctx.workspace.id,
+      }));
+    }
     if (command === 'reschedule') {
       const local = String(formData?.get('scheduledAt') || '');
       if (!local) throw invalid(`Pick a date and time (${ctx.workspace.timezone}) before rescheduling.`);
@@ -191,14 +208,12 @@ export async function postCommandAction(
         throw invalid(`${formatInZone(scheduledAt, ctx.workspace.timezone)} has already passed. Any future slot works, earlier or later than the current one.`);
       }
       await assertStoredPostValid(ctx.workspace.id, post.id);
-      await db.post.update({
-        where: { id: post.id, workspaceId: ctx.workspace.id },
-        data: { status: 'SCHEDULED', scheduledAt, timezone: ctx.workspace.timezone },
-      });
-      await db.postPlatform.updateMany({
-        where: { postId, workspaceId: ctx.workspace.id, status: { in: ['FAILED', 'CANCELLED'] } },
-        data: { status: 'PENDING', errorMessage: null, errorCode: null },
-      });
+      await db.$transaction((tx) => applyGuardedReschedule(tx, {
+        postId: post.id,
+        workspaceId: ctx.workspace.id,
+        scheduledAt,
+        timezone: ctx.workspace.timezone,
+      }));
     }
     if (command === 'publish' || command === 'retry') {
       // Guards the two-tab race: the button is hidden once a post goes live, but
@@ -222,4 +237,63 @@ export async function postCommandAction(
     if (isRedirectError(error)) throw error;
     return actionError(error, 'The post could not be updated.');
   }
+}
+
+export type PostPublishOutcome = {
+  accountName: string;
+  platformLabel: string;
+  status: 'waiting' | 'publishing' | 'published' | 'failed' | 'skipped' | 'cancelled';
+  statusLabel: string;
+  guidance: string | null;
+};
+
+export async function getPostPublishOutcomesAction(
+  slug: string,
+  postId: string,
+): Promise<PostPublishOutcome[]> {
+  const ctx = await requireWorkspace(slug, 'post:view');
+  const rows = await db.postPlatform.findMany({
+    where: { postId, workspaceId: ctx.workspace.id, post: { workspaceId: ctx.workspace.id } },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      platform: true,
+      status: true,
+      errorCode: true,
+      socialAccount: { select: { accountName: true } },
+    },
+  });
+  const labels = {
+    PENDING: ['waiting', 'Waiting'],
+    PUBLISHING: ['publishing', 'Publishing'],
+    PUBLISHED: ['published', 'Published'],
+    FAILED: ['failed', 'Needs attention'],
+    SKIPPED: ['skipped', 'Not sent'],
+    CANCELLED: ['cancelled', 'Cancelled'],
+  } as const;
+  return rows.map((row) => ({
+    accountName: row.socialAccount.accountName,
+    platformLabel: PLATFORM_LABELS[row.platform],
+    status: labels[row.status][0],
+    statusLabel: labels[row.status][1],
+    guidance: row.status === 'FAILED' ? friendlyPublishFailure(row.errorCode) : null,
+  }));
+}
+
+export async function listAttachableDraftsAction(
+  slug: string,
+): Promise<Array<{ id: string; label: string }>> {
+  const ctx = await requireWorkspace(slug, 'post:update');
+  const posts = await db.post.findMany({
+    where: {
+      workspaceId: ctx.workspace.id,
+      status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SCHEDULED', 'FAILED', 'CANCELLED'] },
+    },
+    orderBy: { updatedAt: 'desc' },
+    take: 100,
+    select: { id: true, title: true, status: true },
+  });
+  return posts.map((post) => ({
+    id: post.id,
+    label: `${post.title || 'Untitled post'} · ${post.status === 'PENDING_APPROVAL' ? 'In review' : post.status.charAt(0) + post.status.slice(1).toLowerCase()}`,
+  }));
 }

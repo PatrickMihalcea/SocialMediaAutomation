@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { DateTime } from 'luxon';
+import type { PostStatus } from '@prisma/client';
 import {
   CalendarCheck,
   CalendarDays,
@@ -15,23 +16,29 @@ import {
   List,
   Lock,
   PenLine,
+  RotateCcw,
   Send,
   Trash2,
 } from 'lucide-react';
 import { Badge, Button, Dialog, EmptyState, Field, IconButton, Select, StatusMessage } from '@/bridge88/components';
-import { postCommandAction } from '@/app/actions/posts';
+import {
+  getPostPublishOutcomesAction,
+  postCommandAction,
+  type PostPublishOutcome,
+} from '@/app/actions/posts';
 import {
   commitBulkScheduleAction,
   previewBulkScheduleAction,
   reschedulePostAction,
 } from '@/app/actions/queue';
 import { PlatformGlyph, StatusGlyph } from '@/components/visuals';
+import { legalPostActions } from '@/lib/posts/lifecycle';
 
 export type CalendarPost = {
   id: string;
   title: string;
   text: string;
-  status: string;
+  status: PostStatus;
   scheduledAt: string | null;
   campaign: string | null;
   platforms: string[];
@@ -114,10 +121,37 @@ export function CalendarShell({
   const [bulkSlots, setBulkSlots] = useState<string[]>([]);
   const [message, setMessage] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [publishConfirmation, setPublishConfirmation] = useState<{ postId: string; retry: boolean } | null>(null);
+  const [cancelConfirmation, setCancelConfirmation] = useState<string | null>(null);
   const [publishingPostId, setPublishingPostId] = useState<string | null>(null);
+  const [outcomes, setOutcomes] = useState<PostPublishOutcome[]>([]);
+  const [outcomeError, setOutcomeError] = useState('');
+  const [outcomesLoading, setOutcomesLoading] = useState(false);
   // Resolved after hydration so the server render never disagrees about the date.
   const [todayKey, setTodayKey] = useState<string | null>(null);
   useEffect(() => setTodayKey(DateTime.now().setZone(timezone).toISODate()), [timezone]);
+
+  useEffect(() => {
+    if (!selectedPost) {
+      setOutcomes([]);
+      setOutcomeError('');
+      return;
+    }
+    let active = true;
+    setOutcomesLoading(true);
+    setOutcomeError('');
+    void getPostPublishOutcomesAction(slug, selectedPost.id)
+      .then((result) => {
+        if (active) setOutcomes(result);
+      })
+      .catch(() => {
+        if (active) setOutcomeError('Channel results could not be loaded. Close this panel and try again.');
+      })
+      .finally(() => {
+        if (active) setOutcomesLoading(false);
+      });
+    return () => { active = false; };
+  }, [selectedPost, slug]);
 
   useEffect(() => {
     if (
@@ -211,7 +245,7 @@ export function CalendarShell({
     });
   }
 
-  function command(postId: string, action: 'duplicate' | 'delete' | 'publish' | 'retry' | 'cancel') {
+  function command(postId: string, action: 'duplicate' | 'delete' | 'publish' | 'retry' | 'cancel' | 'restore') {
     if (action === 'publish' || action === 'retry') {
       setPublishingPostId(postId);
       setMessage({ text: action === 'retry' ? 'Retrying publish.' : 'Publishing post.', tone: 'success' });
@@ -313,11 +347,27 @@ export function CalendarShell({
                 const key = day.toISODate()!;
                 const dayPosts = byDay.get(key) ?? [];
                 const isToday = key === todayKey;
+                const composerSlot = day.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
+                const canCreateHere = dayPosts.length === 0 && composerSlot.toMillis() > DateTime.now().setZone(timezone).toMillis();
+                const openComposer = () => {
+                  if (!canCreateHere) return;
+                  router.push(`/w/${slug}/compose?scheduledAt=${encodeURIComponent(composerSlot.toFormat("yyyy-MM-dd'T'HH:mm"))}`);
+                };
                 return (
                   <div
                     key={key}
                     aria-current={isToday ? 'date' : undefined}
-                    className={`min-h-36 border-b border-r border-hairline-soft p-2 ${day.month !== anchorDate.month && view === 'month' ? 'bg-surface-soft' : ''}`}
+                    role={canCreateHere ? 'link' : undefined}
+                    tabIndex={canCreateHere ? 0 : undefined}
+                    aria-label={canCreateHere ? `Create a post for ${day.toFormat('d LLL yyyy')} at 09:00` : undefined}
+                    className={`min-h-36 h-36 overflow-y-auto border-b border-r border-hairline-soft p-2 ${canCreateHere ? 'cursor-pointer transition-opacity hover:opacity-80' : ''} ${day.month !== anchorDate.month && view === 'month' ? 'bg-surface-soft' : ''}`}
+                    onClick={openComposer}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openComposer();
+                      }
+                    }}
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => movePost(event.dataTransfer.getData('text/post-id'), day)}
                   >
@@ -336,7 +386,10 @@ export function CalendarShell({
                           draggable={isMovable(post.status)}
                           title={isMovable(post.status) ? undefined : publishedMoveHint(post.status)}
                           onDragStart={(event) => event.dataTransfer.setData('text/post-id', post.id)}
-                          onClick={() => navigate({ post: post.id })}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            navigate({ post: post.id });
+                          }}
                           className={`block w-full rounded-sm p-2 text-left text-xs transition-opacity hover:opacity-80 ${isMovable(post.status) ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${statusBlocks[post.status] ?? 'bg-surface-soft'}`}
                         >
                           <span className="mb-1 flex items-center gap-1.5">
@@ -421,12 +474,34 @@ export function CalendarShell({
               <div><dt className="b88-caption">Accounts</dt><dd>{selectedPost.accounts.join(', ') || 'No account'}</dd></div>
               <div><dt className="b88-caption">Campaign</dt><dd>{selectedPost.campaign ?? 'No campaign'}</dd></div>
             </dl>
+            <section className="mt-6 border-t border-hairline pt-6" aria-busy={outcomesLoading}>
+              <p className="b88-eyebrow">Channel results</p>
+              {outcomesLoading && <p className="mt-3 text-sm">Loading channel results.</p>}
+              {outcomeError && <StatusMessage tone="error" className="mt-3">{outcomeError}</StatusMessage>}
+              {!outcomesLoading && !outcomeError && outcomes.length === 0 && (
+                <p className="mt-3 text-sm">No publishing channels are attached to this post.</p>
+              )}
+              <div className="mt-3 space-y-3">
+                {outcomes.map((outcome) => (
+                  <div key={`${outcome.platformLabel}-${outcome.accountName}`} className="b88-tile">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-[540]">{outcome.platformLabel} · {outcome.accountName}</p>
+                      <Badge tone={outcome.status === 'published' ? 'mint' : outcome.status === 'failed' ? 'coral' : 'outline'}>
+                        {outcome.statusLabel}
+                      </Badge>
+                    </div>
+                    {outcome.guidance && <p className="mt-2 text-sm">{outcome.guidance}</p>}
+                  </div>
+                ))}
+              </div>
+            </section>
             <div className="mt-8 flex flex-wrap gap-2">
-              <Button type="button" href={`/w/${slug}/compose/${selectedPost.id}`}><PenLine size={16} strokeWidth={1.75} /> Edit post</Button>
-              {['DRAFT', 'APPROVED', 'SCHEDULED', 'FAILED', 'CANCELLED'].includes(selectedPost.status) && <Button type="button" disabled={pending || publishingPostId === selectedPost.id} aria-busy={publishingPostId === selectedPost.id} onClick={() => command(selectedPost.id, selectedPost.status === 'FAILED' ? 'retry' : 'publish')}><Send size={16} strokeWidth={1.75} /> {publishingPostId === selectedPost.id ? 'Publishing' : selectedPost.status === 'FAILED' ? 'Retry publish' : 'Publish now'}</Button>}
-              <Button type="button" variant="secondary" disabled={pending} onClick={() => command(selectedPost.id, 'duplicate')}><Copy size={16} strokeWidth={1.75} /> Duplicate</Button>
-              {selectedPost.status === 'SCHEDULED' && <Button type="button" variant="secondary" disabled={pending} onClick={() => command(selectedPost.id, 'cancel')}><CalendarX size={16} strokeWidth={1.75} /> Cancel</Button>}
-              {canDelete && <Button type="button" variant="tertiary" disabled={pending} onClick={() => setDeleteOpen(true)}><Trash2 size={16} strokeWidth={1.75} /> Delete</Button>}
+              {legalPostActions(selectedPost.status).includes('edit') && <Button type="button" href={`/w/${slug}/compose/${selectedPost.id}`}><PenLine size={16} strokeWidth={1.75} /> {selectedPost.status === 'PUBLISHED' ? 'Edit as new draft' : 'Edit post'}</Button>}
+              {(legalPostActions(selectedPost.status).includes('publish') || legalPostActions(selectedPost.status).includes('retry')) && <Button type="button" disabled={pending || publishingPostId === selectedPost.id} aria-busy={publishingPostId === selectedPost.id} onClick={() => setPublishConfirmation({ postId: selectedPost.id, retry: selectedPost.status === 'FAILED' })}><Send size={16} strokeWidth={1.75} /> {publishingPostId === selectedPost.id ? 'Publishing' : selectedPost.status === 'FAILED' ? 'Retry publish' : 'Publish now'}</Button>}
+              {legalPostActions(selectedPost.status).includes('restore') && <Button type="button" variant="secondary" disabled={pending} onClick={() => command(selectedPost.id, 'restore')}><RotateCcw size={16} strokeWidth={1.75} /> Restore draft</Button>}
+              {legalPostActions(selectedPost.status).includes('duplicate') && <Button type="button" variant="secondary" disabled={pending} onClick={() => command(selectedPost.id, 'duplicate')}><Copy size={16} strokeWidth={1.75} /> Duplicate</Button>}
+              {legalPostActions(selectedPost.status).includes('cancel') && <Button type="button" variant="secondary" disabled={pending} onClick={() => setCancelConfirmation(selectedPost.id)}><CalendarX size={16} strokeWidth={1.75} /> Cancel</Button>}
+              {canDelete && legalPostActions(selectedPost.status).includes('delete') && <Button type="button" variant="tertiary" disabled={pending} onClick={() => setDeleteOpen(true)}><Trash2 size={16} strokeWidth={1.75} /> Delete</Button>}
             </div>
           </aside>
         </div>
@@ -443,6 +518,54 @@ export function CalendarShell({
       >
         This permanently removes the post and its publishing history.
         {message?.tone === 'error' && <StatusMessage tone="error" className="mt-4">{message.text}</StatusMessage>}
+      </Dialog>
+      <Dialog
+        open={Boolean(publishConfirmation)}
+        eyebrow="Confirm publishing"
+        title={publishConfirmation?.retry ? 'Retry unsuccessful channels now?' : 'Publish this post now?'}
+        onClose={() => setPublishConfirmation(null)}
+        actions={<>
+          <Button type="button" variant="secondary" onClick={() => setPublishConfirmation(null)}>Not now</Button>
+          <Button
+            type="button"
+            disabled={pending}
+            onClick={() => {
+              if (!publishConfirmation) return;
+              const current = publishConfirmation;
+              setPublishConfirmation(null);
+              command(current.postId, current.retry ? 'retry' : 'publish');
+            }}
+          >
+            {publishConfirmation?.retry ? 'Retry publishing' : 'Publish now'}
+          </Button>
+        </>}
+      >
+        {publishConfirmation?.retry
+          ? `Bridge88 will send this post again only to the unsuccessful channels: ${selectedPost?.platforms.join(', ') || 'the selected channels'}.`
+          : `Bridge88 will publish immediately to ${selectedPost?.platforms.join(', ') || 'the selected channels'}. Publishing cannot be undone from Bridge88.`}
+      </Dialog>
+      <Dialog
+        open={Boolean(cancelConfirmation)}
+        eyebrow="Confirm cancellation"
+        title="Cancel this post?"
+        onClose={() => setCancelConfirmation(null)}
+        actions={<>
+          <Button type="button" variant="secondary" onClick={() => setCancelConfirmation(null)}>Keep scheduled</Button>
+          <Button
+            type="button"
+            disabled={pending}
+            onClick={() => {
+              if (!cancelConfirmation) return;
+              const postId = cancelConfirmation;
+              setCancelConfirmation(null);
+              command(postId, 'cancel');
+            }}
+          >
+            Cancel post
+          </Button>
+        </>}
+      >
+        Bridge88 will remove this post from its publishing time. You can restore it as a draft later.
       </Dialog>
     </>
   );

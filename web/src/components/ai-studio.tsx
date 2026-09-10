@@ -304,14 +304,18 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
           </div>}
         </div>
         {assets.length ? (
-          <div className="mt-6 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-6 xl:grid-cols-3">
             {visibleAssets.map((asset) => (
               <button key={asset.id} type="button" onClick={() => setSelected(asset.id)} className="relative rounded-[24px] border bg-canvas p-4 text-left transition-opacity hover:opacity-80" style={{ borderColor: selected === asset.id ? 'var(--ink)' : 'var(--hairline)' }}>
                 {selected === asset.id && <span className="absolute right-6 top-6 z-10 flex size-7 items-center justify-center rounded-full bg-ink text-canvas" aria-label="Selected"><Check size={16} /></span>}
                 {asset.type === 'IMAGE' ? (
                   <img src={asset.url} alt={asset.filename} className="aspect-square w-full rounded-md bg-surface-soft object-contain" />
-                ) : asset.type === 'VIDEO' ? (
+                ) : asset.type === 'VIDEO' && !simulated ? (
                   <video src={asset.url} controls className="aspect-video w-full rounded-md bg-surface-soft object-contain" onClick={(event) => event.stopPropagation()} />
+                ) : asset.type === 'VIDEO' ? (
+                  <div className="flex aspect-video items-center justify-center rounded-md bg-surface-soft p-4 text-center">
+                    <span className="b88-caption">Simulated video fixture · no playable footage</span>
+                  </div>
                 ) : (
                   <div className="flex min-h-28 items-center rounded-md bg-surface-soft p-3" onClick={(event) => event.stopPropagation()}>
                     <audio src={asset.url} controls className="w-full" />

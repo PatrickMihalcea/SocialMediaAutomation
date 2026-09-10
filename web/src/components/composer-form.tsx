@@ -3,12 +3,13 @@
 import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { PostStatus } from '@prisma/client';
-import { ArrowDown, ArrowUp, CalendarClock, Save, Send, Sparkles, Trash2, UserCheck } from 'lucide-react';
+import { ArrowDown, ArrowUp, CalendarClock, RefreshCw, Save, Send, Sparkles, Trash2, UserCheck } from 'lucide-react';
 import {
   AssetTile,
   Badge,
   Button,
   Checkbox,
+  Dialog,
   Field,
   MediaUploader,
   Select,
@@ -36,6 +37,7 @@ import {
   versionsToPayload,
   writeStoredDraft,
 } from '@/lib/posts/composer';
+import { legalPostActions } from '@/lib/posts/lifecycle';
 
 type ComposerFormProps = {
   slug: string;
@@ -51,6 +53,7 @@ type ComposerFormProps = {
   canSubmitForApproval?: boolean;
   initial?: ComposerInitial;
   attachAssetId?: string;
+  contextDefaults?: { scheduledAt?: string; campaignId?: string };
 };
 
 export function ComposerForm({
@@ -67,12 +70,13 @@ export function ComposerForm({
   canSubmitForApproval = true,
   initial,
   attachAssetId,
+  contextDefaults,
 }: ComposerFormProps) {
   const router = useRouter();
   const storageKey = draftStorageKey(slug, postId);
   const baseDraft = useMemo(
-    () => buildInitialDraft(accounts, initial, attachAssetId),
-    [accounts, initial, attachAssetId],
+    () => buildInitialDraft(accounts, initial, attachAssetId, contextDefaults),
+    [accounts, initial, attachAssetId, contextDefaults],
   );
   const [draft, setDraft] = useState<ComposerDraft>(baseDraft);
   const [state, submit, isPending] = useActionState(action, {});
@@ -81,6 +85,8 @@ export function ComposerForm({
   const [aiLoading, setAiLoading] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
+  const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
+  const [replacement, setReplacement] = useState<{ accountId: string; index: number } | null>(null);
   const [, startTransition] = useTransition();
   const hydrated = useRef(false);
 
@@ -88,8 +94,15 @@ export function ComposerForm({
     if (hydrated.current) return;
     hydrated.current = true;
     const stored = readStoredDraft(storageKey);
-    if (stored) setDraft(mergeDraft(baseDraft, stored, Boolean(initial)));
-  }, [baseDraft, initial, storageKey]);
+    if (stored) {
+      const merged = mergeDraft(baseDraft, stored, Boolean(initial));
+      setDraft({
+        ...merged,
+        scheduledAt: contextDefaults?.scheduledAt ?? merged.scheduledAt,
+        campaignId: contextDefaults?.campaignId ?? merged.campaignId,
+      });
+    }
+  }, [baseDraft, contextDefaults, initial, storageKey]);
 
   useEffect(() => {
     if (!hydrated.current) return;
@@ -144,6 +157,27 @@ export function ComposerForm({
         versions: { ...current.versions, [accountId]: { ...version, media } },
       };
     });
+  }
+
+  function chooseMedia(accountId: string, assetId: string) {
+    if (replacement?.accountId !== accountId) {
+      toggleMedia(accountId, assetId);
+      return;
+    }
+    const version = draft.versions[accountId];
+    const replacing = version.media[replacement.index];
+    if (!replacing || version.media.some((item, index) =>
+      index !== replacement.index && item.mediaAssetId === assetId)) {
+      setReplacement(null);
+      return;
+    }
+    const media = version.media.map((item, index) =>
+      index === replacement.index
+        ? { mediaAssetId: assetId, altText: '', thumbnailOffset: '' }
+        : item,
+    );
+    updateVersion(accountId, { media });
+    setReplacement(null);
   }
 
   function toggleAccount(accountId: string, selected: boolean) {
@@ -270,8 +304,10 @@ export function ComposerForm({
   const accountErrors = fieldErrors[activeAccount.id] ?? [];
   const isPendingApproval = postStatus === 'PENDING_APPROVAL';
   const isPublished = postStatus === 'PUBLISHED';
+  const lifecycleActions = legalPostActions(postStatus ?? 'DRAFT');
 
   return (
+    <>
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)]">
       <section className="b88-card">
         {postStatus === 'PUBLISHED' && (
@@ -466,6 +502,11 @@ export function ComposerForm({
             <p className="mt-3 text-sm">
               Select assets for this channel. Select an attached asset again to remove it.
             </p>
+            {replacement?.accountId === activeAccount.id && (
+              <StatusMessage tone="neutral" className="mt-3">
+                Choose a different asset below. The replacement is not saved until you save the post.
+              </StatusMessage>
+            )}
             <div className="mt-4 max-h-96 overflow-y-auto pr-2">
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
               {assets.map((asset) => {
@@ -482,7 +523,7 @@ export function ComposerForm({
                       ratio="1:1"
                       src={asset.thumbnailUrl}
                       selected={selected}
-                      onClick={() => toggleMedia(activeAccount.id, asset.id)}
+                      onClick={() => chooseMedia(activeAccount.id, asset.id)}
                     />
                   </div>
                 );
@@ -498,6 +539,14 @@ export function ComposerForm({
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-sm font-[540]">{asset?.filename ?? 'Missing media'}</p>
                         <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="tertiary"
+                            disabled={readOnly}
+                            onClick={() => setReplacement({ accountId: activeAccount.id, index })}
+                          >
+                            <RefreshCw size={16} />Replace
+                          </Button>
                           <Button
                             type="button"
                             variant="tertiary"
@@ -593,7 +642,7 @@ export function ComposerForm({
                 <Save size={16} />
                 {pendingIntent === 'draft' ? 'Saving' : 'Save draft'}
               </PendingButton>
-              {canPublish && !isPendingApproval && (
+              {canPublish && lifecycleActions.includes('publish') && !isPendingApproval && (
                 <PendingButton
                   type="button"
                   variant={isPublished ? 'tertiary' : 'promo'}
@@ -601,13 +650,13 @@ export function ComposerForm({
                   pendingLabel="Publishing"
                   disabled={readOnly || isPending}
                   aria-busy={pendingIntent === 'publish'}
-                  onClick={() => submitWithIntent('publish')}
+                  onClick={() => setPublishConfirmOpen(true)}
                 >
                   <Send size={16} />
                   {pendingIntent === 'publish' ? 'Publishing' : 'Publish now'}
                 </PendingButton>
               )}
-              {canSchedule && (
+              {canSchedule && (lifecycleActions.includes('schedule') || lifecycleActions.includes('reschedule')) && (
                 <PendingButton
                   type="button"
                   variant="secondary"
@@ -621,7 +670,7 @@ export function ComposerForm({
                   {pendingIntent === 'schedule' ? 'Scheduling' : 'Schedule'}
                 </PendingButton>
               )}
-              {canSubmitForApproval && (
+              {canSubmitForApproval && lifecycleActions.includes('submitForApproval') && (
                 <PendingButton
                   type="button"
                   variant="secondary"
@@ -652,6 +701,32 @@ export function ComposerForm({
         </p>
       </aside>
     </div>
+    <Dialog
+      open={publishConfirmOpen}
+      eyebrow="Confirm publishing"
+      title="Publish this post now?"
+      onClose={() => setPublishConfirmOpen(false)}
+      actions={<>
+        <Button type="button" variant="secondary" onClick={() => setPublishConfirmOpen(false)}>
+          Keep editing
+        </Button>
+        <Button
+          type="button"
+          disabled={isPending}
+          onClick={() => {
+            setPublishConfirmOpen(false);
+            submitWithIntent('publish');
+          }}
+        >
+          Publish now
+        </Button>
+      </>}
+    >
+      Bridge88 will publish immediately to {selectedAccounts.map((account) =>
+        `${PLATFORM_LABELS[account.platform]} (${account.accountHandle ?? account.accountName})`
+      ).join(', ')}. Publishing cannot be undone from Bridge88.
+    </Dialog>
+    </>
   );
 }
 

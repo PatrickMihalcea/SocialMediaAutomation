@@ -11,6 +11,7 @@ const priceFor = (plan: Exclude<Plan, 'FREE'>) =>
   plan === 'PRO' ? env.STRIPE_PRICE_PRO : env.STRIPE_PRICE_BUSINESS;
 
 export const stripeBillingProvider: BillingProvider = {
+  kind: 'stripe',
   async checkout({ workspaceId, customerEmail, plan, returnUrl }) {
     const price = priceFor(plan);
     if (!price) throw new Error(`Stripe price for ${plan.toLowerCase()} is not configured.`);
@@ -32,6 +33,30 @@ export const stripeBillingProvider: BillingProvider = {
   async portal({ customerId, returnUrl }) {
     const session = await client().billingPortal.sessions.create({ customer: customerId, return_url: returnUrl });
     return session.url;
+  },
+  async changePlan({ subscriptionId, plan }) {
+    if (!subscriptionId) throw new Error('This subscription is not connected to the billing provider.');
+    const price = plan === 'FREE' ? null : priceFor(plan);
+    if (!price) throw new Error('Use cancellation to move to the Free plan at the end of the paid period.');
+    const subscription = await client().subscriptions.retrieve(subscriptionId);
+    const item = subscription.items.data[0];
+    if (!item) throw new Error('The subscription has no billable item.');
+    await client().subscriptions.update(subscriptionId, {
+      items: [{ id: item.id, price }],
+      proration_behavior: 'create_prorations',
+      cancel_at_period_end: false,
+    });
+    await retrieveAndSyncStripeSubscription(subscriptionId);
+  },
+  async cancel({ subscriptionId }) {
+    if (!subscriptionId) throw new Error('This subscription is not connected to the billing provider.');
+    await client().subscriptions.update(subscriptionId, { cancel_at_period_end: true });
+    await retrieveAndSyncStripeSubscription(subscriptionId);
+  },
+  async resume({ subscriptionId }) {
+    if (!subscriptionId) throw new Error('This subscription is not connected to the billing provider.');
+    await client().subscriptions.update(subscriptionId, { cancel_at_period_end: false });
+    await retrieveAndSyncStripeSubscription(subscriptionId);
   },
 };
 

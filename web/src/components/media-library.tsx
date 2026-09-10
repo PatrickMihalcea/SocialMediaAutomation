@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -8,7 +8,8 @@ import {
   Copy, Download, Eye, Folder, Move, Pencil, Plus,
   Tags, Trash2, X,
 } from 'lucide-react';
-import { Badge, Button, EmptyState, Field, IconButton, MediaFrame, MediaUploader, StatusMessage, VideoPlayer } from '@/bridge88/components';
+import { Badge, Button, EmptyState, Field, IconButton, MediaFrame, MediaUploader, Select, StatusMessage, VideoPlayer } from '@/bridge88/components';
+import { listAttachableDraftsAction } from '@/app/actions/posts';
 import { MEDIA_PRESETS } from '@/lib/social/capabilities';
 import {
   createDerivativeAction, createFolderAction, createTagAction, deleteFolderAction,
@@ -443,7 +444,27 @@ function PreviewDrawer({ asset, slug, canEdit, canDelete, pending, onClose, onDe
   onDetails: (id: string, data: FormData) => void; onRetry: () => void; onDelete: () => void;
 }) {
   const [preset, setPreset] = useState('');
+  const [drafts, setDrafts] = useState<Array<{ id: string; label: string }>>([]);
+  const [draftId, setDraftId] = useState('');
+  const [draftsLoading, setDraftsLoading] = useState(asset.status === 'READY');
+  const [draftsError, setDraftsError] = useState('');
+  const router = useRouter();
   const dimensions = MEDIA_PRESETS.find((item) => item.id === preset);
+  useEffect(() => {
+    if (asset.status !== 'READY') return;
+    let active = true;
+    void listAttachableDraftsAction(slug)
+      .then((result) => {
+        if (active) setDrafts(result);
+      })
+      .catch(() => {
+        if (active) setDraftsError('Draft destinations are unavailable for this account.');
+      })
+      .finally(() => {
+        if (active) setDraftsLoading(false);
+      });
+    return () => { active = false; };
+  }, [asset.status, slug]);
   return (
     <div className="fixed inset-0 z-50 bg-[var(--scrim-modal)]" onMouseDown={onClose}>
       <aside className="ml-auto flex h-full w-full max-w-xl flex-col bg-canvas" onMouseDown={(event) => event.stopPropagation()}>
@@ -476,6 +497,32 @@ function PreviewDrawer({ asset, slug, canEdit, canDelete, pending, onClose, onDe
           {asset.status === 'READY' && <Button href={`/w/${slug}/compose?asset=${asset.id}`}><Plus size={15} /> Create post</Button>}
           <Button href={`/w/${slug}/studio?source=${asset.id}`} variant="secondary">Open media studio</Button>
         </div>
+        {asset.status === 'READY' && (
+          <section className="mt-6 rounded-lg border border-hairline p-4" aria-busy={draftsLoading}>
+            <p className="b88-caption">Add to an existing draft</p>
+            {draftsLoading ? (
+              <p className="mt-3 text-sm">Loading draft destinations.</p>
+            ) : draftsError ? (
+              <StatusMessage tone="error" className="mt-3">{draftsError}</StatusMessage>
+            ) : drafts.length ? (
+              <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                <Select label="Draft destination" value={draftId} onChange={(event) => setDraftId(event.target.value)}>
+                  <option value="">Choose a draft</option>
+                  {drafts.map((draft) => <option key={draft.id} value={draft.id}>{draft.label}</option>)}
+                </Select>
+                <Button
+                  type="button"
+                  disabled={!draftId}
+                  onClick={() => router.push(`/w/${slug}/compose/${draftId}?asset=${encodeURIComponent(asset.id)}`)}
+                >
+                  Add to draft
+                </Button>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm">There are no editable drafts. Create a post with this asset instead.</p>
+            )}
+          </section>
+        )}
 
         <section className="mt-8 border-t border-hairline pt-6">
           <p className="b88-caption">Used in posts</p>

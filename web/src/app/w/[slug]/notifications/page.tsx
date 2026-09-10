@@ -3,6 +3,7 @@ import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { markAllNotificationsReadAction, markNotificationReadAction, updateNotificationPreferencesAction } from '@/app/actions/notifications';
 import type { NotificationType } from '@prisma/client';
+import { notificationDestination } from '@/lib/notifications/service';
 
 const TYPE_LABELS: Record<NotificationType, string> = {
   POST_PUBLISHED: 'Publishing success',
@@ -42,11 +43,19 @@ export default async function NotificationsPage({ params }: { params: Promise<{ 
               <p className="b88-caption mt-2">{item.createdAt.toLocaleString()}</p>
             </div>
             <div className="col-start-2 flex flex-wrap gap-1 sm:col-start-3 sm:row-start-1 sm:flex-col sm:items-end">
-              <Button href={notificationHref(item.type, item.href, slug, ctx.workspace.id)} variant="tertiary">Open</Button>
+              <Button href={notificationDestination(item.type, item.href, slug, ctx.workspace.id)} variant="tertiary">Open</Button>
               {!item.readAt && <form action={markNotificationReadAction.bind(null, slug, item.id)}><Button type="submit" variant="tertiary">Mark read</Button></form>}
             </div>
           </article>
-        )) : <EmptyState eyebrow="Inbox clear" title="No notifications yet">Publishing updates, approval requests, account problems and completed AI media will appear here with a direct next step.</EmptyState>}
+        )) : (
+          <EmptyState
+            eyebrow="Inbox clear"
+            title="No notifications yet"
+            action={<Button href={`/w/${slug}/compose`}>Create a post</Button>}
+          >
+            Publishing updates, approval requests, account problems and completed AI media will appear here.
+          </EmptyState>
+        )}
       </section>
       <aside className="b88-card self-start">
         <p className="b88-caption">Preferences</p><h2 className="b88-heading mt-2">Delivery</h2>
@@ -59,21 +68,6 @@ export default async function NotificationsPage({ params }: { params: Promise<{ 
       </div>
     </>
   );
-}
-
-function notificationHref(type: NotificationType, href: string | null, slug: string, workspaceId: string) {
-  if (href?.startsWith(`/w/${slug}/`)) return href;
-  if (href?.startsWith(`/w/${workspaceId}/`)) return href.replace(`/w/${workspaceId}/`, `/w/${slug}/`);
-  return {
-    POST_PUBLISHED: `/w/${slug}/calendar`,
-    POST_FAILED: `/w/${slug}/calendar?status=FAILED`,
-    OAUTH_EXPIRED: `/w/${slug}/channels`,
-    APPROVAL_REQUESTED: `/w/${slug}/calendar?status=PENDING_APPROVAL`,
-    APPROVAL_COMPLETED: `/w/${slug}/calendar`,
-    MEDIA_PROCESSING_COMPLETE: `/w/${slug}/media`,
-    MEMBER_JOINED: `/w/${slug}/team`,
-    LIMIT_REACHED: `/w/${slug}/settings/billing`,
-  }[type];
 }
 
 function displayTitle(type: NotificationType, title: string) {

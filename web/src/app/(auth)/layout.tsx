@@ -5,7 +5,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <p className="text-xl font-[540]">Bridge88</p>
         <div className="auth-story-lede">
           <p className="b88-eyebrow">One workspace</p>
-          <h1 className="b88-page-title mt-4 max-w-xl">Your channels, calendar and reviewers in one place.</h1>
+          <p className="b88-page-title mt-4 max-w-xl">Your channels, calendar and reviewers in one place.</p>
         </div>
         <p className="b88-caption">Scheduling that tells you when it fails</p>
       </section>

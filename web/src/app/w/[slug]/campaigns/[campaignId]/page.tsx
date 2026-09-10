@@ -93,7 +93,10 @@ export default async function CampaignDetailPage({
       orderBy: { name: 'asc' },
     }),
     db.post.findMany({
-      where: { workspaceId: ctx.workspace.id, campaignId: { not: campaignId } },
+      where: {
+        workspaceId: ctx.workspace.id,
+        OR: [{ campaignId: null }, { campaignId: { not: campaignId } }],
+      },
       select: { id: true, title: true, status: true, scheduledAt: true, campaign: { select: { name: true } } },
       orderBy: [{ scheduledAt: 'asc' }, { createdAt: 'desc' }],
       take: 100,

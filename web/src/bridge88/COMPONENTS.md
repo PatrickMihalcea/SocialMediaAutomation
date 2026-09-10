@@ -151,6 +151,8 @@ One-line: pill tab toggle — use whenever a view switches between 2–5 named s
 
 - Selected tab is the black primary surface; unselected is transparent with ink text. Never colour the selected tab.
 - Scrolls horizontally rather than wrapping below 560px.
+- Uses the ARIA tabs keyboard pattern: one tab stop, arrow keys move and select,
+  and Home/End jump to the first/last item.
 
 ```ts
 import * as React from 'react';
@@ -611,7 +613,11 @@ One-line: confirmations and short flows that must block the queue — deleting a
 ```ts
 import * as React from 'react';
 
-/** Level-3 modal: 24px-radius white card over a 60% black scrim. Escape and scrim click close it. */
+/**
+ * Level-3 modal: 24px-radius white card over a 60% black scrim.
+ * Focus moves inside on open, is trapped until dismissal, Escape and scrim
+ * click close it, and focus returns to the opener.
+ */
 export interface DialogProps extends React.HTMLAttributes<HTMLDivElement> {
   open?: boolean;
   title?: string;
@@ -888,6 +894,8 @@ One-line: how media enters Bridge88 — composer, asset library, brand kit.
 ```
 
 - Dashed 24px-radius panel; the drag-over state darkens the border to ink and fills with `--surface-soft`. No coloured "success" flash.
+- The native file picker remains keyboard-operable; its containing drop zone
+  receives the visible focus ring when the visually-hidden input has focus.
 
 ```ts
 import * as React from 'react';

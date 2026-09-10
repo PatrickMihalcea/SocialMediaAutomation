@@ -14,7 +14,9 @@ export default async function StudioPage({
   const { slug } = await params;
   const { source } = await searchParams;
   const ctx = await requireWorkspace(slug, 'ai:use');
-  const jobs = await db.aiMediaJob.findMany({
+  // Generated assets do not depend on the jobs query, so both reads can start
+  // together. Legacy output ids without generation metadata are filled below.
+  const [jobs, generatedAssets] = await Promise.all([db.aiMediaJob.findMany({
       where: { workspaceId: ctx.workspace.id },
       orderBy: { createdAt: 'desc' },
       take: 20,
@@ -27,22 +29,31 @@ export default async function StudioPage({
         outputAssetId: true,
         createdAt: true,
       },
-    });
+    }),
+    db.mediaAsset.findMany({
+      where: {
+        workspaceId: ctx.workspace.id,
+        status: 'READY',
+        OR: [
+          { aiGenerationId: { not: null } },
+          { derivationPreset: { in: ['IMAGE_GENERATE', 'IMAGE_EDIT', 'IMAGE_VARIATION', 'VIDEO_GENERATE', 'VIDEO_ANIMATE', 'AUDIO_TTS'] } },
+          ...(source ? [{ id: source }] : []),
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 25,
+    }),
+  ]);
   const outputIds = jobs.flatMap((job) => job.outputAssetId ? [job.outputAssetId] : []);
-  const assets = await db.mediaAsset.findMany({
-    where: {
-      workspaceId: ctx.workspace.id,
-      status: 'READY',
-      OR: [
-        { aiGenerationId: { not: null } },
-        { id: { in: outputIds } },
-        { derivationPreset: { in: ['IMAGE_GENERATE', 'IMAGE_EDIT', 'IMAGE_VARIATION', 'VIDEO_GENERATE', 'VIDEO_ANIMATE', 'AUDIO_TTS'] } },
-        ...(source ? [{ id: source }] : []),
-      ],
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 25,
-  });
+  const loadedIds = new Set(generatedAssets.map((asset) => asset.id));
+  const missingIds = [...new Set([...outputIds, ...(source ? [source] : [])])]
+    .filter((id) => !loadedIds.has(id));
+  const missingAssets = missingIds.length
+    ? await db.mediaAsset.findMany({
+        where: { workspaceId: ctx.workspace.id, status: 'READY', id: { in: missingIds } },
+      })
+    : [];
+  const assets = [...missingAssets, ...generatedAssets];
   const validatedSource = source && assets.some((asset) => asset.id === source) ? source : undefined;
   const withUrls = await Promise.all(assets.map(async (asset) => ({
     id: asset.id,

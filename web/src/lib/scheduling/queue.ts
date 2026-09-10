@@ -1,5 +1,5 @@
 import 'server-only';
-import { PostStatus } from '@prisma/client';
+import { PostStatus, type Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { conflict, invalid } from '@/lib/errors';
 import { nextOccurrence } from '@/lib/scheduling/time';
@@ -15,6 +15,7 @@ import { nextOccurrence } from '@/lib/scheduling/time';
  */
 
 const HORIZON_DAYS = 120;
+type QueueDb = Pick<Prisma.TransactionClient, 'workspace' | 'schedulingRule' | 'post' | 'queueItem'>;
 
 export interface Slot {
   at: Date;
@@ -57,17 +58,21 @@ export function selectBulkSlots(slots: Slot[], count: number, startAt?: Date): D
 
 /** Every slot the rules imply between now and the horizon, marked taken or free. */
 export async function listSlots(workspaceId: string, limit = 40): Promise<Slot[]> {
-  const workspace = await db.workspace.findUniqueOrThrow({
+  return listSlotsWithClient(db, workspaceId, limit);
+}
+
+async function listSlotsWithClient(client: QueueDb, workspaceId: string, limit: number): Promise<Slot[]> {
+  const workspace = await client.workspace.findUniqueOrThrow({
     where: { id: workspaceId },
     select: { timezone: true },
   });
-  const rules = await db.schedulingRule.findMany({
+  const rules = await client.schedulingRule.findMany({
     where: { workspaceId, enabled: true },
     orderBy: [{ weekday: 'asc' }, { hour: 'asc' }, { minute: 'asc' }],
   });
   if (rules.length === 0) return [];
 
-  const occupied = await occupiedInstants(workspaceId);
+  const occupied = await occupiedInstants(client, workspaceId);
   const slots: Slot[] = [];
   const horizon = Date.now() + HORIZON_DAYS * 24 * 60 * 60 * 1000;
   let cursor = new Date();
@@ -95,20 +100,22 @@ export async function nextAvailableSlot(workspaceId: string, after?: Date): Prom
 
 /** Assigns a post the next open slot and schedules it. */
 export async function addToQueue(workspaceId: string, postId: string): Promise<Date> {
-  const workspace = await db.workspace.findUniqueOrThrow({
-    where: { id: workspaceId },
-    select: { timezone: true },
-  });
-  const rules = await db.schedulingRule.count({ where: { workspaceId, enabled: true } });
-  if (rules === 0) {
-    throw invalid('This workspace has no posting times yet. Add at least one in Queue settings.');
-  }
-
-  const slot = await nextAvailableSlot(workspaceId);
-  if (!slot) throw conflict('Every slot in the next four months is taken. Add more posting times.');
-
-  const position = await nextPosition(workspaceId);
-  await db.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
+    // Serialize assignments inside a workspace. Without this, two simultaneous
+    // "add" requests can both observe the same free slot and position.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}))`;
+    const workspace = await tx.workspace.findUniqueOrThrow({
+      where: { id: workspaceId },
+      select: { timezone: true },
+    });
+    const rules = await tx.schedulingRule.count({ where: { workspaceId, enabled: true } });
+    if (rules === 0) {
+      throw invalid('This workspace has no posting times yet. Add at least one in Queue settings.');
+    }
+    const slots = await listSlotsWithClient(tx, workspaceId, 200);
+    const slot = slots.find((candidate) => !candidate.taken)?.at;
+    if (!slot) throw conflict('Every slot in the next four months is taken. Add more posting times.');
+    const position = await nextPosition(tx, workspaceId);
     const post = await tx.post.updateMany({
       where: {
         id: postId,
@@ -125,8 +132,8 @@ export async function addToQueue(workspaceId: string, postId: string): Promise<D
       create: { workspaceId, postId, position, slotAt: slot },
       update: { position, slotAt: slot },
     });
+    return slot;
   });
-  return slot;
 }
 
 export async function removeFromQueue(postId: string): Promise<void> {
@@ -201,8 +208,8 @@ export async function planBulkSchedule(input: {
   return selectBulkSlots(slots, input.count, input.startAt);
 }
 
-async function occupiedInstants(workspaceId: string): Promise<Map<number, string>> {
-  const scheduled = await db.post.findMany({
+async function occupiedInstants(client: QueueDb, workspaceId: string): Promise<Map<number, string>> {
+  const scheduled = await client.post.findMany({
     where: {
       workspaceId,
       scheduledAt: { gte: new Date() },
@@ -213,8 +220,8 @@ async function occupiedInstants(workspaceId: string): Promise<Map<number, string
   return new Map(scheduled.filter((p) => p.scheduledAt).map((p) => [p.scheduledAt!.getTime(), p.id]));
 }
 
-async function nextPosition(workspaceId: string): Promise<number> {
-  const last = await db.queueItem.findFirst({
+async function nextPosition(client: QueueDb, workspaceId: string): Promise<number> {
+  const last = await client.queueItem.findFirst({
     where: { workspaceId },
     orderBy: { position: 'desc' },
     select: { position: true },

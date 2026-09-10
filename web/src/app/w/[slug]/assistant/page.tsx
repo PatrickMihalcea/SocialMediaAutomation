@@ -2,6 +2,7 @@ import { AiAssistant } from '@/components/ai-assistant';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { listConversations } from '@/lib/ai/conversations';
 import { env } from '@/lib/env';
+import { assistantReplySchema } from '@/lib/ai/schemas';
 
 export default async function AssistantPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -31,11 +32,16 @@ export default async function AssistantPage({ params }: { params: Promise<{ slug
             id: message.id,
             role: message.role,
             content: message.content,
-            proposal: message.proposal,
+            proposal: proposalForClient(message.proposal),
             proposalStatus: message.proposalStatus,
           })),
         }))}
       />
     </>
   );
+}
+
+function proposalForClient(value: unknown) {
+  const parsed = assistantReplySchema.shape.action.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }

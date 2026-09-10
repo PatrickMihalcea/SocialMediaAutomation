@@ -664,7 +664,12 @@ export function Dialog({
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
   const titleId = useId();
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -678,7 +683,7 @@ export function Dialog({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose?.();
+        onCloseRef.current?.();
         return;
       }
       if (event.key !== 'Tab' || !dialog) return;
@@ -705,7 +710,7 @@ export function Dialog({
       document.removeEventListener('keydown', onKeyDown);
       returnFocusRef.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   return (

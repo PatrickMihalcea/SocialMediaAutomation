@@ -36,4 +36,9 @@ describe('smart queue planning', () => {
     ];
     expect(selectBulkSlots(slots, 2, at(10))).toEqual([at(11), at(12)]);
   });
+
+  it('returns no slots for an invalid bulk count', () => {
+    expect(selectBulkSlots([{ at: at(9), taken: false }], 0)).toEqual([]);
+    expect(selectBulkSlots([{ at: at(9), taken: false }], -1)).toEqual([]);
+  });
 });

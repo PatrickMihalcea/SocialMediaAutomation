@@ -13,7 +13,7 @@ export default async function QueuePage({ params }: { params: Promise<{ slug: st
   const [rules, items, drafts, slots, recurrences, accounts, campaigns] = await Promise.all([
     db.schedulingRule.findMany({ where: { workspaceId: ctx.workspace.id }, orderBy: [{ weekday: 'asc' }, { hour: 'asc' }, { minute: 'asc' }] }),
     db.queueItem.findMany({ where: { workspaceId: ctx.workspace.id }, include: { post: { include: { platforms: { take: 1 } } } }, orderBy: { position: 'asc' } }),
-    db.post.findMany({ where: { workspaceId: ctx.workspace.id, status: { in: ['DRAFT', 'APPROVED'] }, queueItem: null }, include: { platforms: { take: 1 } }, orderBy: { updatedAt: 'desc' }, take: 12 }),
+    db.post.findMany({ where: { workspaceId: ctx.workspace.id, status: { in: ['DRAFT', 'APPROVED', 'SCHEDULED'] }, queueItem: null, recurringScheduleId: null }, include: { platforms: { take: 1 } }, orderBy: { updatedAt: 'desc' }, take: 12 }),
     listSlots(ctx.workspace.id, 50),
     db.recurringSchedule.findMany({
       where: { workspaceId: ctx.workspace.id },

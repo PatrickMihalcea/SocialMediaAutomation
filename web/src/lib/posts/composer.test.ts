@@ -70,4 +70,42 @@ describe('composer helpers', () => {
     expect(draftStorageKey('acme')).toBe('composer-draft:acme:new');
     expect(draftStorageKey('acme', 'post-1')).toBe('composer-draft:acme:post-1');
   });
+
+  it('prefills a new post with validated calendar and campaign context', () => {
+    const draft = buildInitialDraft(accounts, undefined, undefined, {
+      scheduledAt: '2026-09-20T09:30',
+      campaignId: 'campaign-1',
+    });
+    expect(draft.scheduledAt).toBe('2026-09-20T09:30');
+    expect(draft.campaignId).toBe('campaign-1');
+  });
+
+  it('appends a requested asset to existing post media without duplicating it', () => {
+    const initial = {
+      title: 'Media post',
+      campaignId: null,
+      scheduledAt: null,
+      updatedAt: '2026-09-10T12:00:00.000Z',
+      status: 'DRAFT' as const,
+      platforms: [{
+        socialAccountId: accounts[0].id,
+        platform: Platform.MOCK,
+        text: 'Saved copy',
+        firstComment: null,
+        hashtags: [],
+        mentions: [],
+        link: null,
+        media: [{
+          mediaAssetId: 'asset-existing',
+          altText: 'Existing',
+          thumbnailOffset: null,
+        }],
+      }],
+    };
+    const appended = buildInitialDraft(accounts, initial, 'asset-new');
+    expect(appended.versions[accounts[0].id].media.map((media) => media.mediaAssetId))
+      .toEqual(['asset-existing', 'asset-new']);
+    const unchanged = buildInitialDraft(accounts, initial, 'asset-existing');
+    expect(unchanged.versions[accounts[0].id].media).toHaveLength(1);
+  });
 });

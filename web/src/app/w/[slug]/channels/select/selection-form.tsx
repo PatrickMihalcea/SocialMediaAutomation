@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { Avatar, Button, Checkbox, StatusMessage } from '@/bridge88/components';
+import type { ChannelActionState } from '@/app/actions/channels';
 
 type SelectableAccount = {
   externalAccountId: string;
@@ -15,9 +16,9 @@ export function SelectionForm({
   action,
 }: {
   accounts: SelectableAccount[];
-  action: (formData: FormData) => Promise<void>;
+  action: (previous: ChannelActionState, formData: FormData) => Promise<ChannelActionState>;
 }) {
-  const [error, setError] = useState<string>();
+  const [state, setState] = useState<ChannelActionState>({});
   const [pending, startTransition] = useTransition();
 
   return (
@@ -28,20 +29,32 @@ export function SelectionForm({
         const form = event.currentTarget;
         const formData = new FormData(form);
         if (!formData.getAll('account').length) {
-          setError('Select at least one account to continue.');
+          setState({ status: 'error', error: 'Select at least one account to continue.' });
           return;
         }
-        setError(undefined);
+        setState({});
         startTransition(async () => {
           try {
-            await action(formData);
+            setState(await action({}, formData));
           } catch (caught) {
-            setError(caught instanceof Error ? caught.message : 'The accounts could not be connected. Try again.');
+            setState({
+              status: 'error',
+              error: caught instanceof Error ? caught.message : 'The accounts could not be connected. Try again.',
+            });
           }
         });
       }}
     >
-      {error && <StatusMessage tone="error">{error}</StatusMessage>}
+      {state.error && (
+        <StatusMessage tone="error">
+          <p>{state.error}</p>
+          {state.billingHref && (
+            <Button href={state.billingHref} variant="secondary" className="mt-3">
+              Open Billing
+            </Button>
+          )}
+        </StatusMessage>
+      )}
       {accounts.map((account) => (
         <div key={account.externalAccountId} className="b88-card flex items-center gap-4">
           <Checkbox

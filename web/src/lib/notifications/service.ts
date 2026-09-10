@@ -13,6 +13,44 @@ export interface NotifyInput {
   href?: string;
 }
 
+const APPROVAL_TYPES = new Set<NotificationType>(['APPROVAL_REQUESTED', 'APPROVAL_COMPLETED']);
+
+export function normalizeNotificationHref(type: NotificationType, href?: string | null): string | undefined {
+  if (!href || !APPROVAL_TYPES.has(type)) return href ?? undefined;
+  try {
+    const url = new URL(href, 'http://bridge88.local');
+    const postId = url.searchParams.get('post');
+    const workspace = url.pathname.match(/^\/w\/([^/]+)\//)?.[1];
+    if (!postId || !workspace) return href;
+    return `/w/${workspace}/posts/${encodeURIComponent(postId)}`;
+  } catch {
+    return href;
+  }
+}
+
+export function notificationDestination(
+  type: NotificationType,
+  href: string | null,
+  slug: string,
+  workspaceId: string,
+): string {
+  const normalized = normalizeNotificationHref(type, href);
+  if (normalized?.startsWith(`/w/${slug}/`)) return normalized;
+  if (normalized?.startsWith(`/w/${workspaceId}/`)) {
+    return normalized.replace(`/w/${workspaceId}/`, `/w/${slug}/`);
+  }
+  return {
+    POST_PUBLISHED: `/w/${slug}/calendar`,
+    POST_FAILED: `/w/${slug}/calendar?status=FAILED`,
+    OAUTH_EXPIRED: `/w/${slug}/channels`,
+    APPROVAL_REQUESTED: `/w/${slug}/team`,
+    APPROVAL_COMPLETED: `/w/${slug}/team`,
+    MEDIA_PROCESSING_COMPLETE: `/w/${slug}/media`,
+    MEMBER_JOINED: `/w/${slug}/team`,
+    LIMIT_REACHED: `/w/${slug}/settings/billing`,
+  }[type];
+}
+
 /**
  * In-app notifications are the delivery guarantee; email is best-effort on top.
  * Never throws — a notification that fails must not roll back the thing it was
@@ -33,7 +71,7 @@ export async function notify(input: NotifyInput): Promise<void> {
         type: input.type,
         title: input.title,
         body: input.body ?? null,
-        href: input.href ?? null,
+        href: normalizeNotificationHref(input.type, input.href) ?? null,
         },
       })),
     );

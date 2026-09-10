@@ -4,15 +4,16 @@ import { db } from '@/lib/db';
 import { limitReached } from '@/lib/errors';
 
 export const PLAN_LIMITS = {
-  FREE: { socialAccounts: 3, scheduledPosts: 10, aiGenerations: 100, teamMembers: 1 },
-  PRO: { socialAccounts: 10, scheduledPosts: null, aiGenerations: 1_000, teamMembers: 5 },
-  BUSINESS: { socialAccounts: 30, scheduledPosts: null, aiGenerations: 5_000, teamMembers: 50 },
+  FREE: { socialAccounts: 3, scheduledPosts: 10, aiGenerations: 100, storageBytes: 1024 ** 3, teamMembers: 1 },
+  PRO: { socialAccounts: 10, scheduledPosts: null, aiGenerations: 1_000, storageBytes: 10 * 1024 ** 3, teamMembers: 5 },
+  BUSINESS: { socialAccounts: 30, scheduledPosts: null, aiGenerations: 5_000, storageBytes: 100 * 1024 ** 3, teamMembers: 50 },
 } as const satisfies Record<
   Plan,
   {
     socialAccounts: number;
     scheduledPosts: number | null;
     aiGenerations: number;
+    storageBytes: number;
     teamMembers: number;
   }
 >;
@@ -37,10 +38,27 @@ export async function assertWithinLimit(
   const plan = await workspacePlan(workspaceId);
   const limit = PLAN_LIMITS[plan][feature];
   if (limit !== null && currentValue >= limit) {
-    throw limitReached(
-      `${plan === Plan.FREE ? 'The Free plan' : `Your ${plan.toLowerCase()} plan`} allows ${limit.toLocaleString()} ${label(feature)}. Change plans to add more.`,
-    );
+    throw limitReached(limitMessage({ plan, feature, used: currentValue, limit }));
   }
+}
+
+export function nextMonthlyReset(from = new Date()): Date {
+  return new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 1));
+}
+
+export function limitMessage(input: {
+  plan: Plan;
+  feature: LimitedFeature;
+  used: number;
+  limit: number;
+  now?: Date;
+}): string {
+  const planLabel = input.plan === Plan.FREE ? 'Free' : sentenceCase(input.plan);
+  const amount = input.feature === 'storageBytes'
+    ? `${formatBytes(input.used)} of ${formatBytes(input.limit)}`
+    : `${input.used.toLocaleString()} of ${input.limit.toLocaleString()}`;
+  const reset = resetExplanation(input.feature, input.now);
+  return `You are using ${amount} ${label(input.feature)} on the ${planLabel} plan. ${reset} ${nextStep(input.feature)}`;
 }
 
 export async function currentMonthUsage(workspaceId: string, metric: string): Promise<number> {
@@ -74,6 +92,49 @@ function label(feature: LimitedFeature): string {
     socialAccounts: 'connected social accounts',
     scheduledPosts: 'scheduled posts',
     aiGenerations: 'AI generations per month',
+    storageBytes: 'of media storage',
     teamMembers: 'workspace members',
   }[feature];
+}
+
+function resetExplanation(feature: LimitedFeature, now = new Date()): string {
+  if (feature === 'aiGenerations') {
+    return `This usage resets on ${nextMonthlyReset(now).toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'UTC',
+    })}.`;
+  }
+  if (feature === 'scheduledPosts') {
+    return 'This capacity has no fixed reset date; it becomes available when scheduled posts publish or are canceled.';
+  }
+  return 'This capacity does not reset automatically.';
+}
+
+function nextStep(feature: LimitedFeature): string {
+  const alternative = {
+    socialAccounts: 'Disconnect an account',
+    scheduledPosts: 'Cancel a scheduled post',
+    aiGenerations: 'Wait for the reset',
+    storageBytes: 'Delete media',
+    teamMembers: 'Remove a workspace member',
+  }[feature];
+  return `${alternative} or change plans in Billing.`;
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${trim(bytes / 1024 ** 3)} GB`;
+  if (bytes >= 1024 ** 2) return `${trim(bytes / 1024 ** 2)} MB`;
+  if (bytes >= 1024) return `${trim(bytes / 1024)} KB`;
+  return `${bytes} bytes`;
+}
+
+function trim(value: number): string {
+  return value.toLocaleString('en-US', { maximumFractionDigits: 1 });
+}
+
+function sentenceCase(value: string): string {
+  const lower = value.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }

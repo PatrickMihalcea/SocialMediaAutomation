@@ -1,5 +1,5 @@
 import 'server-only';
-import { PostPlatformStatus, PostStatus } from '@prisma/client';
+import { Platform, PostPlatformStatus, PostStatus } from '@prisma/client';
 import { db } from '@/lib/db';
 import { getUsableAccount, markExpired } from '@/lib/social/accounts';
 import { getAdapterForAccount } from '@/lib/social/registry';
@@ -176,7 +176,7 @@ export async function publishPostPlatform(postPlatformId: string): Promise<void>
       { workspaceId: row.workspaceId, runAt: new Date(Date.now() + 60 * 60 * 1000) },
     );
   } catch (error) {
-    await handleFailure(row.id, row.postId, row.workspaceId, workspace.slug, row.socialAccountId, error);
+    await handleFailure(row.id, row.postId, row.workspaceId, workspace.slug, row.socialAccountId, row.platform, error);
     throw error;
   } finally {
     await reconcilePostStatus(row.postId);
@@ -207,6 +207,7 @@ async function handleFailure(
   workspaceId: string,
   workspaceSlug: string,
   socialAccountId: string,
+  platform: Platform,
   error: unknown,
 ): Promise<void> {
   const platformError = error instanceof PlatformError ? error : null;
@@ -240,7 +241,12 @@ async function handleFailure(
     action: 'post.publish_failed',
     entityType: 'post_platform',
     entityId: postPlatformId,
-    metadata: { code: platformError?.code ?? 'UNKNOWN', retryable: platformError?.retryable ?? false },
+    metadata: {
+      platform,
+      code: platformError?.code ?? 'UNKNOWN',
+      message,
+      retryable: platformError?.retryable ?? false,
+    },
   });
   await notifyWorkspace(workspaceId, {
     type: 'POST_FAILED',

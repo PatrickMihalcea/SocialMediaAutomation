@@ -1,19 +1,15 @@
 import { CalendarDays, Check, Layers3, Send, Sparkles } from 'lucide-react';
-import { auth } from '@/auth';
 import { Badge, Button } from '@/bridge88/components';
 
-export default async function MarketingPage() {
-  const session = await auth();
+export default function MarketingPage() {
   return (
     <main id="main-content" className="marketing-shell" tabIndex={-1}>
       <nav className="marketing-nav">
         <span className="text-xl font-[540]">Bridge88</span>
         <div className="flex flex-wrap items-center gap-2">
           <Button href="/pricing" variant="tertiary">Pricing</Button>
-          <Button href={session ? '/w' : '/login'} variant="tertiary">
-            {session ? 'Open app' : 'Sign in'}
-          </Button>
-          <Button href={session ? '/w' : '/signup'}>Start free</Button>
+          <Button href="/login" variant="tertiary">Sign in</Button>
+          <Button href="/signup">Start free</Button>
         </div>
       </nav>
 
@@ -25,7 +21,7 @@ export default async function MarketingPage() {
             One queue for your channels, reviewers and media. Bridge88 validates every version before it reaches the publishing worker.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-            <Button href={session ? '/w' : '/signup'} className="w-full sm:w-auto">Create a workspace</Button>
+            <Button href="/signup" className="w-full sm:w-auto">Create a workspace</Button>
             <Button href="#how-it-works" variant="secondary" className="w-full sm:w-auto">See how it works</Button>
           </div>
         </div>

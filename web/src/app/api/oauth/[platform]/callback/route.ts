@@ -12,6 +12,8 @@ import { rateLimit, LIMITS } from '@/lib/rate-limit';
 import { PlatformError } from '@/lib/social/errors';
 import { db } from '@/lib/db';
 import { assertWithinLimit } from '@/lib/billing/limits';
+import { toAppError } from '@/lib/errors';
+import { billingLimitRedirect } from '@/app/api/oauth/limit-redirect';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ platform: string }> }) {
   const { platform: rawPlatform } = await params;
@@ -106,14 +108,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.redirect(new URL(`/w/${ctx.workspace.slug}/channels/select?selection=${encodeURIComponent(selection)}`, request.url));
   } catch (error) {
     console.error(`[oauth] ${platform} callback failed`, error instanceof Error ? error.message : error);
+    const appError = toAppError(error);
     await audit({
       workspaceId: ctx.workspace.id,
       userId: ctx.user.id,
       action: 'channel.connect_failed',
       entityType: 'oauth_attempt',
       entityId: attempt.id,
-      metadata: { platform, code: error instanceof PlatformError ? error.code : 'UNKNOWN' },
+      metadata: {
+        platform,
+        code: error instanceof PlatformError ? error.code : appError.code,
+        message: error instanceof PlatformError ? error.message : appError.message,
+      },
     });
+    const billingUrl = billingLimitRedirect(error, request.url, ctx.workspace.slug);
+    if (billingUrl) return NextResponse.redirect(billingUrl);
     channelsUrl.searchParams.set('oauth', error instanceof PlatformError ? 'platform_error' : 'failed');
     return NextResponse.redirect(channelsUrl);
   }

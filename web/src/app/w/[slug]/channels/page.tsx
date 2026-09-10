@@ -1,12 +1,13 @@
-import { AlertTriangle, CheckCircle2, Link2, Plus, RefreshCw, Unplug } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Link2, RefreshCw, Unplug } from 'lucide-react';
 import { Avatar, Badge, Button, EmptyState } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { describePlatforms, PLATFORM_LABELS } from '@/lib/social/registry';
 import { relativeLabel } from '@/lib/scheduling/time';
-import { connectDemoChannelAction, disconnectChannelAction, reconnectDemoChannelAction } from '@/app/actions/channels';
+import { disconnectChannelAction, reconnectDemoChannelAction } from '@/app/actions/channels';
 import { ConfirmationButton } from '@/components/action-ui';
 import { PlatformGlyph } from '@/components/visuals';
+import { DemoChannelConnectForm } from './channel-connect-form';
 
 function sentenceCase(value: string) {
   const words = value.replaceAll('_', ' ').toLowerCase();
@@ -30,12 +31,17 @@ export default async function ChannelsPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ oauth?: string }>;
+  searchParams: Promise<{ oauth?: string; account?: string }>;
 }) {
   const [{ slug }, query] = await Promise.all([params, searchParams]);
   const ctx = await requireWorkspace(slug, 'channel:view');
   const accounts = await db.socialAccount.findMany({
-    where: { workspaceId: ctx.workspace.id, status: { not: 'DISCONNECTED' } },
+    where: {
+      workspaceId: ctx.workspace.id,
+      ...(query.account
+        ? { OR: [{ status: { not: 'DISCONNECTED' } }, { id: query.account }] }
+        : { status: { not: 'DISCONNECTED' } }),
+    },
     include: {
       _count: {
         select: {
@@ -75,7 +81,12 @@ export default async function ChannelsPage({
           const scheduledTargets = account._count.postPlatforms;
           const tone = account.status === 'ACTIVE' ? 'mint' : account.status === 'EXPIRED' ? 'coral' : 'cream';
           return (
-            <article key={account.id} className="b88-card">
+            <article
+              id={account.id}
+              key={account.id}
+              className="b88-card scroll-mt-20"
+              style={query.account === account.id ? { borderColor: 'var(--ink)' } : undefined}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <Avatar name={account.accountName} src={account.avatarUrl} size={44} />
@@ -166,10 +177,11 @@ export default async function ChannelsPage({
                     <Link2 size={16} /> Connect {platform.label}
                   </Button>
                 ) : (
-                  <form action={connectDemoChannelAction.bind(null, slug)}>
-                    <input type="hidden" name="platform" value={platform.platform} />
-                    <Button type="submit" variant="secondary" fullWidth className="mt-4"><Plus size={16} /> Connect {platform.label} demo</Button>
-                  </form>
+                  <DemoChannelConnectForm
+                    slug={slug}
+                    platform={platform.platform}
+                    label={platform.label}
+                  />
                 )}
               </div>
             ))}

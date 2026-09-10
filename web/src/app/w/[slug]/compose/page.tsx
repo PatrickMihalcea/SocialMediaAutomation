@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ComposerForm } from '@/components/composer-form';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { loadComposerContext } from '@/lib/posts/load';
+import { parseComposerContext } from '@/lib/posts/lifecycle';
 import { createPostAction } from '@/app/actions/posts';
 
 export default async function ComposePage({
@@ -9,14 +10,16 @@ export default async function ComposePage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ asset?: string }>;
+  searchParams: Promise<{ asset?: string; campaign?: string; scheduledAt?: string }>;
 }) {
   const { slug } = await params;
-  const { asset } = await searchParams;
+  const query = await searchParams;
   const ctx = await requireWorkspace(slug, 'post:create');
   const data = await loadComposerContext(ctx.workspace.id, slug);
-  const attachAssetId =
-    asset && data.assets.some((entry) => entry.id === asset) ? asset : undefined;
+  const context = parseComposerContext(query, {
+    assetIds: data.assets.map((asset) => asset.id),
+    campaignIds: data.campaigns.map((campaign) => campaign.id),
+  });
   const action = createPostAction.bind(null, slug);
 
   return (
@@ -33,7 +36,11 @@ export default async function ComposePage({
           assets={data.assets}
           campaigns={data.campaigns}
           timezone={data.timezone}
-          attachAssetId={attachAssetId}
+          attachAssetId={context.assetId}
+          contextDefaults={{
+            scheduledAt: context.scheduledAt,
+            campaignId: context.campaignId,
+          }}
           canSchedule={ctx.can('post:schedule')}
           canPublish={ctx.can('post:publish')}
           canSubmitForApproval={ctx.can('post:submit_for_approval')}

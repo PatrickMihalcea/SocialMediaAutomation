@@ -81,25 +81,65 @@ export const assistantReplySchema = z.object({
     .discriminatedUnion('kind', [
       z.object({
         kind: z.literal('create_drafts'),
-        summary: z.string(),
+        summary: z.string().min(1).max(500),
         posts: z.array(
           z.object({
-            title: z.string().optional(),
-            text: z.string(),
-            hashtags: z.array(z.string()).default([]),
-          }),
-        ),
-      }),
+            title: z.string().min(1).max(200).optional(),
+            text: z.string().min(1).max(65_000),
+            hashtags: z.array(z.string().max(100)).max(30).default([]),
+          }).strict(),
+        ).min(1).max(10),
+      }).strict(),
       z.object({
         kind: z.literal('schedule_posts'),
-        summary: z.string(),
-        postIds: z.array(z.string()).default([]),
+        summary: z.string().min(1).max(500),
+        posts: z.array(z.object({
+          postId: z.string().uuid(),
+          postTitle: z.string().min(1).max(200),
+        }).strict()).min(1).max(50),
         weekdays: z.array(z.number().int().min(0).max(6)).default([]),
         hour: z.number().int().min(0).max(23).default(9),
         minute: z.number().int().min(0).max(59).default(0),
-      }),
+      }).strict(),
+      z.object({
+        kind: z.literal('assign_campaign'),
+        summary: z.string().min(1).max(500),
+        postId: z.string().uuid(),
+        postTitle: z.string().min(1).max(200),
+        campaignId: z.string().uuid(),
+        campaignName: z.string().min(1).max(200),
+      }).strict(),
+      z.object({
+        kind: z.literal('attach_media'),
+        summary: z.string().min(1).max(500),
+        postId: z.string().uuid(),
+        postTitle: z.string().min(1).max(200),
+        media: z.array(z.object({
+          mediaAssetId: z.string().uuid(),
+          filename: z.string().min(1).max(500),
+          altText: z.string().max(2_000).nullable().default(null),
+        }).strict()).min(1).max(35),
+      }).strict(),
+      z.object({
+        kind: z.literal('update_post_content'),
+        summary: z.string().min(1).max(500),
+        postId: z.string().uuid(),
+        postTitle: z.string().min(1).max(200),
+        title: z.string().min(1).max(200).nullable().optional(),
+        text: z.string().min(1).max(65_000),
+        hashtags: z.array(z.string().max(100)).max(30).default([]),
+      }).strict(),
+      z.object({
+        kind: z.literal('repurpose_content'),
+        summary: z.string().min(1).max(500),
+        sourcePostId: z.string().uuid(),
+        sourcePostTitle: z.string().min(1).max(200),
+        newTitle: z.string().min(1).max(200),
+        text: z.string().min(1).max(65_000),
+        hashtags: z.array(z.string().max(100)).max(30).default([]),
+      }).strict(),
     ])
     .nullable()
     .default(null),
-});
+}).strict();
 export type AssistantReply = z.infer<typeof assistantReplySchema>;

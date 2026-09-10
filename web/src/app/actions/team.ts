@@ -7,13 +7,14 @@ import { db } from '@/lib/db';
 import { issueSecret } from '@/lib/crypto/tokens';
 import { hashSecret } from '@/lib/crypto/tokens';
 import { assertWithinLimit } from '@/lib/billing/limits';
-import { notifyWorkspace } from '@/lib/notifications/service';
+import { notifyRoles, notifyWorkspace } from '@/lib/notifications/service';
 import { sendInviteEmail } from '@/lib/notifications/email';
 import { publicEnv } from '@/lib/env';
 import { requireUser } from '@/lib/auth/guard';
 import { redirect } from 'next/navigation';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
-import { conflict } from '@/lib/errors';
+import { conflict, invalid } from '@/lib/errors';
+import { audit } from '@/lib/audit';
 
 const inviteMemberSchema = z.object({
   email: z.string().email(),
@@ -135,9 +136,10 @@ export async function approvalAction(
 ) {
   const ctx = await requireWorkspace(slug, 'post:approve');
   const post = await db.post.findFirst({ where: { id: postId, workspaceId: ctx.workspace.id } });
-  if (!post) return;
-  const body = String(formData.get('body') || '').trim() || decision.toLowerCase().replace('_', ' ');
-  await db.$transaction([
+  if (!post) throw invalid('That post is no longer available in this workspace.');
+  const providedComment = String(formData.get('body') || '').trim();
+  const body = providedComment || decision.toLowerCase().replaceAll('_', ' ');
+  const [comment] = await db.$transaction([
     db.approvalComment.create({
       data: { postId, workspaceId: ctx.workspace.id, authorId: ctx.user.id, decision, body },
     }),
@@ -146,11 +148,66 @@ export async function approvalAction(
       data: { status: decision === 'APPROVED' ? 'APPROVED' : 'DRAFT' },
     }),
   ]);
+  const action = {
+    APPROVED: 'approval.approved',
+    REJECTED: 'approval.rejected',
+    CHANGES_REQUESTED: 'approval.changes_requested',
+  }[decision];
+  await audit({
+    workspaceId: ctx.workspace.id,
+    userId: ctx.user.id,
+    action,
+    entityType: 'approval',
+    entityId: postId,
+    metadata: { decision, ...(providedComment ? { comment: providedComment } : {}) },
+  });
+  if (providedComment) {
+    await audit({
+      workspaceId: ctx.workspace.id,
+      userId: ctx.user.id,
+      action: 'approval.commented',
+      entityType: 'approval_comment',
+      entityId: comment.id,
+      metadata: { postId, comment: providedComment },
+    });
+  }
   await notifyWorkspace(ctx.workspace.id, {
     type: 'APPROVAL_COMPLETED',
-    title: decision === 'APPROVED' ? 'A post was approved' : 'A post needs changes',
+    title: {
+      APPROVED: 'A post was approved',
+      REJECTED: 'A post was rejected',
+      CHANGES_REQUESTED: 'Changes were requested',
+    }[decision],
     body,
-    href: `/w/${slug}/calendar?post=${postId}`,
+    href: `/w/${slug}/posts/${postId}`,
   });
   revalidatePath(`/w/${slug}/team`);
+  revalidatePath(`/w/${slug}/posts/${postId}`);
+  revalidatePath(`/w/${slug}/history`);
+}
+
+export async function cancelApprovalRequestAction(
+  slug: string,
+  postId: string,
+): Promise<ActionState> {
+  try {
+    const ctx = await requireWorkspace(slug, 'post:update');
+    const result = await db.post.updateMany({
+      where: { id: postId, workspaceId: ctx.workspace.id, status: 'PENDING_APPROVAL' },
+      data: { status: 'DRAFT' },
+    });
+    if (!result.count) throw conflict('This post is no longer waiting for approval.');
+    await notifyRoles(ctx.workspace.id, ['OWNER', 'ADMIN'], {
+      type: 'APPROVAL_COMPLETED',
+      title: 'An approval request was cancelled',
+      body: 'The author returned the post to drafts.',
+      href: `/w/${slug}/posts/${postId}`,
+    });
+    revalidatePath(`/w/${slug}/team`);
+    revalidatePath(`/w/${slug}/posts/${postId}`);
+    revalidatePath(`/w/${slug}/compose/${postId}`);
+    return actionSuccess('Approval request cancelled. The post is now a draft.');
+  } catch (error) {
+    return actionError(error, 'The approval request could not be cancelled.');
+  }
 }

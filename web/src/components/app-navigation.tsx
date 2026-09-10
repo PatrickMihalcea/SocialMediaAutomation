@@ -9,6 +9,7 @@ import {
   CalendarDays,
   Contact,
   FilePenLine,
+  History,
   Image,
   LayoutDashboard,
   ListTodo,
@@ -31,6 +32,7 @@ const items = [
   ['AI studio', '/studio', WandSparkles],
   ['Media', '/media', Image],
   ['Analytics', '/analytics', BarChart3],
+  ['History', '/history', History],
   ['Campaigns', '/campaigns', Megaphone],
   ['Social accounts', '/channels', Share2],
   ['Team', '/team', Contact],
@@ -53,6 +55,7 @@ const overflowItems = [
   destination('/assistant'),
   destination('/studio'),
   destination('/analytics'),
+  destination('/history'),
   destination('/campaigns'),
   destination('/channels'),
   destination('/team'),
@@ -109,7 +112,7 @@ export function AppNavigation({
           </select>
           <Link href="/w/new" className="mt-2 inline-block text-sm">Create workspace</Link>
         </div>
-        <nav className="space-y-1">
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">
           {items.map(([label, path, Icon]) => {
             const href = `${root}${path}`;
             const active = path === '' ? pathname === root : pathname.startsWith(href);

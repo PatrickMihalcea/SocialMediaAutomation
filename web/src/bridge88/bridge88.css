@@ -37,7 +37,7 @@ h1,h2,h3,h4,p{margin:0}
 a{color:inherit;text-decoration:none}
 button,input,textarea,select{font:inherit;color:inherit}
 button{cursor:pointer}
-:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+:focus-visible{outline:3px solid var(--ink);outline-offset:3px;box-shadow:0 0 0 2px var(--canvas)}
 ::selection{background:var(--accent-magenta);color:#fff}
 
 .b88-eyebrow,.b88-caption{font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.06em}
@@ -48,7 +48,8 @@ button{cursor:pointer}
 .b88-card{background:var(--canvas);border:1px solid var(--hairline);border-radius:24px;padding:24px}
 .b88-tile{background:var(--surface-soft);border-radius:8px;padding:16px}
 .b88-input{width:100%;min-height:48px;padding:12px;background:var(--canvas);border:1px solid var(--hairline);border-radius:8px}
-.b88-input:focus{outline:2px solid var(--ink);outline-offset:2px}
+.b88-input:focus-visible{outline:3px solid var(--ink);outline-offset:3px;box-shadow:0 0 0 2px var(--canvas)}
+.b88-input[aria-invalid="true"]{border-color:var(--accent-magenta)}
 .b88-input[readonly]{background:var(--surface-soft)}
 textarea.b88-input{resize:vertical}
 .b88-label{display:block;margin-bottom:var(--space-xs);font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
@@ -59,9 +60,10 @@ label:has(>.b88-label){display:block}
    (not min-height) is required: native selects and inputs otherwise keep an
    intrinsic height of 41-42px and miss --control-size. */
 .b88-pill-select,.b88-filter-control{height:var(--control-size);padding:0 var(--space-md);background:var(--canvas);color:var(--ink);border:1px solid var(--hairline);border-radius:var(--radius-pill)}
-.b88-filter-control:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.b88-filter-control:focus-visible{outline:3px solid var(--ink);outline-offset:3px;box-shadow:0 0 0 2px var(--canvas)}
 .b88-checkbox{appearance:none;border:1px solid var(--hairline);border-radius:var(--radius-sm);background:var(--canvas);background-position:center;background-repeat:no-repeat;background-size:14px 14px}
 .b88-checkbox:checked{border-color:var(--primary);background-color:var(--primary);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='m5 10 3 3 7-7' fill='none' stroke='white' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
+.b88-uploader:has(input:focus-visible){outline:3px solid var(--ink);outline-offset:3px;box-shadow:0 0 0 2px var(--canvas)}
 /* Bulk actions follow the viewport instead of scrolling away above a long grid. */
 @keyframes b88-rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 /* Centred with auto margins, not translateX: a fixed box with `left` set resolves

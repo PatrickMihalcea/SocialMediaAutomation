@@ -1,8 +1,12 @@
 import { Badge } from '@/bridge88/components';
+import type { PostStatus } from '@prisma/client';
 import { ComposerForm } from '@/components/composer-form';
 import { ConfirmationButton, PendingButton } from '@/components/action-ui';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { loadComposerContext } from '@/lib/posts/load';
+import { parseComposerContext } from '@/lib/posts/lifecycle';
+import { legalPostActions } from '@/lib/posts/lifecycle';
+import { PLATFORM_LABELS } from '@/lib/social/labels';
 import { postCommandAction, updatePostAction, type ComposerState } from '@/app/actions/posts';
 
 const statusTone = {
@@ -18,13 +22,20 @@ const statusTone = {
 
 export default async function EditComposePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string; postId: string }>;
+  searchParams: Promise<{ asset?: string }>;
 }) {
   const { slug, postId } = await params;
+  const query = await searchParams;
   const ctx = await requireWorkspace(slug, 'post:view');
   const data = await loadComposerContext(ctx.workspace.id, slug, postId);
   if (!data.post) return null;
+  const context = parseComposerContext(query, {
+    assetIds: data.assets.map((asset) => asset.id),
+    campaignIds: data.campaigns.map((campaign) => campaign.id),
+  });
 
   async function action(state: ComposerState, formData: FormData): Promise<ComposerState> {
     'use server';
@@ -53,6 +64,10 @@ export default async function EditComposePage({
           canDelete={ctx.can('post:delete')}
           canPublish={ctx.can('post:publish')}
           canSchedule={ctx.can('post:schedule')}
+          channelLabels={(data.initial?.platforms ?? []).map((platform) => {
+            const account = data.accounts.find((item) => item.id === platform.socialAccountId);
+            return `${PLATFORM_LABELS[platform.platform]} (${account?.accountHandle ?? account?.accountName ?? 'connected account'})`;
+          })}
         />
       </div>
       {data.accounts.length ? (
@@ -66,6 +81,7 @@ export default async function EditComposePage({
           postId={postId}
           postStatus={data.post.status}
           initial={data.initial}
+          attachAssetId={context.assetId}
           canSchedule={ctx.can('post:schedule')}
           canPublish={ctx.can('post:publish')}
           canSubmitForApproval={ctx.can('post:submit_for_approval')}
@@ -88,37 +104,61 @@ function PostCommands({
   canDelete,
   canPublish,
   canSchedule,
+  channelLabels,
 }: {
   slug: string;
   postId: string;
-  status: string;
+  status: PostStatus;
   timezone: string;
   canDelete: boolean;
   canPublish: boolean;
   canSchedule: boolean;
+  channelLabels: string[];
 }) {
+  const actions = legalPostActions(status);
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <form action={async () => { 'use server'; await postCommandAction(slug, postId, 'duplicate'); }}>
+      {actions.includes('duplicate') && <form action={async () => { 'use server'; await postCommandAction(slug, postId, 'duplicate'); }}>
         <PendingButton type="submit" variant="secondary" pendingLabel="Duplicating">Duplicate</PendingButton>
-      </form>
-      {['DRAFT', 'SCHEDULED', 'FAILED', 'APPROVED'].includes(status) && canPublish && (
+      </form>}
+      {(actions.includes('publish') || actions.includes('retry')) && canPublish && (
         <form action={async () => { 'use server'; await postCommandAction(slug, postId, status === 'FAILED' ? 'retry' : 'publish'); }}>
-          <PendingButton type="submit" variant="secondary" pendingLabel="Publishing">{status === 'FAILED' ? 'Retry publish' : 'Publish now'}</PendingButton>
+          <ConfirmationButton
+            type="submit"
+            variant="secondary"
+            pendingLabel="Publishing"
+            confirmMessage={status === 'FAILED'
+              ? `Retry publishing only to the unsuccessful channels: ${channelLabels.join(', ')}?`
+              : `Publish immediately to ${channelLabels.join(', ')}? Publishing cannot be undone from Bridge88.`}
+          >
+            {status === 'FAILED' ? 'Retry publish' : 'Publish now'}
+          </ConfirmationButton>
         </form>
       )}
-      {status === 'SCHEDULED' && (
+      {actions.includes('cancel') && (
         <form action={async () => { 'use server'; await postCommandAction(slug, postId, 'cancel'); }}>
-          <PendingButton type="submit" variant="tertiary" pendingLabel="Cancelling">Cancel schedule</PendingButton>
+          <ConfirmationButton
+            type="submit"
+            variant="tertiary"
+            pendingLabel="Cancelling"
+            confirmMessage="Cancel this post and remove it from its publishing time? You can restore it as a draft later."
+          >
+            Cancel schedule
+          </ConfirmationButton>
         </form>
       )}
-      {['SCHEDULED', 'FAILED', 'CANCELLED'].includes(status) && canSchedule && (
+      {actions.includes('restore') && (
+        <form action={async () => { 'use server'; await postCommandAction(slug, postId, 'restore'); }}>
+          <PendingButton type="submit" variant="secondary" pendingLabel="Restoring">Restore draft</PendingButton>
+        </form>
+      )}
+      {actions.includes('reschedule') && canSchedule && (
         <form action={async (formData: FormData) => { 'use server'; await postCommandAction(slug, postId, 'reschedule', formData); }} className="flex items-center gap-2">
           <input type="datetime-local" name="scheduledAt" className="b88-filter-control w-auto" aria-label={`Reschedule (${timezone})`} />
           <PendingButton type="submit" variant="secondary" pendingLabel="Rescheduling">Reschedule</PendingButton>
         </form>
       )}
-      {canDelete && (
+      {canDelete && actions.includes('delete') && (
         <form action={async () => { 'use server'; await postCommandAction(slug, postId, 'delete'); }}>
           <ConfirmationButton type="submit" variant="tertiary" confirmMessage="Delete this post permanently?" pendingLabel="Deleting">
             Delete

@@ -1,5 +1,5 @@
 import { Button, PricingCard } from '@/bridge88/components';
-import { PLAN_LIMITS } from '@/lib/billing/limits';
+import { formatBytes, PLAN_LIMITS } from '@/lib/billing/limits';
 import Link from 'next/link';
 
 const plans = [
@@ -28,6 +28,7 @@ export default function PricingPage() {
               `${limits.teamMembers} ${limits.teamMembers === 1 ? 'team member' : 'team members'}`,
               `${limits.scheduledPosts ?? 'Unlimited'} scheduled posts`,
               `${limits.aiGenerations.toLocaleString()} AI generations monthly`,
+              `${formatBytes(limits.storageBytes)} media storage`,
             ]}
             cta={<Button
                 href={plan.key === 'FREE' ? '/signup' : `/signup?plan=${plan.key}`}

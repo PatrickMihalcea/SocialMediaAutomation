@@ -119,7 +119,7 @@ export function QueueManager({
         ))}</ol> : <div className="mt-6"><EmptyState eyebrow="Queue clear" title="No posts are queued" action={<Button href={`/w/${slug}/compose`}>Create a draft</Button>}>Create a post, save it as a draft, then return here to assign the next open slot.</EmptyState></div>}
         {canManage && <div className="mt-6 border-t border-hairline pt-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
-            <div><p className="b88-label">Drafts ready to queue</p><p className="mt-1 text-sm">{paused ? 'Resume the queue before assigning new slots.' : 'Select one or more drafts. They will receive sequential open slots in this order.'}</p></div>
+            <div><p className="b88-label">Posts ready to queue</p><p className="mt-1 text-sm">{paused ? 'Resume the queue before assigning new slots.' : 'Select drafts or scheduled posts. They will receive sequential open slots in this order.'}</p></div>
             {!drafts.length && <Button href={`/w/${slug}/compose`} variant="secondary">Create a draft</Button>}
           </div>
           {drafts.length > 0 && <div className="mt-3 grid gap-1 sm:grid-cols-2">
@@ -134,7 +134,7 @@ export function QueueManager({
             />)}
           </div>}
         </div>}
-        {selectedDrafts.length > 0 && <div className="b88-selection-bar" role="region" aria-label={`Queue ${selectedDrafts.length} selected drafts`}>
+        {selectedDrafts.length > 0 && <div className="b88-selection-bar" role="region" aria-label={`Queue ${selectedDrafts.length} selected posts`} style={{ flexWrap: 'nowrap', justifyContent: 'flex-start', overflowX: 'auto' }}>
           <span className="px-2 text-sm font-[480]">{selectedDrafts.length} selected</span>
           <Button type="button" variant="secondary" disabled={pending || paused} onClick={() => run(async () => {
             for (const id of selectedDrafts) await addPostToQueueAction(slug, id);
@@ -148,10 +148,16 @@ export function QueueManager({
         <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="b88-eyebrow">Posting times</p><h2 className="b88-heading mt-2">Weekly slot rules</h2></div></div>
         <StatusMessage className="mt-4">Changes apply only to future queue assignments. Posts already queued keep their current publishing times.</StatusMessage>
         {rules.length ? <div className="mt-6 space-y-3">{rules.map((rule) => (
-          <form key={rule.id} onSubmit={(event) => {
+          <details key={rule.id} className="rounded-md bg-surface-soft">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2">
+              <span className="font-[480]">{weekdays[rule.weekday]} at {String(rule.hour).padStart(2, '0')}:{String(rule.minute).padStart(2, '0')}</span>
+              <Badge tone={rule.enabled ? 'mint' : 'outline'}>{rule.enabled ? 'Enabled' : 'Disabled'} · Edit</Badge>
+            </summary>
+          <form onSubmit={(event) => {
             event.preventDefault();
-            run(() => updateSlotRuleAction(slug, rule.id, new FormData(event.currentTarget)), 'Posting time saved. Existing queued posts were not changed.');
-          }} className="grid grid-cols-1 items-end gap-3 rounded-md bg-surface-soft p-4 md:grid-cols-[minmax(0,1fr)_110px_110px_auto_auto]">
+            const formData = new FormData(event.currentTarget);
+            run(() => updateSlotRuleAction(slug, rule.id, formData), 'Posting time saved. Existing queued posts were not changed.');
+          }} className="grid grid-cols-1 items-end gap-3 border-t border-hairline p-4 md:grid-cols-[minmax(0,1fr)_110px_110px_auto_auto]">
             <Select name="weekday" label="Day" className={compactInput} defaultValue={rule.weekday}>{weekdays.map((day, index) => <option key={day} value={index}>{day}</option>)}</Select>
             <Field label="Hour" name="hour" type="number" min={0} max={23} defaultValue={rule.hour} className={compactInput} />
             <Field label="Minute" name="minute" type="number" min={0} max={59} step={5} defaultValue={rule.minute} className={compactInput} />
@@ -161,10 +167,12 @@ export function QueueManager({
               <IconButton type="button" icon={Trash2} label={`Delete ${weekdays[rule.weekday]} slot`} disabled={pending} onClick={() => confirm(`Delete the ${weekdays[rule.weekday]} ${String(rule.hour).padStart(2, '0')}:${String(rule.minute).padStart(2, '0')} posting time? Existing queued posts will keep their times.`) && run(() => deleteSlotRuleAction(slug, rule.id), 'Posting time deleted. Existing queued posts were not changed.')} />
             </div>
           </form>
+          </details>
         ))}</div> : <div className="mt-6"><EmptyState eyebrow="No posting times" title="Add your first slot">Queue posts need at least one weekly publishing time.</EmptyState></div>}
         {canManage && <form onSubmit={(event) => {
           event.preventDefault();
-          run(() => createSlotRuleAction(slug, new FormData(event.currentTarget)), 'Posting time added.');
+          const formData = new FormData(event.currentTarget);
+          run(() => createSlotRuleAction(slug, formData), 'Posting time added.');
         }} className="mt-6 grid grid-cols-1 items-end gap-3 border-t border-hairline pt-6 md:grid-cols-[minmax(0,1fr)_110px_110px_auto]">
           <Select name="weekday" label="Day" className={compactInput}>{weekdays.map((day, index) => <option key={day} value={index}>{day}</option>)}</Select>
           <Field label="Hour" name="hour" type="number" min={0} max={23} defaultValue={9} className={compactInput} />
@@ -202,7 +210,10 @@ export function QueueManager({
           </article>
         ))}</div>
         {!recurrences.length && <EmptyState eyebrow="No recurring content" title="Create your first series">Choose a pattern, publishing time, start date, and optional end date below.</EmptyState>}
-        {canManage && editing === null && <div className="mt-6 border-t border-hairline pt-6"><RecurrenceForm slug={slug} accounts={accounts} campaigns={campaigns} pending={pending} run={run} /></div>}
+        {canManage && editing === null && <details className="mt-6 border-t border-hairline pt-4" open={!recurrences.length}>
+          <summary className="flex min-h-11 cursor-pointer list-none items-center font-[480]">Create a recurring series</summary>
+          <div className="mt-3"><RecurrenceForm slug={slug} accounts={accounts} campaigns={campaigns} pending={pending} run={run} /></div>
+        </details>}
       </section>
     </>
   );
@@ -223,8 +234,9 @@ function RecurrenceForm({
   const [frequency, setFrequency] = useState(recurrence?.frequency ?? 'weekly');
   return <form onSubmit={(event) => {
     event.preventDefault();
+    const formData = new FormData(event.currentTarget);
     run(async () => {
-      await action(new FormData(event.currentTarget));
+      await action(formData);
       onCancel?.();
     }, recurrence ? 'Series updated. Future unpublished occurrences were replaced.' : 'Recurring series created.');
   }} className="grid gap-4 rounded-md bg-surface-soft p-4 md:grid-cols-2">

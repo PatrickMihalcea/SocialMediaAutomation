@@ -18,8 +18,8 @@ export function ActionForm({
   const [state, submit] = useActionState(action, {});
   return (
     <form action={submit} className={className} encType={encType}>
-      {state.error && <StatusMessage tone="error" className="mb-4">{state.error}</StatusMessage>}
-      {state.success && <StatusMessage tone="success" className="mb-4">{state.success}</StatusMessage>}
+      {state.error && <StatusMessage tone="error" className="col-span-full mb-4">{state.error}</StatusMessage>}
+      {state.success && <StatusMessage tone="success" className="col-span-full mb-4">{state.success}</StatusMessage>}
       {children}
     </form>
   );

@@ -35,7 +35,7 @@ export class MockAiProvider implements AiProvider {
     schemaName: string;
   }): Promise<AiObjectResult<T>> {
     const prompt = lastUser(input.messages);
-    const candidate = build(input.schemaName, prompt);
+    const candidate = build(input.schemaName, prompt, input.messages);
     const parsed = input.schema.safeParse(candidate);
     if (!parsed.success) {
       throw new AiError(
@@ -63,7 +63,7 @@ export class MockAiProvider implements AiProvider {
 
 // ---------------------------------------------------------------- samples
 
-function build(schemaName: string, prompt: string): unknown {
+function build(schemaName: string, prompt: string, messages: AiMessage[]): unknown {
   const topic = extractTopic(prompt);
   switch (schemaName) {
     case 'post_draft':
@@ -128,24 +128,175 @@ function build(schemaName: string, prompt: string): unknown {
       };
 
     case 'assistant_reply':
-      if (/\b(create|draft|post)\b/i.test(prompt)) {
+      {
+      const context = workspaceContext(messages);
+      const post = referenced(prompt, context.posts, (item) => item.title);
+      const campaign = referenced(prompt, context.campaigns, (item) => item.name);
+      const asset = referenced(prompt, context.media, (item) => item.filename);
+      const simulated = 'This is simulated output. ';
+      if (/\b(schedule|queue)\b/i.test(prompt)) {
+        if (!post) return { reply: `${simulated}I could not identify an existing post to schedule, so I did not prepare a proposal. Name the post you want to schedule.`, action: null };
+        const posts = selectRequestedPosts(prompt, context.posts, post);
+        const { hour, minute } = requestedTime(prompt);
         return {
-          reply: `I prepared a draft for ${topic}. Confirm the proposed action to add it to the workspace.`,
+          reply: `${simulated}I prepared a schedule proposal for ${posts.length === 1 ? `"${posts[0].title}"` : `${posts.length} posts`}. Nothing will change until you confirm.`,
+          action: {
+            kind: 'schedule_posts',
+            summary: `Schedule ${posts.length === 1 ? `"${posts[0].title}"` : `${posts.length} posts`}`,
+            posts: posts.map((item) => ({ postId: item.id, postTitle: item.title })),
+            weekdays: requestedWeekdays(prompt),
+            hour,
+            minute,
+          },
+        };
+      }
+      if (/\b(assign|add|put|link)\b.*\bcampaign\b|\bcampaign\b.*\b(assign|add|put|link)\b/i.test(prompt)) {
+        if (!post || !campaign) return { reply: `${simulated}I could not identify both an existing post and campaign, so I did not prepare a proposal. Name both of them.`, action: null };
+        return {
+          reply: `${simulated}I prepared a proposal to assign "${post.title}" to "${campaign.name}". Nothing will change until you confirm.`,
+          action: {
+            kind: 'assign_campaign',
+            summary: `Assign "${post.title}" to "${campaign.name}"`,
+            postId: post.id,
+            postTitle: post.title,
+            campaignId: campaign.id,
+            campaignName: campaign.name,
+          },
+        };
+      }
+      if (/\b(attach|add)\b.*\b(media|image|asset|video|file)\b/i.test(prompt)) {
+        if (!post || !asset) return { reply: `${simulated}I could not identify both an existing post and ready media file, so I did not prepare a proposal. Name both of them.`, action: null };
+        return {
+          reply: `${simulated}I prepared a proposal to attach "${asset.filename}" to "${post.title}" on every channel version. Nothing will change until you confirm.`,
+          action: {
+            kind: 'attach_media',
+            summary: `Attach "${asset.filename}" to "${post.title}"`,
+            postId: post.id,
+            postTitle: post.title,
+            media: [{ mediaAssetId: asset.id, filename: asset.filename, altText: `Media for ${post.title}` }],
+          },
+        };
+      }
+      if (/\b(repurpose|adapt)\b/i.test(prompt)) {
+        if (!post) return { reply: `${simulated}I could not identify an existing source post, so I did not prepare a proposal. Name the post you want to repurpose.`, action: null };
+        return {
+          reply: `${simulated}I prepared a new draft based on "${post.title}". The original will remain unchanged, and nothing will be created until you confirm.`,
+          action: {
+            kind: 'repurpose_content',
+            summary: `Create a repurposed draft from "${post.title}"`,
+            sourcePostId: post.id,
+            sourcePostTitle: post.title,
+            newTitle: `${post.title} — repurposed`,
+            text: draftFor(`${post.title} for a fresh audience`),
+            hashtags: hashtagsFor(post.title),
+          },
+        };
+      }
+      if (/\b(update|rewrite|shorten|expand|tone|technical|hashtags?)\b/i.test(prompt) && post) {
+        const text = /\bshorten\b/i.test(prompt) ? shortDraft(post.title) : draftFor(`${post.title}, revised`);
+        return {
+          reply: `${simulated}I prepared revised copy for "${post.title}" across every channel version. Nothing will change until you confirm.`,
+          action: {
+            kind: 'update_post_content',
+            summary: `Update the copy for "${post.title}"`,
+            postId: post.id,
+            postTitle: post.title,
+            text,
+            hashtags: hashtagsFor(post.title),
+          },
+        };
+      }
+      if (/\b(create|draft|post)\b/i.test(prompt)) {
+        const count = Math.min(requestedCount(prompt, 'post') ?? 1, 10);
+        return {
+          reply: `${simulated}I prepared ${count === 1 ? 'a draft' : `${count} distinct drafts`} for ${topic}. Confirm the proposed action to add ${count === 1 ? 'it' : 'them'} to the workspace.`,
           action: {
             kind: 'create_drafts',
-            summary: `Create one draft about ${topic}`,
-            posts: [{ title: `${topic}: draft`, text: draftFor(topic), hashtags: hashtagsFor(topic) }],
+            summary: `Create ${count === 1 ? 'one draft' : `${count} drafts`} about ${topic}`,
+            posts: Array.from({ length: count }, (_, index) => ({
+              title: count === 1 ? `${topic}: draft` : `${topic}: draft ${index + 1}`,
+              text: draftFor(count === 1 ? topic : `${topic} — angle ${index + 1}`),
+              hashtags: hashtagsFor(topic),
+            })),
           },
         };
       }
       return {
-        reply: `Here is a plan for ${topic}. Ask me to create drafts when you want a structured action; nothing is written until you confirm.`,
+        reply: `${simulated}Here is a plan for ${topic}. Ask me to create drafts or name an existing workspace item when you want a structured action; nothing is written until you confirm.`,
         action: null,
       };
+      }
 
     default:
       return null;
   }
+}
+
+type WorkspaceContext = {
+  posts: Array<{ id: string; title: string; status: string }>;
+  campaigns: Array<{ id: string; name: string }>;
+  media: Array<{ id: string; filename: string; type: string }>;
+};
+
+function workspaceContext(messages: AiMessage[]): WorkspaceContext {
+  const combined = messages.map((message) => message.content).join('\n');
+  const match = combined.match(/WORKSPACE_CONTEXT_BEGIN([\s\S]*?)WORKSPACE_CONTEXT_END/);
+  if (!match) return { posts: [], campaigns: [], media: [] };
+  try {
+    return JSON.parse(match[1]) as WorkspaceContext;
+  } catch {
+    return { posts: [], campaigns: [], media: [] };
+  }
+}
+
+function referenced<T>(prompt: string, values: T[], label: (value: T) => string): T | undefined {
+  const normalized = prompt.toLowerCase();
+  return values.find((value) => normalized.includes(label(value).toLowerCase())) ?? values[0];
+}
+
+function selectRequestedPosts(
+  prompt: string,
+  posts: WorkspaceContext['posts'],
+  fallback: WorkspaceContext['posts'][number],
+) {
+  const count = Math.min(requestedCount(prompt, 'post') ?? 1, posts.length);
+  if (count <= 1) return [fallback];
+  return [fallback, ...posts.filter((post) => post.id !== fallback.id)].slice(0, count);
+}
+
+function requestedCount(prompt: string, _noun: 'post'): number | null {
+  const numeric = prompt.match(/\b(\d{1,2})[ -]?(?:distinct\s+)?(?:drafts?|posts?)\b/i);
+  if (numeric) return Number(numeric[1]);
+  const words: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5,
+    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  };
+  const written = prompt.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten)[ -]?(?:distinct\s+)?(?:drafts?|posts?)\b/i);
+  return written ? words[written[1].toLowerCase()] : null;
+}
+
+function requestedWeekdays(prompt: string): number[] {
+  const names: Array<[RegExp, number]> = [
+    [/\bsun(?:day)?s?\b/i, 0],
+    [/\bmon(?:day)?s?\b/i, 1],
+    [/\btue(?:sday)?s?\b/i, 2],
+    [/\bwed(?:nesday)?s?\b/i, 3],
+    [/\bthu(?:rsday)?s?\b/i, 4],
+    [/\bfri(?:day)?s?\b/i, 5],
+    [/\bsat(?:urday)?s?\b/i, 6],
+  ];
+  const selected = names.filter(([pattern]) => pattern.test(prompt)).map(([, day]) => day);
+  return selected.length ? selected : [1, 3, 5];
+}
+
+function requestedTime(prompt: string): { hour: number; minute: number } {
+  const match = prompt.match(/\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+  if (!match) return { hour: 9, minute: 0 };
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? 0);
+  if (match[3]?.toLowerCase() === 'pm' && hour < 12) hour += 12;
+  if (match[3]?.toLowerCase() === 'am' && hour === 12) hour = 0;
+  return hour <= 23 && minute <= 59 ? { hour, minute } : { hour: 9, minute: 0 };
 }
 
 const IDEA_ANGLES = [

@@ -86,6 +86,7 @@ export function buildInitialDraft(
   accounts: ComposerAccount[],
   initial?: ComposerInitial,
   attachAssetId?: string,
+  defaults: { scheduledAt?: string; campaignId?: string } = {},
 ): ComposerDraft {
   const versions: Record<string, PlatformVersionState> = {};
   for (const account of accounts) {
@@ -110,15 +111,15 @@ export function buildInitialDraft(
   if (attachAssetId) {
     for (const account of accounts) {
       const version = versions[account.id];
-      if (version.media.length === 0) {
-        version.media = attachedMedia(attachAssetId);
+      if (!version.media.some((media) => media.mediaAssetId === attachAssetId)) {
+        version.media = [...version.media, ...attachedMedia(attachAssetId)];
       }
     }
   }
   return {
     title: initial?.title ?? '',
-    campaignId: initial?.campaignId ?? '',
-    scheduledAt: initial?.scheduledAt ?? '',
+    campaignId: initial?.campaignId ?? defaults.campaignId ?? '',
+    scheduledAt: initial?.scheduledAt ?? defaults.scheduledAt ?? '',
     activeAccountId:
       initial?.platforms.find((platform) =>
         accounts.some((account) => account.id === platform.socialAccountId),

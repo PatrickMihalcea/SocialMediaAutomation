@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Button, Field, StatusMessage } from '@/bridge88/components';
 import {
@@ -15,6 +15,19 @@ import { firstFieldError, initialActionState } from '@/lib/actions/state';
 
 const initialState: FormState = initialActionState;
 
+function FormErrorSummary({ state }: { state: FormState }) {
+  const summaryRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (state.error) summaryRef.current?.focus();
+  }, [state]);
+  if (!state.error) return null;
+  return (
+    <div ref={summaryRef} tabIndex={-1}>
+      <StatusMessage tone="error">{state.error}</StatusMessage>
+    </div>
+  );
+}
+
 export function LoginForm({ next, googleEnabled }: { next?: string; googleEnabled: boolean }) {
   const [state, action, pending] = useActionState(loginAction, initialState);
   return (
@@ -22,10 +35,10 @@ export function LoginForm({ next, googleEnabled }: { next?: string; googleEnable
       <input type="hidden" name="next" value={next ?? '/w'} />
       <Field name="email" label="Email" type="email" autoComplete="email" required />
       <Field name="password" label="Password" type="password" autoComplete="current-password" required />
-      {state.error && <StatusMessage tone="error">{state.error}</StatusMessage>}
-      <Button type="submit" fullWidth disabled={pending}>{pending ? 'Signing in' : 'Sign in'}</Button>
+      <FormErrorSummary state={state} />
+      <Button type="submit" fullWidth disabled={pending} aria-busy={pending}>{pending ? 'Signing in' : 'Sign in'}</Button>
       {googleEnabled && (
-        <Button type="submit" formAction={googleSignInAction} variant="secondary" fullWidth disabled={pending}>
+        <Button type="submit" formAction={googleSignInAction} variant="secondary" fullWidth disabled={pending} aria-busy={pending}>
           Continue with Google
         </Button>
       )}
@@ -43,8 +56,8 @@ export function ForgotPasswordForm() {
     <form action={action} className="space-y-6">
       <Field name="email" label="Account email" type="email" autoComplete="email" error={firstFieldError(state, 'email')} required />
       {state.success && <StatusMessage tone="success">{state.success}</StatusMessage>}
-      {state.error && !state.fields?.email && <StatusMessage tone="error">{state.error}</StatusMessage>}
-      <Button type="submit" fullWidth disabled={pending}>{pending ? 'Preparing link' : 'Reset password'}</Button>
+      <FormErrorSummary state={state} />
+      <Button type="submit" fullWidth disabled={pending} aria-busy={pending}>{pending ? 'Preparing link' : 'Reset password'}</Button>
       <p className="text-center text-sm"><Link href="/login" className="underline underline-offset-4">Back to sign in</Link></p>
     </form>
   );
@@ -58,8 +71,8 @@ export function ResetPasswordForm({ token }: { token: string }) {
       <Field name="password" label="New password" type="password" autoComplete="new-password" minLength={10} error={firstFieldError(state, 'password')} required />
       <Field name="confirmPassword" label="Confirm new password" type="password" autoComplete="new-password" minLength={10} error={firstFieldError(state, 'confirmPassword')} required />
       {state.success && <StatusMessage tone="success">{state.success}</StatusMessage>}
-      {state.error && !state.fields?.password && <StatusMessage tone="error">{state.error}</StatusMessage>}
-      <Button type="submit" fullWidth disabled={pending}>{pending ? 'Updating password' : 'Set new password'}</Button>
+      <FormErrorSummary state={state} />
+      <Button type="submit" fullWidth disabled={pending} aria-busy={pending}>{pending ? 'Updating password' : 'Set new password'}</Button>
       {state.success && <p className="text-center text-sm"><Link href="/login" className="underline underline-offset-4">Sign in</Link></p>}
     </form>
   );
@@ -84,10 +97,10 @@ export function SignUpForm({ googleEnabled, next }: { googleEnabled: boolean; ne
       />
       <Field name="confirmPassword" label="Confirm password" type="password" autoComplete="new-password" error={firstFieldError(state, 'confirmPassword')} required />
       {state.success && <StatusMessage tone="success">{state.success}</StatusMessage>}
-      {state.error && !state.fields && <StatusMessage tone="error">{state.error}</StatusMessage>}
-      <Button type="submit" fullWidth disabled={pending}>{pending ? 'Creating account' : 'Create account'}</Button>
+      <FormErrorSummary state={state} />
+      <Button type="submit" fullWidth disabled={pending} aria-busy={pending}>{pending ? 'Creating account' : 'Create account'}</Button>
       {googleEnabled && (
-        <Button type="submit" formAction={googleSignInAction} variant="secondary" fullWidth disabled={pending}>
+        <Button type="submit" formAction={googleSignInAction} variant="secondary" fullWidth disabled={pending} aria-busy={pending}>
           Continue with Google
         </Button>
       )}

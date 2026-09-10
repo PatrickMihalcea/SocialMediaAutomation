@@ -8,6 +8,7 @@ import { formatMetric, sumReported, type NullableMetric } from '@/lib/analytics/
 import { refreshAnalyticsAction } from '@/app/actions/analytics';
 import { percentageChange, previousRange, resolveAnalyticsRange } from '@/lib/analytics/range';
 import type { Platform, Prisma } from '@prisma/client';
+import { PendingButton } from '@/components/action-ui';
 
 /**
  * StatCard sets its value at 38px, which reads as a headline for the
@@ -149,7 +150,11 @@ export default async function AnalyticsPage({
         <div><p className="b88-eyebrow">Measurement</p><h1 className="b88-page-title mt-3">Analytics</h1></div>
         <div className="flex flex-wrap gap-2">
           <Button href={`/w/${slug}/analytics/export?${new URLSearchParams(filters as Record<string, string>)}`} variant="secondary">Export CSV</Button>
-          <form action={refreshAnalyticsAction.bind(null, slug)}><Button type="submit" variant="secondary">Refresh analytics</Button></form>
+          <form action={refreshAnalyticsAction.bind(null, slug)}>
+            <PendingButton type="submit" variant="secondary" pendingLabel="Refreshing analytics">
+              Refresh analytics
+            </PendingButton>
+          </form>
         </div>
       </div>
       <p className="mt-4 max-w-2xl">Null metrics remain “not reported.” Bridge88 never turns a platform omission into a zero.</p>

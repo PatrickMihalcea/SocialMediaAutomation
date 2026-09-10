@@ -14,10 +14,43 @@ type Proposal =
   | {
       kind: 'schedule_posts';
       summary: string;
-      postIds: string[];
+      posts: Array<{ postId: string; postTitle: string }>;
       weekdays: number[];
       hour: number;
       minute: number;
+    }
+  | {
+      kind: 'assign_campaign';
+      summary: string;
+      postId: string;
+      postTitle: string;
+      campaignId: string;
+      campaignName: string;
+    }
+  | {
+      kind: 'attach_media';
+      summary: string;
+      postId: string;
+      postTitle: string;
+      media: Array<{ mediaAssetId: string; filename: string; altText: string | null }>;
+    }
+  | {
+      kind: 'update_post_content';
+      summary: string;
+      postId: string;
+      postTitle: string;
+      title?: string | null;
+      text: string;
+      hashtags: string[];
+    }
+  | {
+      kind: 'repurpose_content';
+      summary: string;
+      sourcePostId: string;
+      sourcePostTitle: string;
+      newTitle: string;
+      text: string;
+      hashtags: string[];
     };
 
 type Message = {
@@ -97,7 +130,7 @@ export function AiAssistant({
             ? { ...item, proposalStatus: result.status }
             : item),
         })));
-        setNotice(message.proposal?.kind === 'schedule_posts' ? 'Schedule updated' : 'Drafts created');
+        setNotice(completionCopy(message.proposal));
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'The proposal could not be confirmed.');
       } finally {
@@ -143,7 +176,7 @@ export function AiAssistant({
         </div>
       </aside>
 
-      <section className="flex h-[640px] min-h-0 flex-col rounded-[24px] bg-[var(--block-cream)] p-5 md:h-[min(680px,calc(100dvh-96px))] md:p-6">
+      <section className="flex h-[640px] min-h-0 flex-col rounded-[24px] bg-[var(--block-cream)] p-5 pb-20 md:h-[min(680px,calc(100dvh-96px))] md:p-6">
         <div className="flex items-center gap-3 border-b border-[var(--hairline-soft)] pb-6">
           <span className="flex size-11 items-center justify-center rounded-full bg-canvas"><Bot size={20} /></span>
           <div className="min-w-0">
@@ -156,7 +189,7 @@ export function AiAssistant({
             <div className="mx-auto max-w-lg py-8 text-center">
               <p>Ask for copy or a draft proposal. Bridge88 stores proposed actions separately and waits for confirmation.</p>
               <p className="mt-3 text-sm">
-                Campaign creation, media generation, post moves, publishing, and deletion are not available in this assistant yet.
+                Campaign creation, media generation or search, post moves, publishing, and deletion are not available in this assistant.
               </p>
               <div className="mt-5 flex flex-wrap justify-center gap-2">
                 <Button href={`/w/${slug}/compose`} variant="secondary">Create post</Button>
@@ -182,10 +215,10 @@ export function AiAssistant({
                   {message.proposalStatus === 'COMPLETED' && (
                     <div className="mt-3">
                       <Button
-                        href={message.proposal?.kind === 'schedule_posts' ? `/w/${slug}/calendar` : `/w/${slug}/drafts`}
+                        href={proposalDestination(slug, message.proposal)}
                         variant="secondary"
                       >
-                        {message.proposal?.kind === 'schedule_posts' ? 'View calendar' : 'View drafts'}
+                        {proposalDestinationLabel(message.proposal)}
                       </Button>
                     </div>
                   )}
@@ -242,7 +275,7 @@ export function AiAssistant({
       <Dialog
         open={Boolean(proposalToConfirm)}
         eyebrow="Confirm workspace change"
-        title={proposalToConfirm?.proposal?.kind === 'schedule_posts' ? 'Apply this schedule?' : 'Create these drafts?'}
+        title={proposalDialogTitle(proposalToConfirm?.proposal ?? null)}
         onClose={() => { if (!pending) setProposalToConfirm(null); }}
         actions={(
           <>
@@ -275,10 +308,62 @@ function ProposalDetails({ proposal }: { proposal: Proposal }) {
       </div>
     );
   }
+  if (proposal.kind === 'schedule_posts') {
+    return (
+      <div className="mt-4 rounded-md bg-surface-soft p-3 text-sm">
+        <p className="font-[540]">{proposal.posts.length === 1 ? proposal.posts[0].postTitle : `${proposal.posts.length} posts`}</p>
+        {proposal.posts.length > 1 && (
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {proposal.posts.map((post) => <li key={post.postId}>{post.postTitle}</li>)}
+          </ul>
+        )}
+        <p className="mt-2">
+          Each post will become scheduled at {formatTime(proposal.hour, proposal.minute)} on the next available {formatWeekdays(proposal.weekdays)}.
+        </p>
+      </div>
+    );
+  }
+  if (proposal.kind === 'assign_campaign') {
+    return (
+      <div className="mt-4 rounded-md bg-surface-soft p-3 text-sm">
+        <p><span className="font-[540]">{proposal.postTitle}</span> will be assigned to the campaign <span className="font-[540]">{proposal.campaignName}</span>.</p>
+        <p className="mt-2">Its copy, media, status, and publishing time will stay the same.</p>
+      </div>
+    );
+  }
+  if (proposal.kind === 'attach_media') {
+    return (
+      <div className="mt-4 rounded-md bg-surface-soft p-3 text-sm">
+        <p>The following media will be attached to every channel version of <span className="font-[540]">{proposal.postTitle}</span>:</p>
+        <ul className="mt-2 list-disc space-y-2 pl-5">
+          {proposal.media.map((asset) => (
+            <li key={asset.mediaAssetId}>
+              <span className="font-[540]">{asset.filename}</span>
+              <span className="block">Alternative text: {asset.altText || 'none'}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-2">Existing media will remain attached.</p>
+      </div>
+    );
+  }
+  if (proposal.kind === 'update_post_content') {
+    return (
+      <div className="mt-4 max-h-72 overflow-y-auto rounded-md bg-surface-soft p-3 text-sm">
+        <p>Every channel version of <span className="font-[540]">{proposal.postTitle}</span> will use this copy:</p>
+        {proposal.title !== undefined && <p className="mt-3 font-[540]">Title: {proposal.title || 'Untitled'}</p>}
+        <p className="mt-3 whitespace-pre-wrap">{proposal.text}</p>
+        <p className="mt-3">{proposal.hashtags.length ? proposal.hashtags.join(' ') : 'No hashtags'}</p>
+        <p className="mt-3">Media, campaign, status, and publishing time will stay the same.</p>
+      </div>
+    );
+  }
   return (
-    <div className="mt-4 rounded-md bg-surface-soft p-3 text-sm">
-      <p>{proposal.postIds.length} {proposal.postIds.length === 1 ? 'post' : 'posts'}</p>
-      <p className="mt-1">At {formatTime(proposal.hour, proposal.minute)} on the selected weekdays</p>
+    <div className="mt-4 max-h-72 overflow-y-auto rounded-md bg-surface-soft p-3 text-sm">
+      <p>A new draft named <span className="font-[540]">{proposal.newTitle}</span> will be created from <span className="font-[540]">{proposal.sourcePostTitle}</span>.</p>
+      <p className="mt-3 whitespace-pre-wrap">{proposal.text}</p>
+      <p className="mt-3">{proposal.hashtags.length ? proposal.hashtags.join(' ') : 'No hashtags'}</p>
+      <p className="mt-3">The source post will remain unchanged. Its channel selection, campaign, and media will be copied to the new draft.</p>
     </div>
   );
 }
@@ -303,4 +388,41 @@ function outputText(message: Message): string {
 function formatTime(hour: number, minute: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })
     .format(new Date(Date.UTC(2020, 0, 1, hour, minute)));
+}
+
+function formatWeekdays(weekdays: number[]): string {
+  const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const selected = (weekdays.length ? weekdays : [1, 3, 5]).map((day) => names[day]);
+  return selected.length === 1 ? selected[0] : `${selected.slice(0, -1).join(', ')} and ${selected.at(-1)}`;
+}
+
+function proposalDialogTitle(proposal: Proposal | null): string {
+  if (!proposal) return 'Confirm this change?';
+  if (proposal.kind === 'create_drafts') return 'Create these drafts?';
+  if (proposal.kind === 'schedule_posts') return 'Apply this schedule?';
+  if (proposal.kind === 'assign_campaign') return 'Assign this campaign?';
+  if (proposal.kind === 'attach_media') return 'Attach this media?';
+  if (proposal.kind === 'update_post_content') return 'Replace this post copy?';
+  return 'Create this repurposed draft?';
+}
+
+function proposalDestination(slug: string, proposal: Proposal | null): string {
+  if (!proposal) return `/w/${slug}/assistant`;
+  if (proposal.kind === 'schedule_posts') return `/w/${slug}/calendar`;
+  if (proposal.kind === 'create_drafts' || proposal.kind === 'repurpose_content') return `/w/${slug}/drafts`;
+  return `/w/${slug}/compose/${proposal.postId}`;
+}
+
+function proposalDestinationLabel(proposal: Proposal | null): string {
+  if (proposal?.kind === 'schedule_posts') return 'View calendar';
+  if (proposal?.kind === 'create_drafts' || proposal?.kind === 'repurpose_content') return 'View drafts';
+  return 'View post';
+}
+
+function completionCopy(proposal: Proposal | null): string {
+  if (proposal?.kind === 'schedule_posts') return 'Schedule updated';
+  if (proposal?.kind === 'assign_campaign') return 'Campaign assigned';
+  if (proposal?.kind === 'attach_media') return 'Media attached';
+  if (proposal?.kind === 'update_post_content') return 'Post copy updated';
+  return 'Drafts created';
 }

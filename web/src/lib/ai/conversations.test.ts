@@ -8,15 +8,121 @@ const dbMock = vi.hoisted(() => ({
     update: vi.fn(),
   },
   socialAccount: { findMany: vi.fn() },
-  post: { create: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+  post: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+  campaign: { findFirst: vi.fn() },
+  mediaAsset: { findMany: vi.fn() },
   $transaction: vi.fn(),
+}));
+const serviceMock = vi.hoisted(() => ({
+  savePost: vi.fn(),
+  assertPostNotLive: vi.fn((post: { status: string }) => {
+    if (post.status === 'PUBLISHED') throw new Error('This post has already been published');
+    if (post.status === 'PUBLISHING') throw new Error('This post is publishing right now');
+  }),
 }));
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/ai', () => ({ generateObject: vi.fn() }));
 vi.mock('@/lib/ai/brand-voice', () => ({ buildSystemPrompt: vi.fn() }));
+vi.mock('@/lib/posts/service', () => serviceMock);
 
-import { confirmProposal } from '@/lib/ai/conversations';
+import { assistantCapabilityReply, confirmProposal, executeProposal } from '@/lib/ai/conversations';
+import type { AssistantReply } from '@/lib/ai/schemas';
+
+const POST_ID = '11111111-1111-4111-8111-111111111111';
+const CAMPAIGN_ID = '22222222-2222-4222-8222-222222222222';
+const ASSET_ID = '33333333-3333-4333-8333-333333333333';
+const actions = {
+  create_drafts: {
+    kind: 'create_drafts',
+    summary: 'Create a draft',
+    posts: [{ title: 'Launch draft', text: 'Draft copy', hashtags: ['#launch'] }],
+  },
+  schedule_posts: {
+    kind: 'schedule_posts',
+    summary: 'Schedule Launch',
+    posts: [{ postId: POST_ID, postTitle: 'Launch' }],
+    weekdays: [1],
+    hour: 9,
+    minute: 0,
+  },
+  assign_campaign: {
+    kind: 'assign_campaign',
+    summary: 'Assign Spring',
+    postId: POST_ID,
+    postTitle: 'Launch',
+    campaignId: CAMPAIGN_ID,
+    campaignName: 'Spring',
+  },
+  attach_media: {
+    kind: 'attach_media',
+    summary: 'Attach launch.png',
+    postId: POST_ID,
+    postTitle: 'Launch',
+    media: [{ mediaAssetId: ASSET_ID, filename: 'launch.png', altText: 'Launch graphic' }],
+  },
+  update_post_content: {
+    kind: 'update_post_content',
+    summary: 'Update Launch',
+    postId: POST_ID,
+    postTitle: 'Launch',
+    title: 'Launch revised',
+    text: 'Revised copy',
+    hashtags: ['#revised'],
+  },
+  repurpose_content: {
+    kind: 'repurpose_content',
+    summary: 'Repurpose Launch',
+    sourcePostId: POST_ID,
+    sourcePostTitle: 'Launch',
+    newTitle: 'Launch recap',
+    text: 'Recap copy',
+    hashtags: ['#recap'],
+  },
+} satisfies Record<string, NonNullable<AssistantReply['action']>>;
+
+function loadedPost(status = 'DRAFT') {
+  return {
+    id: POST_ID,
+    status,
+    updatedAt: new Date(),
+    title: 'Launch',
+    campaignId: null,
+    scheduledAt: null,
+    timezone: 'UTC',
+    platforms: [{
+      socialAccountId: '44444444-4444-4444-8444-444444444444',
+      platform: 'LINKEDIN',
+      text: 'Original copy',
+      firstComment: null,
+      hashtags: ['#original'],
+      mentions: [],
+      link: null,
+      media: [],
+    }],
+  };
+}
+
+describe('assistant capability disclosure', () => {
+  it.each([
+    ['Publish this post now', 'cannot publish'],
+    ['Move tomorrow’s LinkedIn post to Friday', 'cannot move'],
+    ['Create a five-post campaign', 'Campaign creation'],
+    ['Find the summer campaign images', 'Media search'],
+    ['Generate 12 posts from this idea', 'at most 10'],
+  ])('returns an honest gap for %s', (prompt, expected) => {
+    expect(assistantCapabilityReply(prompt)).toContain(expected);
+  });
+
+  it('leaves supported ideas and action requests to the provider', () => {
+    expect(assistantCapabilityReply('Give me 20 LinkedIn ideas about AI agents')).toBeNull();
+    expect(assistantCapabilityReply('Create one draft about AI agents')).toBeNull();
+    expect(assistantCapabilityReply('Make the Launch post more technical')).toBeNull();
+    expect(assistantCapabilityReply('Schedule Launch post tomorrow at 9')).toBeNull();
+    expect(assistantCapabilityReply('Generate five posts from this idea')).toBeNull();
+    expect(assistantCapabilityReply('Tell me about the existing draft')).toBeNull();
+  });
+});
 
 describe('assistant proposal confirmation', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -39,7 +145,7 @@ describe('assistant proposal confirmation', () => {
       messageId: 'message-1',
     })).resolves.toEqual({ status: 'COMPLETED' });
     expect(dbMock.aiMessage.updateMany).not.toHaveBeenCalled();
-    expect(dbMock.post.create).not.toHaveBeenCalled();
+    expect(serviceMock.savePost).not.toHaveBeenCalled();
   });
 
   it('does not execute when another request already claimed it', async () => {
@@ -62,7 +168,7 @@ describe('assistant proposal confirmation', () => {
       role: 'OWNER',
       messageId: 'message-1',
     })).resolves.toEqual({ status: 'EXECUTING' });
-    expect(dbMock.post.create).not.toHaveBeenCalled();
+    expect(serviceMock.savePost).not.toHaveBeenCalled();
   });
 
   it('rejects an expired proposal before claiming it', async () => {
@@ -94,7 +200,7 @@ describe('assistant proposal confirmation', () => {
       proposal: {
         kind: 'schedule_posts',
         summary: 'Schedule one post',
-        postIds: ['post-1'],
+        posts: [{ postId: POST_ID, postTitle: 'Launch' }],
         weekdays: [5],
         hour: 10,
         minute: 0,
@@ -108,7 +214,7 @@ describe('assistant proposal confirmation', () => {
       messageId: 'message-1',
     })).rejects.toThrow('Your current role cannot confirm this proposal');
     expect(dbMock.aiMessage.updateMany).not.toHaveBeenCalled();
-    expect(dbMock.post.update).not.toHaveBeenCalled();
+    expect(serviceMock.savePost).not.toHaveBeenCalled();
   });
 
   it.each(['PUBLISHED', 'PUBLISHING'] as const)('never re-dates a %s post', async (status) => {
@@ -119,14 +225,23 @@ describe('assistant proposal confirmation', () => {
       proposal: {
         kind: 'schedule_posts',
         summary: 'Move one post',
-        postIds: ['post-1'],
+        posts: [{ postId: POST_ID, postTitle: 'Launch' }],
         weekdays: [5],
         hour: 10,
         minute: 0,
       },
     });
     dbMock.aiMessage.updateMany.mockResolvedValue({ count: 1 });
-    dbMock.post.findMany.mockResolvedValue([{ id: 'post-1', status }]);
+    dbMock.post.findFirst.mockResolvedValue({
+      id: POST_ID,
+      status,
+      updatedAt: new Date(),
+      title: 'Launch',
+      campaignId: null,
+      scheduledAt: null,
+      timezone: 'UTC',
+      platforms: [],
+    });
 
     await expect(confirmProposal({
       workspaceId: 'workspace-1',
@@ -134,10 +249,93 @@ describe('assistant proposal confirmation', () => {
       role: 'EDITOR',
       messageId: 'message-1',
     })).rejects.toThrow(status === 'PUBLISHED' ? 'already been published' : 'publishing right now');
-    expect(dbMock.post.update).not.toHaveBeenCalled();
+    expect(serviceMock.savePost).not.toHaveBeenCalled();
     expect(dbMock.aiMessage.update).toHaveBeenCalledWith({
       where: { id: 'message-1' },
       data: { proposalStatus: 'PENDING' },
     });
+  });
+});
+
+describe('assistant action executors', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMock.post.findFirst.mockResolvedValue(loadedPost());
+    dbMock.socialAccount.findMany.mockResolvedValue([{
+      id: '44444444-4444-4444-8444-444444444444',
+      platform: 'LINKEDIN',
+    }]);
+    dbMock.campaign.findFirst.mockResolvedValue({ id: CAMPAIGN_ID });
+    dbMock.mediaAsset.findMany.mockResolvedValue([{ id: ASSET_ID }]);
+    serviceMock.savePost.mockResolvedValue({ id: POST_ID, status: 'DRAFT' });
+  });
+
+  it.each(Object.entries(actions))('executes %s through the post service', async (_kind, action) => {
+    await executeProposal('workspace-1', 'user-1', action);
+    expect(serviceMock.savePost).toHaveBeenCalled();
+  });
+
+  it.each([
+    actions.schedule_posts,
+    actions.assign_campaign,
+    actions.attach_media,
+    actions.update_post_content,
+    actions.repurpose_content,
+  ])('refuses $kind for published and publishing targets before writing', async (action) => {
+    for (const status of ['PUBLISHED', 'PUBLISHING']) {
+      vi.clearAllMocks();
+      dbMock.post.findFirst.mockResolvedValue(loadedPost(status));
+      await expect(executeProposal('workspace-1', 'user-1', action)).rejects.toThrow(
+        status === 'PUBLISHED' ? 'already been published' : 'publishing right now',
+      );
+      expect(serviceMock.savePost).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(Object.entries(actions))('rejects a Viewer before claiming %s', async (_kind, proposal) => {
+    dbMock.aiMessage.findFirst.mockResolvedValue({
+      id: 'message-1',
+      createdAt: new Date(),
+      proposalStatus: 'PENDING',
+      proposal,
+    });
+    await expect(confirmProposal({
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      role: 'VIEWER',
+      messageId: 'message-1',
+    })).rejects.toThrow('Your current role cannot confirm this proposal');
+    expect(dbMock.aiMessage.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(Object.entries(actions))('rejects an expired %s before claiming', async (_kind, proposal) => {
+    dbMock.aiMessage.findFirst.mockResolvedValue({
+      id: 'message-1',
+      createdAt: new Date(Date.now() - 31 * 60 * 1000),
+      proposalStatus: 'PENDING',
+      proposal,
+    });
+    await expect(confirmProposal({
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      role: 'OWNER',
+      messageId: 'message-1',
+    })).rejects.toThrow('This proposal expired');
+    expect(dbMock.aiMessage.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(Object.entries(actions))('returns completed idempotently for %s', async (_kind, proposal) => {
+    dbMock.aiMessage.findFirst.mockResolvedValue({
+      id: 'message-1',
+      proposalStatus: 'COMPLETED',
+      proposal,
+    });
+    await expect(confirmProposal({
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      role: 'OWNER',
+      messageId: 'message-1',
+    })).resolves.toEqual({ status: 'COMPLETED' });
+    expect(serviceMock.savePost).not.toHaveBeenCalled();
   });
 });
