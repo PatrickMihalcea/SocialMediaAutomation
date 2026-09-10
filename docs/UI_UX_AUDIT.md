@@ -22,7 +22,7 @@ None found on public auth/marketing. Remaining product P0s from earlier QA (SVG 
 |---|---|---|
 | Marketing nav | 64px bar, not sticky 56px topbar; mobile brand + 3 CTAs do not wrap | `globals.css` `.marketing-nav` |
 | Mobile CTAs | Intrinsic-width buttons on marketing, pricing, onboarding, account vs full-width auth submit | `page.tsx`, `pricing/page.tsx`, onboarding, account |
-| Duplicate landmarks | Root `loading.tsx` and page both use `main#main-content` during stream | `app/loading.tsx` |
+| Loading displacement | Resolved: root and History segment fallbacks were removed because they replaced useful content during client navigation | `app/loading.tsx`, `history/loading.tsx` |
 | Calendar | 7-col grid crushes on mobile; status chips identical lime | `calendar-shell.tsx` |
 | Form rows | 48px inputs next to 40px buttons | team, queue, campaigns |
 | Composer media | historically `object-cover` / mixed preview radii | `composer-preview.tsx` |
@@ -98,6 +98,20 @@ Four defects were systemic rather than per-page:
    acting on assets chosen at the bottom meant scrolling back to the top. It is now
    `.b88-selection-bar`, fixed to the viewport, with all controls at `--control-size` and a
    matching pill radius.
+
+## Performance conclusion (authoritative)
+
+No measured route is genuinely slow when warm: current median TTFB is 36ms for the public
+home, 67ms for Drafts, 86ms for Studio, 105ms for Analytics, and 148ms for Media. Media's
+roughly 50ms overhead above the Dashboard control is unchanged from the earlier run; Analytics
+now matches the Dashboard control. Their apparent regressions were dev-server load and
+concurrent recompilation noise, not new query waterfalls.
+
+Direct profiling attributes 1.4ms to Compose queries plus URL signing, 1.2ms to Studio, and
+1.6ms to Drafts. URL signing itself is about 0.1ms. The earlier claim that signing was a major
+warm-route cost is retracted. First-hit dev compilation ranged from 0.17s to 11.8s and accounted
+for more than 95% of the delay in the visibly slow samples; that compilation cost is not part of
+the production runtime. Do not optimize URL signing to address perceived page load time.
 
 ## Verification
 
