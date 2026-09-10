@@ -163,6 +163,22 @@ describe('savePost', () => {
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
 
+  it('rechecks the lifecycle action against the latest stored status', async () => {
+    mocks.findFirstPost.mockResolvedValue({
+      id: postId,
+      status: PostStatus.CANCELLED,
+      updatedAt: new Date('2026-09-10T12:01:00.000Z'),
+      platforms: [{ status: 'CANCELLED' }],
+    });
+    await expect(
+      savePost(workspaceId, authorId, { ...baseInput, id: postId }, { requiredAction: 'schedule' }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: expect.stringContaining('no longer available'),
+    });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it('duplicates a published post as a new draft instead of mutating it', async () => {
     mocks.findFirstPost.mockResolvedValue({
       id: postId,

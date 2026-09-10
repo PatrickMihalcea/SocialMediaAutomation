@@ -9,6 +9,7 @@ import { assertWithinLimit } from '@/lib/billing/limits';
 import { audit } from '@/lib/audit';
 import { notifyRoles } from '@/lib/notifications/service';
 import { savePostSchema, type SavePostInput } from '@/lib/posts/schemas';
+import { isPostActionLegal, type PostLifecycleAction } from '@/lib/posts/lifecycle';
 
 export async function validateDraft(
   workspaceId: string,
@@ -83,7 +84,7 @@ export async function savePost(
   workspaceId: string,
   authorId: string,
   raw: SavePostInput,
-  options: { validateContent?: boolean } = {},
+  options: { validateContent?: boolean; requiredAction?: PostLifecycleAction } = {},
 ) {
   let input = savePostSchema.parse(raw);
   let source = input.id
@@ -94,6 +95,9 @@ export async function savePost(
     : null;
   const originalSource = source;
   if (input.id && !source) throw notFound('That post no longer exists.');
+  if (source && options.requiredAction && !isPostActionLegal(source.status, options.requiredAction)) {
+    throw conflict('This post changed to a state where that action is no longer available. Refresh to see its current status.');
+  }
   if (source?.status === PostStatus.PUBLISHING) {
     throw conflict('This post is currently publishing and cannot be edited.');
   }

@@ -19,6 +19,7 @@ import { postPlatformInputSchema } from '@/lib/posts/schemas';
 import {
   applyCancelledRestore,
   applyGuardedReschedule,
+  composerActionForIntent,
   composerTargetStatus,
   friendlyPublishFailure,
   isComposerIntentLegal,
@@ -114,13 +115,19 @@ async function persistPost(
       status,
       scheduledAt,
       platforms,
-    }, { validateContent: intent !== 'draft' });
+    }, {
+      validateContent: intent !== 'draft',
+      requiredAction: source ? composerActionForIntent(source.status, intent) : undefined,
+    });
     if (intent === 'publish') {
       await assertStoredPostValid(ctx.workspace.id, post.id);
-      await db.post.update({
-        where: { id: post.id, workspaceId: ctx.workspace.id },
+      const result = await db.post.updateMany({
+        where: { id: post.id, workspaceId: ctx.workspace.id, status: post.status },
         data: { status: 'SCHEDULED', scheduledAt: new Date() },
       });
+      if (result.count !== 1) {
+        throw invalid('This post changed before publishing started. Refresh to see its current status.');
+      }
       await enqueue('publish-post', { postId: post.id }, { workspaceId: ctx.workspace.id, dedupeKey: `publish:${post.id}` });
     }
     const destination =
