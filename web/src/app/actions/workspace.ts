@@ -35,6 +35,53 @@ const workspaceSchema = z.object({
 export type WorkspaceActionState = ActionState;
 export type BrandVoicePreviewState = WorkspaceActionState & { preview?: BrandVoiceDraft };
 
+const workspacePreferencesSchema = z.object({
+  defaultPostDestination: z.enum(['DRAFT', 'QUEUE', 'SCHEDULE']),
+  defaultPublishHour: z.coerce.number().int().min(0).max(23),
+  defaultPublishMinute: z.coerce.number().int().min(0).max(59),
+  defaultHashtags: z.string().max(1_000),
+  defaultCta: z.string().trim().max(500),
+  aiCreativity: z.enum(['PRECISE', 'BALANCED', 'CREATIVE']),
+});
+
+export async function updateWorkspacePreferencesAction(
+  slug: string,
+  _state: WorkspaceActionState,
+  formData: FormData,
+): Promise<WorkspaceActionState> {
+  try {
+    const ctx = await requireWorkspace(slug, 'workspace:update');
+    const input = workspacePreferencesSchema.parse(Object.fromEntries(formData));
+    const defaultHashtags = input.defaultHashtags
+      .split(/[,\s]+/)
+      .map((tag) => tag.trim().replace(/^#/, ''))
+      .filter(Boolean);
+    await db.workspacePreferences.upsert({
+      where: { workspaceId: ctx.workspace.id },
+      create: {
+        workspaceId: ctx.workspace.id,
+        ...input,
+        defaultHashtags,
+        requireApprovalByDefault: formData.get('requireApprovalByDefault') === 'on',
+        aiUseBrandVoice: formData.get('aiUseBrandVoice') === 'on',
+        aiAutoAdaptPlatforms: formData.get('aiAutoAdaptPlatforms') === 'on',
+      },
+      update: {
+        ...input,
+        defaultHashtags,
+        requireApprovalByDefault: formData.get('requireApprovalByDefault') === 'on',
+        aiUseBrandVoice: formData.get('aiUseBrandVoice') === 'on',
+        aiAutoAdaptPlatforms: formData.get('aiAutoAdaptPlatforms') === 'on',
+      },
+    });
+    revalidatePath(`/w/${slug}/settings`);
+    revalidatePath(`/w/${slug}/compose`);
+    return actionSuccess('Posting and AI defaults saved.');
+  } catch (error) {
+    return actionError(error, 'Check the workspace defaults and try again.');
+  }
+}
+
 export async function createWorkspaceAction(
   _state: WorkspaceActionState,
   formData: FormData,

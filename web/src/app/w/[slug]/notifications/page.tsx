@@ -12,6 +12,7 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   APPROVAL_REQUESTED: 'Approval request',
   APPROVAL_COMPLETED: 'Approval update',
   MEDIA_PROCESSING_COMPLETE: 'Media ready',
+  AI_GENERATION_COMPLETE: 'AI generation ready',
   MEMBER_JOINED: 'Team update',
   LIMIT_REACHED: 'Usage limit',
 };
@@ -25,7 +26,16 @@ export default async function NotificationsPage({ params }: { params: Promise<{ 
       orderBy: { createdAt: 'desc' },
       take: 100,
     }),
-    db.user.findUniqueOrThrow({ where: { id: ctx.user.id }, select: { notificationEmailEnabled: true } }),
+    db.user.findUniqueOrThrow({
+      where: { id: ctx.user.id },
+      select: {
+        notificationEmailEnabled: true,
+        notificationInAppEnabled: true,
+        notificationApprovalsEnabled: true,
+        notificationPublishingFailuresEnabled: true,
+        notificationWeeklyDigestEnabled: true,
+      },
+    }),
   ]);
   return (
     <>
@@ -59,9 +69,13 @@ export default async function NotificationsPage({ params }: { params: Promise<{ 
       </section>
       <aside className="b88-card self-start">
         <p className="b88-caption">Preferences</p><h2 className="b88-heading mt-2">Delivery</h2>
-        <p className="mt-2 text-sm">In-app notifications stay on so important publishing failures always have a destination.</p>
+        <p className="mt-2 text-sm">Choose which events Bridge88 delivers and where they appear.</p>
         <form action={updateNotificationPreferencesAction.bind(null, slug)} className="mt-5">
+          <Checkbox name="inAppEnabled" label="In-app notifications" description="Show enabled events in this inbox." defaultChecked={user.notificationInAppEnabled} />
           <Checkbox name="emailEnabled" label="Email notifications" description="Send a copy of workspace notifications by email." defaultChecked={user.notificationEmailEnabled} />
+          <Checkbox name="approvalsEnabled" label="Approval updates" description="Approval requests and decisions." defaultChecked={user.notificationApprovalsEnabled} />
+          <Checkbox name="publishingFailuresEnabled" label="Publishing failures" description="Alerts when a post cannot publish." defaultChecked={user.notificationPublishingFailuresEnabled} />
+          <Checkbox name="weeklyDigestEnabled" label="Weekly digest" description="Receive the weekly workspace summary when digest delivery is configured." defaultChecked={user.notificationWeeklyDigestEnabled} />
           <Button type="submit" variant="secondary" className="mt-4 w-full">Save preferences</Button>
         </form>
       </aside>

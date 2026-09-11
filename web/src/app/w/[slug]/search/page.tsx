@@ -7,6 +7,7 @@ import { PLATFORM_LABELS, PLATFORMS } from '@/lib/social/registry';
 import type { PostStatus } from '@prisma/client';
 import { hasSearchCriteria, parseSearchFilters } from '@/lib/search/filters';
 import { PostResultActions } from './result-actions';
+import { deleteSearchViewAction, saveSearchViewAction } from '@/app/actions/search';
 
 // Every control on the filter rows has to match the Search pill at 40px. The
 // kit field wrappers always carry b88-input, whose 48px floor outlives the
@@ -15,6 +16,7 @@ const ROW_CONTROL = 'b88-filter-control min-h-10';
 
 const STATUS_OPTIONS: [PostStatus, string][] = [
   ['DRAFT', 'Draft'],
+  ['REJECTED', 'Rejected'],
   ['PENDING_APPROVAL', 'Pending approval'],
   ['APPROVED', 'Approved'],
   ['SCHEDULED', 'Scheduled'],
@@ -41,6 +43,10 @@ export default async function SearchPage({
   const filters = parseSearchFilters(raw);
   const q = filters.q;
   const ctx = await requireWorkspace(slug, 'workspace:view');
+  const savedViews = await db.savedSearchView.findMany({
+    where: { workspaceId: ctx.workspace.id },
+    orderBy: { name: 'asc' },
+  });
   const hasPostOnlyFilter = Boolean(filters.status || filters.account || filters.campaign || filters.author);
   const types = filters.type ? [filters.type] : hasPostOnlyFilter ? ['post'] : ['post', 'media', 'campaign', 'account'];
   const createdAt = {
@@ -130,6 +136,24 @@ export default async function SearchPage({
           </div>
         </details>
       </Form>
+      <section className="mt-4 flex max-w-5xl flex-wrap items-end gap-3">
+        {hasSearchCriteria(filters) && (
+          <form action={saveSearchViewAction.bind(null, slug, raw)} className="flex flex-1 flex-wrap items-end gap-2">
+            <Field name="name" label="Save this search as" required className={ROW_CONTROL} containerClassName="min-w-56 flex-1" />
+            <Button type="submit" variant="secondary">Save view</Button>
+          </form>
+        )}
+        {savedViews.map((view) => {
+          const query = new URLSearchParams(
+            Object.entries(view.query as Record<string, unknown>)
+              .filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+          );
+          return <div key={view.id} className="flex items-center gap-1">
+            <Button href={`/w/${slug}/search?${query.toString()}`} variant="tertiary">{view.name}</Button>
+            {view.ownerId === ctx.user.id && <form action={deleteSearchViewAction.bind(null, slug, view.id)}><Button type="submit" variant="tertiary">Remove</Button></form>}
+          </div>;
+        })}
+      </section>
       {filters.error && <StatusMessage tone="error" className="mt-4 max-w-5xl">{filters.error}</StatusMessage>}
       {results.length ? (
         <section className="b88-card mt-6 max-w-5xl">

@@ -12,7 +12,9 @@ import {
   planBulkSchedule,
   removeFromQueue,
   reorderQueue,
+  restoreSkippedSlot,
   setQueuePaused,
+  skipNextSlot,
 } from '@/lib/scheduling/queue';
 import { formatInZone, localInputToUtc } from '@/lib/scheduling/time';
 
@@ -69,7 +71,19 @@ export async function removePostFromQueueAction(slug: string, postId: string) {
   const ctx = await requireWorkspace(slug, 'schedule:manage');
   const item = await db.queueItem.findFirst({ where: { postId, workspaceId: ctx.workspace.id }, select: { postId: true } });
   if (!item) return;
-  await removeFromQueue(item.postId);
+  if (item.postId) await removeFromQueue(item.postId);
+  refresh(slug);
+}
+
+export async function skipNextQueueSlotAction(slug: string) {
+  const ctx = await requireWorkspace(slug, 'schedule:manage');
+  await skipNextSlot(ctx.workspace.id);
+  refresh(slug);
+}
+
+export async function restoreSkippedQueueSlotAction(slug: string, queueItemId: string) {
+  const ctx = await requireWorkspace(slug, 'schedule:manage');
+  await restoreSkippedSlot(ctx.workspace.id, queueItemId);
   refresh(slug);
 }
 

@@ -12,6 +12,7 @@ import { cancelApprovalRequestAction } from '@/app/actions/team';
 
 const statusTone = {
   DRAFT: 'outline',
+  REJECTED: 'coral',
   PENDING_APPROVAL: 'cream',
   APPROVED: 'mint',
   SCHEDULED: 'lime',

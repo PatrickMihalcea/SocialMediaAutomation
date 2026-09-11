@@ -22,6 +22,8 @@ import {
   pauseQueueAction,
   removePostFromQueueAction,
   reorderQueueAction,
+  restoreSkippedQueueSlotAction,
+  skipNextQueueSlotAction,
   updateSlotRuleAction,
 } from '@/app/actions/queue';
 import {
@@ -52,9 +54,10 @@ function errorMessage(error: unknown) {
 }
 
 export function QueueManager({
-  slug, timezone, paused, rules, queuePosts, drafts, nextSlot, recurrences, accounts, campaigns, canManage,
+  slug, timezone, paused, rules, queuePosts, skippedSlots, drafts, nextSlot, recurrences, accounts, campaigns, canManage,
 }: {
   slug: string; timezone: string; paused: boolean; rules: Rule[]; queuePosts: QueuePost[];
+  skippedSlots: { id: string; slotAt: string }[];
   drafts: { id: string; title: string }[]; nextSlot: string | null; recurrences: Recurrence[];
   accounts: Option[]; campaigns: Option[]; canManage: boolean;
 }) {
@@ -98,6 +101,20 @@ export function QueueManager({
           <p className="b88-caption">Queued posts</p>
           <p className="mt-3 text-[38px] font-[340] leading-none">{queuePosts.length}</p>
         </div>
+      </section>
+
+      <section className="b88-card mt-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><p className="b88-eyebrow">Reserved gaps</p><h2 className="b88-heading mt-2">Skipped queue slots</h2></div>
+          {canManage && <Button type="button" variant="secondary" disabled={pending || !nextSlot} onClick={() => run(() => skipNextQueueSlotAction(slug), 'Next queue slot skipped.')}>Skip next slot</Button>}
+        </div>
+        {skippedSlots.length ? <ul className="mt-4 space-y-2">{skippedSlots.map((slot) => (
+          <li key={slot.id} className="flex items-center gap-3 rounded-md bg-surface-soft p-3">
+            <span className="min-w-0 flex-1">{DateTime.fromISO(slot.slotAt).setZone(timezone).toFormat('ccc d LLL, HH:mm')}</span>
+            <Badge tone="outline">Skipped</Badge>
+            {canManage && <Button type="button" variant="tertiary" disabled={pending} onClick={() => run(() => restoreSkippedQueueSlotAction(slug, slot.id), 'Queue slot restored.')}>Restore slot</Button>}
+          </li>
+        ))}</ul> : <p className="mt-4 text-sm">No queue slots are intentionally skipped.</p>}
       </section>
 
       <section className="b88-card mt-6">

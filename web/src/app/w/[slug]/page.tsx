@@ -48,7 +48,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ slug
       take: 7,
     }),
     db.post.findMany({
-      where: { workspaceId: workspace.id, status: { in: ['DRAFT', 'PENDING_APPROVAL'] } },
+      where: { workspaceId: workspace.id, status: { in: ['DRAFT', 'REJECTED', 'PENDING_APPROVAL'] } },
       include: { platforms: { select: { platform: true } } },
       orderBy: { createdAt: 'desc' },
       take: 7,
@@ -107,7 +107,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ slug
                       {post.platforms.map((p) => PLATFORM_LABELS[p.platform]).join(', ')}
                     </p>
                   </div>
-                  <Badge tone={post.status === 'FAILED' ? 'coral' : post.status === 'PENDING_APPROVAL' ? 'cream' : post.status === 'DRAFT' ? 'outline' : 'lime'}>
+                  <Badge tone={post.status === 'FAILED' || post.status === 'REJECTED' ? 'coral' : post.status === 'PENDING_APPROVAL' ? 'cream' : post.status === 'DRAFT' ? 'outline' : 'lime'}>
                     {statusLabel(post.status)}
                   </Badge>
                 </Link>

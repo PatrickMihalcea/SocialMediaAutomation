@@ -145,7 +145,7 @@ export async function approvalAction(
     }),
     db.post.update({
       where: { id: postId },
-      data: { status: decision === 'APPROVED' ? 'APPROVED' : 'DRAFT' },
+      data: { status: decision === 'APPROVED' ? 'APPROVED' : decision === 'REJECTED' ? 'REJECTED' : 'DRAFT' },
     }),
   ]);
   const action = {
@@ -184,6 +184,37 @@ export async function approvalAction(
   revalidatePath(`/w/${slug}/team`);
   revalidatePath(`/w/${slug}/posts/${postId}`);
   revalidatePath(`/w/${slug}/history`);
+}
+
+export async function replyToApprovalCommentAction(
+  slug: string,
+  postId: string,
+  parentId: string,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const ctx = await requireWorkspace(slug, 'post:approve');
+    const body = z.string().trim().min(1, 'Write a reply.').max(2_000).parse(formData.get('body'));
+    const parent = await db.approvalComment.findFirst({
+      where: { id: parentId, postId, workspaceId: ctx.workspace.id },
+      select: { id: true, postId: true, workspaceId: true },
+    });
+    if (!parent) throw invalid('That comment is no longer available on this post.');
+    await db.approvalComment.create({
+      data: {
+        postId: parent.postId,
+        workspaceId: parent.workspaceId,
+        parentId: parent.id,
+        authorId: ctx.user.id,
+        decision: 'COMMENT',
+        body,
+      },
+    });
+    revalidatePath(`/w/${slug}/posts/${postId}`);
+    return actionSuccess('Reply added.');
+  } catch (error) {
+    return actionError(error, 'The reply could not be added.');
+  }
 }
 
 export async function cancelApprovalRequestAction(

@@ -21,7 +21,13 @@ export async function updateNotificationPreferencesAction(slug: string, formData
   const ctx = await requireWorkspace(slug, 'workspace:view');
   await db.user.update({
     where: { id: ctx.user.id },
-    data: { notificationEmailEnabled: formData.get('emailEnabled') === 'on' },
+    data: {
+      notificationEmailEnabled: formData.get('emailEnabled') === 'on',
+      notificationInAppEnabled: formData.get('inAppEnabled') === 'on',
+      notificationApprovalsEnabled: formData.get('approvalsEnabled') === 'on',
+      notificationPublishingFailuresEnabled: formData.get('publishingFailuresEnabled') === 'on',
+      notificationWeeklyDigestEnabled: formData.get('weeklyDigestEnabled') === 'on',
+    },
   });
   revalidatePath(`/w/${slug}/notifications`);
 }

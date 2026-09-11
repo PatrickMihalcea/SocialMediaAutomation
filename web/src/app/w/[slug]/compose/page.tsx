@@ -40,6 +40,9 @@ export default async function ComposePage({
           contextDefaults={{
             scheduledAt: context.scheduledAt,
             campaignId: context.campaignId,
+            defaultHashtags: data.preferences?.defaultHashtags,
+            defaultCta: data.preferences?.defaultCta,
+            defaultPostDestination: data.preferences?.defaultPostDestination,
           }}
           canSchedule={ctx.can('post:schedule')}
           canPublish={ctx.can('post:publish')}

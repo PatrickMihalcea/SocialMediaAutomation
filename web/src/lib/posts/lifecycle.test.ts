@@ -17,6 +17,7 @@ const postId = '44444444-4444-4444-8444-444444444444';
 describe('post lifecycle matrix', () => {
   it.each([
     [PostStatus.DRAFT, ['edit', 'submitForApproval', 'schedule', 'publish', 'duplicate', 'delete']],
+    [PostStatus.REJECTED, ['edit', 'submitForApproval', 'schedule', 'publish', 'duplicate', 'delete']],
     [PostStatus.PENDING_APPROVAL, ['edit', 'withdrawApproval', 'duplicate', 'delete']],
     [PostStatus.APPROVED, ['edit', 'schedule', 'publish', 'duplicate', 'delete']],
     [PostStatus.SCHEDULED, ['edit', 'publish', 'reschedule', 'cancel', 'duplicate', 'delete']],
@@ -30,6 +31,7 @@ describe('post lifecycle matrix', () => {
 
   it.each([
     [PostStatus.DRAFT, { draft: true, approval: true, schedule: true, publish: true }],
+    [PostStatus.REJECTED, { draft: true, approval: true, schedule: true, publish: true }],
     [PostStatus.PENDING_APPROVAL, { draft: true, approval: false, schedule: false, publish: false }],
     [PostStatus.APPROVED, { draft: true, approval: false, schedule: true, publish: true }],
     [PostStatus.SCHEDULED, { draft: true, approval: false, schedule: true, publish: true }],

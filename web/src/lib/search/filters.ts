@@ -1,7 +1,7 @@
 import type { Platform, PostStatus } from '@prisma/client';
 
 const TYPES = new Set(['post', 'media', 'campaign', 'account']);
-const STATUSES = new Set<PostStatus>(['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SCHEDULED', 'PUBLISHING', 'PUBLISHED', 'FAILED', 'CANCELLED']);
+const STATUSES = new Set<PostStatus>(['DRAFT', 'REJECTED', 'PENDING_APPROVAL', 'APPROVED', 'SCHEDULED', 'PUBLISHING', 'PUBLISHED', 'FAILED', 'CANCELLED']);
 const PLATFORMS = new Set<Platform>(['INSTAGRAM', 'FACEBOOK', 'LINKEDIN', 'X', 'TIKTOK', 'YOUTUBE', 'MOCK']);
 const SORTS = new Set(['newest', 'oldest', 'title']);
 

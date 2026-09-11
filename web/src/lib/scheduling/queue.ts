@@ -152,13 +152,37 @@ export async function removeFromQueue(postId: string): Promise<void> {
   });
 }
 
+/** Reserve the next open queue instant without assigning a post to it. */
+export async function skipNextSlot(workspaceId: string): Promise<Date> {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}))`;
+    const slots = await listSlotsWithClient(tx, workspaceId, 200);
+    const slotAt = slots.find((slot) => !slot.taken)?.at;
+    if (!slotAt) throw conflict('Every slot in the next four months is already reserved.');
+    await tx.queueItem.create({
+      data: {
+        workspaceId,
+        postId: null,
+        position: await nextPosition(tx, workspaceId),
+        slotAt,
+        skipped: true,
+      },
+    });
+    return slotAt;
+  });
+}
+
+export async function restoreSkippedSlot(workspaceId: string, queueItemId: string): Promise<void> {
+  await db.queueItem.deleteMany({ where: { id: queueItemId, workspaceId, skipped: true, postId: null } });
+}
+
 /**
  * Reordering re-deals the slots: the queue is an ordered list of posts mapped
  * onto an ordered list of times, so moving a post moves everything after it.
  */
 export async function reorderQueue(workspaceId: string, orderedPostIds: string[]): Promise<void> {
-  const items = await db.queueItem.findMany({ where: { workspaceId } });
-  const known = new Set(items.map((i) => i.postId));
+  const items = await db.queueItem.findMany({ where: { workspaceId, postId: { not: null } } });
+  const known = new Set(items.flatMap((item) => item.postId ? [item.postId] : []));
   if (!isCompleteQueueOrder([...known], orderedPostIds)) {
     throw invalid('That queue order does not match the posts currently queued.');
   }
@@ -209,15 +233,24 @@ export async function planBulkSchedule(input: {
 }
 
 async function occupiedInstants(client: QueueDb, workspaceId: string): Promise<Map<number, string>> {
-  const scheduled = await client.post.findMany({
-    where: {
-      workspaceId,
-      scheduledAt: { gte: new Date() },
-      status: { in: [PostStatus.SCHEDULED, PostStatus.APPROVED, PostStatus.PENDING_APPROVAL, PostStatus.PUBLISHING] },
-    },
-    select: { id: true, scheduledAt: true },
-  });
-  return new Map(scheduled.filter((p) => p.scheduledAt).map((p) => [p.scheduledAt!.getTime(), p.id]));
+  const [scheduled, reserved] = await Promise.all([
+    client.post.findMany({
+      where: {
+        workspaceId,
+        scheduledAt: { gte: new Date() },
+        status: { in: [PostStatus.SCHEDULED, PostStatus.APPROVED, PostStatus.PENDING_APPROVAL, PostStatus.PUBLISHING] },
+      },
+      select: { id: true, scheduledAt: true },
+    }),
+    client.queueItem.findMany({
+      where: { workspaceId, slotAt: { gte: new Date() } },
+      select: { id: true, postId: true, slotAt: true },
+    }),
+  ]);
+  return new Map([
+    ...scheduled.filter((post) => post.scheduledAt).map((post) => [post.scheduledAt!.getTime(), post.id] as const),
+    ...reserved.map((item) => [item.slotAt.getTime(), item.postId ?? `skipped:${item.id}`] as const),
+  ]);
 }
 
 async function nextPosition(client: QueueDb, workspaceId: string): Promise<number> {

@@ -46,6 +46,7 @@ export function notificationDestination(
     APPROVAL_REQUESTED: `/w/${slug}/team`,
     APPROVAL_COMPLETED: `/w/${slug}/team`,
     MEDIA_PROCESSING_COMPLETE: `/w/${slug}/media`,
+    AI_GENERATION_COMPLETE: `/w/${slug}/studio`,
     MEMBER_JOINED: `/w/${slug}/team`,
     LIMIT_REACHED: `/w/${slug}/settings/billing`,
   }[type];
@@ -61,10 +62,20 @@ export async function notify(input: NotifyInput): Promise<void> {
   try {
     const recipients = await db.user.findMany({
       where: { id: { in: input.userIds } },
-      select: { id: true, notificationEmailEnabled: true },
+      select: {
+        id: true,
+        notificationEmailEnabled: true,
+        notificationInAppEnabled: true,
+        notificationApprovalsEnabled: true,
+        notificationPublishingFailuresEnabled: true,
+      },
     });
+    const eligible = recipients.filter((recipient) =>
+      (!APPROVAL_TYPES.has(input.type) || recipient.notificationApprovalsEnabled) &&
+      (input.type !== 'POST_FAILED' || recipient.notificationPublishingFailuresEnabled),
+    );
     const notifications = await db.$transaction(
-      recipients.map((recipient) => db.notification.create({
+      eligible.filter((recipient) => recipient.notificationInAppEnabled).map((recipient) => db.notification.create({
         data: {
         workspaceId: input.workspaceId,
         userId: recipient.id,
@@ -76,14 +87,16 @@ export async function notify(input: NotifyInput): Promise<void> {
       })),
     );
     if (env.RESEND_API_KEY) {
-      const emailUsers = new Set(recipients.filter((user) => user.notificationEmailEnabled).map((user) => user.id));
-      await Promise.all(notifications
-        .filter((notification) => emailUsers.has(notification.userId))
-        .map((notification) => enqueue(
+      const emailUsers = eligible.filter((user) => user.notificationEmailEnabled);
+      await Promise.all(emailUsers.map((user) => {
+        const notification = notifications.find((item) => item.userId === user.id);
+        if (!notification) return Promise.resolve();
+        return enqueue(
           'send-notification-email',
           { notificationId: notification.id },
           { workspaceId: input.workspaceId },
-        )));
+        );
+      }));
     }
   } catch (error) {
     console.error('[notifications] failed to write', input.type, error);

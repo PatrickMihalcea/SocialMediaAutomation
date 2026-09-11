@@ -16,6 +16,7 @@ export type PostLifecycleAction =
 
 const ACTIONS_BY_STATUS: Record<PostStatus, readonly PostLifecycleAction[]> = {
   DRAFT: ['edit', 'submitForApproval', 'schedule', 'publish', 'duplicate', 'delete'],
+  REJECTED: ['edit', 'submitForApproval', 'schedule', 'publish', 'duplicate', 'delete'],
   PENDING_APPROVAL: ['edit', 'withdrawApproval', 'duplicate', 'delete'],
   APPROVED: ['edit', 'schedule', 'publish', 'duplicate', 'delete'],
   SCHEDULED: ['edit', 'publish', 'reschedule', 'cancel', 'duplicate', 'delete'],

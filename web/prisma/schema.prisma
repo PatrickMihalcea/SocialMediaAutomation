@@ -41,6 +41,7 @@ enum SocialAccountStatus {
 
 enum PostStatus {
   DRAFT
+  REJECTED
   PENDING_APPROVAL
   APPROVED
   SCHEDULED
@@ -116,6 +117,7 @@ enum NotificationType {
   APPROVAL_REQUESTED
   APPROVAL_COMPLETED
   MEDIA_PROCESSING_COMPLETE
+  AI_GENERATION_COMPLETE
   MEMBER_JOINED
   LIMIT_REACHED
 }
@@ -169,34 +171,58 @@ enum RecurrenceStatus {
   ENDED
 }
 
+enum ThemePreference {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+enum DefaultPostDestination {
+  DRAFT
+  QUEUE
+  SCHEDULE
+}
+
+enum AiCreativity {
+  PRECISE
+  BALANCED
+  CREATIVE
+}
+
 // ---------------------------------------------------------------- identity
 
 model User {
-  id             String    @id @default(uuid()) @db.Uuid
-  email          String    @unique
-  name           String?
-  image          String?
-  passwordHash   String?   @map("password_hash")
-  emailVerified  DateTime? @map("email_verified")
-  isPlatformAdmin Boolean  @default(false) @map("is_platform_admin")
-  notificationEmailEnabled Boolean @default(true) @map("notification_email_enabled")
-  lastLoginAt    DateTime? @map("last_login_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  id                                    String          @id @default(uuid()) @db.Uuid
+  email                                 String          @unique
+  name                                  String?
+  image                                 String?
+  passwordHash                          String?         @map("password_hash")
+  emailVerified                         DateTime?       @map("email_verified")
+  isPlatformAdmin                       Boolean         @default(false) @map("is_platform_admin")
+  notificationEmailEnabled              Boolean         @default(true) @map("notification_email_enabled")
+  notificationInAppEnabled              Boolean         @default(true) @map("notification_in_app_enabled")
+  notificationApprovalsEnabled          Boolean         @default(true) @map("notification_approvals_enabled")
+  notificationPublishingFailuresEnabled Boolean         @default(true) @map("notification_publishing_failures_enabled")
+  notificationWeeklyDigestEnabled       Boolean         @default(false) @map("notification_weekly_digest_enabled")
+  themePreference                       ThemePreference @default(SYSTEM) @map("theme_preference")
+  lastLoginAt                           DateTime?       @map("last_login_at")
+  createdAt                             DateTime        @default(now()) @map("created_at")
+  updatedAt                             DateTime        @updatedAt @map("updated_at")
 
-  accounts          Account[]
-  sessions          Session[]
-  memberships       WorkspaceMember[]
-  posts             Post[]
-  mediaAssets       MediaAsset[]
-  notifications     Notification[]
-  approvalComments  ApprovalComment[]
-  aiConversations   AiConversation[]
-  aiGenerations     AiGeneration[]
-  auditLogs         AuditLog[]
-  invitesSent       WorkspaceInvite[] @relation("InviteInviter")
-  oauthAttempts     OAuthAttempt[]
-  oauthSelections   OAuthSelection[]
+  accounts         Account[]
+  sessions         Session[]
+  memberships      WorkspaceMember[]
+  posts            Post[]
+  mediaAssets      MediaAsset[]
+  notifications    Notification[]
+  approvalComments ApprovalComment[]
+  aiConversations  AiConversation[]
+  aiGenerations    AiGeneration[]
+  auditLogs        AuditLog[]
+  invitesSent      WorkspaceInvite[] @relation("InviteInviter")
+  oauthAttempts    OAuthAttempt[]
+  oauthSelections  OAuthSelection[]
+  savedSearchViews SavedSearchView[]
 
   @@index([createdAt])
   @@map("users")
@@ -248,13 +274,13 @@ model VerificationToken {
 
 /// Single-use tokens for email verification and password reset. Stored hashed.
 model AuthToken {
-  id        String   @id @default(uuid()) @db.Uuid
-  tokenHash String   @unique @map("token_hash")
+  id        String    @id @default(uuid()) @db.Uuid
+  tokenHash String    @unique @map("token_hash")
   email     String
   purpose   String
-  expiresAt DateTime @map("expires_at")
+  expiresAt DateTime  @map("expires_at")
   usedAt    DateTime? @map("used_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime  @default(now()) @map("created_at")
 
   @@index([email, purpose])
   @@map("auth_tokens")
@@ -263,51 +289,72 @@ model AuthToken {
 // ---------------------------------------------------------------- tenancy
 
 model Workspace {
-  id              String   @id @default(uuid()) @db.Uuid
+  id              String    @id @default(uuid()) @db.Uuid
   name            String
-  slug            String   @unique
+  slug            String    @unique
   description     String?
   website         String?
-  logoUrl         String?  @map("logo_url")
+  logoUrl         String?   @map("logo_url")
   industry        String?
-  targetAudience  String?  @map("target_audience")
-  timezone        String   @default("UTC")
-  defaultLanguage String   @default("en") @map("default_language")
-  onboardingStep  Int      @default(1) @map("onboarding_step")
+  targetAudience  String?   @map("target_audience")
+  timezone        String    @default("UTC")
+  defaultLanguage String    @default("en") @map("default_language")
+  onboardingStep  Int       @default(1) @map("onboarding_step")
   onboardedAt     DateTime? @map("onboarded_at")
-  logoStorageKey  String?  @map("logo_storage_key")
+  logoStorageKey  String?   @map("logo_storage_key")
   /// Pausing holds the queue: existing slots keep their times, nothing new is
   /// assigned, and due posts are not published until it resumes.
-  queuePaused     Boolean  @default(false) @map("queue_paused")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  queuePaused     Boolean   @default(false) @map("queue_paused")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  members           WorkspaceMember[]
-  invites           WorkspaceInvite[]
-  brandSettings     BrandSettings?
-  socialAccounts    SocialAccount[]
-  posts             Post[]
-  mediaAssets       MediaAsset[]
-  mediaFolders      MediaFolder[]
-  mediaTags         MediaTag[]
-  campaigns         Campaign[]
-  schedulingRules   SchedulingRule[]
-  queueItems        QueueItem[]
+  members            WorkspaceMember[]
+  invites            WorkspaceInvite[]
+  brandSettings      BrandSettings?
+  preferences        WorkspacePreferences?
+  socialAccounts     SocialAccount[]
+  posts              Post[]
+  mediaAssets        MediaAsset[]
+  mediaFolders       MediaFolder[]
+  mediaTags          MediaTag[]
+  campaigns          Campaign[]
+  schedulingRules    SchedulingRule[]
+  queueItems         QueueItem[]
   recurringSchedules RecurringSchedule[]
   analyticsSnapshots AnalyticsSnapshot[]
-  notifications     Notification[]
-  aiConversations   AiConversation[]
-  aiGenerations     AiGeneration[]
-  aiMediaJobs       AiMediaJob[]
-  subscription      Subscription?
-  usageRecords      UsageRecord[]
-  jobs              Job[]
-  auditLogs         AuditLog[]
-  oauthAttempts     OAuthAttempt[]
-  oauthSelections   OAuthSelection[]
+  notifications      Notification[]
+  aiConversations    AiConversation[]
+  aiGenerations      AiGeneration[]
+  aiMediaJobs        AiMediaJob[]
+  subscription       Subscription?
+  usageRecords       UsageRecord[]
+  jobs               Job[]
+  auditLogs          AuditLog[]
+  oauthAttempts      OAuthAttempt[]
+  oauthSelections    OAuthSelection[]
+  savedSearchViews   SavedSearchView[]
 
   @@index([createdAt])
   @@map("workspaces")
+}
+
+model WorkspacePreferences {
+  workspaceId              String                 @id @map("workspace_id") @db.Uuid
+  defaultPostDestination   DefaultPostDestination @default(DRAFT) @map("default_post_destination")
+  defaultPublishHour       Int                    @default(9) @map("default_publish_hour")
+  defaultPublishMinute     Int                    @default(0) @map("default_publish_minute")
+  requireApprovalByDefault Boolean                @default(false) @map("require_approval_by_default")
+  defaultHashtags          String[]               @default([]) @map("default_hashtags")
+  defaultCta               String                 @default("") @map("default_cta")
+  aiCreativity             AiCreativity           @default(BALANCED) @map("ai_creativity")
+  aiUseBrandVoice          Boolean                @default(true) @map("ai_use_brand_voice")
+  aiAutoAdaptPlatforms     Boolean                @default(true) @map("ai_auto_adapt_platforms")
+  createdAt                DateTime               @default(now()) @map("created_at")
+  updatedAt                DateTime               @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("workspace_preferences")
 }
 
 model WorkspaceMember {
@@ -347,20 +394,20 @@ model WorkspaceInvite {
 }
 
 model BrandSettings {
-  id                    String   @id @default(uuid()) @db.Uuid
-  workspaceId           String   @unique @map("workspace_id") @db.Uuid
-  tone                  String?
-  personality           String?
-  targetAudience        String?  @map("target_audience")
-  writingStyle          String?  @map("writing_style")
-  wordsToUse            String[] @default([]) @map("words_to_use")
-  wordsToAvoid          String[] @default([]) @map("words_to_avoid")
-  emojiPolicy           String   @default("SPARING") @map("emoji_policy")
-  hashtagPolicy         String   @default("MODERATE") @map("hashtag_policy")
-  ctaStyle              String?  @map("cta_style")
-  additionalInstructions String? @map("additional_instructions")
-  createdAt             DateTime @default(now()) @map("created_at")
-  updatedAt             DateTime @updatedAt @map("updated_at")
+  id                     String   @id @default(uuid()) @db.Uuid
+  workspaceId            String   @unique @map("workspace_id") @db.Uuid
+  tone                   String?
+  personality            String?
+  targetAudience         String?  @map("target_audience")
+  writingStyle           String?  @map("writing_style")
+  wordsToUse             String[] @default([]) @map("words_to_use")
+  wordsToAvoid           String[] @default([]) @map("words_to_avoid")
+  emojiPolicy            String   @default("SPARING") @map("emoji_policy")
+  hashtagPolicy          String   @default("MODERATE") @map("hashtag_policy")
+  ctaStyle               String?  @map("cta_style")
+  additionalInstructions String?  @map("additional_instructions")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -370,27 +417,27 @@ model BrandSettings {
 // ---------------------------------------------------------------- channels
 
 model SocialAccount {
-  id                   String              @id @default(uuid()) @db.Uuid
-  workspaceId          String              @map("workspace_id") @db.Uuid
-  platform             Platform
-  accountName          String              @map("account_name")
-  accountHandle        String?             @map("account_handle")
+  id                    String              @id @default(uuid()) @db.Uuid
+  workspaceId           String              @map("workspace_id") @db.Uuid
+  platform              Platform
+  accountName           String              @map("account_name")
+  accountHandle         String?             @map("account_handle")
   /// The platform's own id for this account/page/channel.
-  externalAccountId    String              @map("external_account_id")
-  avatarUrl            String?             @map("avatar_url")
+  externalAccountId     String              @map("external_account_id")
+  avatarUrl             String?             @map("avatar_url")
   /// AES-256-GCM ciphertext. Never leaves the server; see src/lib/crypto/tokens.ts.
-  accessTokenEncrypted String?             @map("access_token_encrypted")
-  refreshTokenEncrypted String?            @map("refresh_token_encrypted")
-  tokenExpiresAt       DateTime?           @map("token_expires_at")
-  scopes               String[]            @default([])
-  status               SocialAccountStatus @default(ACTIVE)
-  statusMessage        String?             @map("status_message")
-  lastSyncedAt         DateTime?           @map("last_synced_at")
-  metadata             Json                @default("{}")
-  createdAt            DateTime            @default(now()) @map("created_at")
-  updatedAt            DateTime            @updatedAt @map("updated_at")
+  accessTokenEncrypted  String?             @map("access_token_encrypted")
+  refreshTokenEncrypted String?             @map("refresh_token_encrypted")
+  tokenExpiresAt        DateTime?           @map("token_expires_at")
+  scopes                String[]            @default([])
+  status                SocialAccountStatus @default(ACTIVE)
+  statusMessage         String?             @map("status_message")
+  lastSyncedAt          DateTime?           @map("last_synced_at")
+  metadata              Json                @default("{}")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
 
-  workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace     Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   postPlatforms PostPlatform[]
   snapshots     AnalyticsSnapshot[]
 
@@ -432,7 +479,7 @@ model OAuthSelection {
   userId             String    @map("user_id") @db.Uuid
   workspaceId        String    @map("workspace_id") @db.Uuid
   platform           Platform
-  resultsEncrypted   String    @db.Text @map("results_encrypted")
+  resultsEncrypted   String    @map("results_encrypted") @db.Text
   reconnectAccountId String?   @map("reconnect_account_id") @db.Uuid
   expiresAt          DateTime  @map("expires_at")
   consumedAt         DateTime? @map("consumed_at")
@@ -471,20 +518,21 @@ model Campaign {
 }
 
 model Post {
-  id          String     @id @default(uuid()) @db.Uuid
-  workspaceId String     @map("workspace_id") @db.Uuid
-  authorId    String?    @map("author_id") @db.Uuid
-  campaignId  String?    @map("campaign_id") @db.Uuid
-  status      PostStatus @default(DRAFT)
-  title       String?
+  id                  String     @id @default(uuid()) @db.Uuid
+  workspaceId         String     @map("workspace_id") @db.Uuid
+  authorId            String?    @map("author_id") @db.Uuid
+  campaignId          String?    @map("campaign_id") @db.Uuid
+  status              PostStatus @default(DRAFT)
+  title               String?
   /// Instant the post should publish, always stored UTC.
-  scheduledAt DateTime?  @map("scheduled_at")
-  publishedAt DateTime?  @map("published_at")
+  scheduledAt         DateTime?  @map("scheduled_at")
+  publishedAt         DateTime?  @map("published_at")
+  archivedAt          DateTime?  @map("archived_at")
   /// IANA zone the author picked the wall-clock time in.
-  timezone    String     @default("UTC")
-  recurringScheduleId String? @map("recurring_schedule_id") @db.Uuid
-  createdAt   DateTime   @default(now()) @map("created_at")
-  updatedAt   DateTime   @updatedAt @map("updated_at")
+  timezone            String     @default("UTC")
+  recurringScheduleId String?    @map("recurring_schedule_id") @db.Uuid
+  createdAt           DateTime   @default(now()) @map("created_at")
+  updatedAt           DateTime   @updatedAt @map("updated_at")
 
   workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   author            User?              @relation(fields: [authorId], references: [id], onDelete: SetNull)
@@ -497,6 +545,7 @@ model Post {
   @@index([workspaceId])
   @@index([workspaceId, status])
   @@index([workspaceId, scheduledAt])
+  @@index([workspaceId, archivedAt])
   @@index([scheduledAt])
   @@index([status])
   @@index([campaignId])
@@ -531,8 +580,8 @@ model PostPlatform {
   createdAt       DateTime           @default(now()) @map("created_at")
   updatedAt       DateTime           @updatedAt @map("updated_at")
 
-  post          Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
-  socialAccount SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  post          Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  socialAccount SocialAccount  @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
   media         PostMedia[]
   analytics     PostAnalytics?
 
@@ -547,14 +596,14 @@ model PostPlatform {
 }
 
 model PostMedia {
-  id             String   @id @default(uuid()) @db.Uuid
-  postPlatformId String   @map("post_platform_id") @db.Uuid
-  mediaAssetId   String   @map("media_asset_id") @db.Uuid
-  position       Int      @default(0)
-  altText        String?  @map("alt_text")
+  id              String   @id @default(uuid()) @db.Uuid
+  postPlatformId  String   @map("post_platform_id") @db.Uuid
+  mediaAssetId    String   @map("media_asset_id") @db.Uuid
+  position        Int      @default(0)
+  altText         String?  @map("alt_text")
   /// Frame offset (seconds) chosen as the video cover.
-  thumbnailOffset Float?  @map("thumbnail_offset")
-  createdAt      DateTime @default(now()) @map("created_at")
+  thumbnailOffset Float?   @map("thumbnail_offset")
+  createdAt       DateTime @default(now()) @map("created_at")
 
   postPlatform PostPlatform @relation(fields: [postPlatformId], references: [id], onDelete: Cascade)
   mediaAsset   MediaAsset   @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
@@ -614,43 +663,46 @@ model MediaAssetTag {
 }
 
 model MediaAsset {
-  id           String      @id @default(uuid()) @db.Uuid
-  workspaceId  String      @map("workspace_id") @db.Uuid
-  folderId     String?     @map("folder_id") @db.Uuid
-  uploadedById String?     @map("uploaded_by_id") @db.Uuid
-  filename     String
-  mimeType     String      @map("mime_type")
-  type         MediaType
-  size         Int
-  width        Int?
-  height       Int?
+  id               String      @id @default(uuid()) @db.Uuid
+  workspaceId      String      @map("workspace_id") @db.Uuid
+  folderId         String?     @map("folder_id") @db.Uuid
+  uploadedById     String?     @map("uploaded_by_id") @db.Uuid
+  filename         String
+  mimeType         String      @map("mime_type")
+  type             MediaType
+  size             Int
+  width            Int?
+  height           Int?
   /// Seconds, video only.
-  duration     Float?
-  storageKey   String      @map("storage_key")
-  thumbnailKey String?     @map("thumbnail_key")
-  altText      String?     @map("alt_text")
-  status       MediaStatus @default(READY)
-  usageCount   Int         @default(0) @map("usage_count")
+  duration         Float?
+  storageKey       String      @map("storage_key")
+  thumbnailKey     String?     @map("thumbnail_key")
+  altText          String?     @map("alt_text")
+  status           MediaStatus @default(READY)
+  usageCount       Int         @default(0) @map("usage_count")
   /// Set when this asset was produced by the editor from another asset.
-  derivedFromId String?    @map("derived_from_id") @db.Uuid
-  derivationPreset String? @map("derivation_preset")
+  derivedFromId    String?     @map("derived_from_id") @db.Uuid
+  derivationPreset String?     @map("derivation_preset")
   /// Set when the asset came out of AI image generation.
-  aiGenerationId String?   @map("ai_generation_id") @db.Uuid
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
+  aiGenerationId   String?     @map("ai_generation_id") @db.Uuid
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
 
-  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  folder      MediaFolder?    @relation(fields: [folderId], references: [id], onDelete: SetNull)
-  uploadedBy  User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
-  derivedFrom MediaAsset?     @relation("Derivation", fields: [derivedFromId], references: [id], onDelete: SetNull)
-  derivatives MediaAsset[]    @relation("Derivation")
-  tags        MediaAssetTag[]
-  postMedia   PostMedia[]
+  workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  folder       MediaFolder?    @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  uploadedBy   User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  derivedFrom  MediaAsset?     @relation("Derivation", fields: [derivedFromId], references: [id], onDelete: SetNull)
+  derivatives  MediaAsset[]    @relation("Derivation")
+  tags         MediaAssetTag[]
+  postMedia    PostMedia[]
+  aiGeneration AiGeneration?   @relation(fields: [aiGenerationId], references: [id], onDelete: SetNull)
+  aiJobOutputs AiMediaJob[]    @relation("AiJobOutput")
 
   @@index([workspaceId])
   @@index([folderId])
   @@index([type])
   @@index([status])
+  @@index([aiGenerationId])
   @@index([createdAt])
   @@map("media_assets")
 }
@@ -679,39 +731,41 @@ model SchedulingRule {
 model QueueItem {
   id          String   @id @default(uuid()) @db.Uuid
   workspaceId String   @map("workspace_id") @db.Uuid
-  postId      String   @unique @map("post_id") @db.Uuid
+  postId      String?  @unique @map("post_id") @db.Uuid
   position    Int
   /// Slot this item currently holds, mirrored onto post.scheduledAt.
   slotAt      DateTime @map("slot_at")
+  skipped     Boolean  @default(false)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post      Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
 
+  @@unique([workspaceId, slotAt])
   @@index([workspaceId, position])
   @@index([slotAt])
   @@map("queue_items")
 }
 
 model RecurringSchedule {
-  id          String           @id @default(uuid()) @db.Uuid
-  workspaceId String           @map("workspace_id") @db.Uuid
-  name        String
+  id            String           @id @default(uuid()) @db.Uuid
+  workspaceId   String           @map("workspace_id") @db.Uuid
+  name          String
   /// Template post content, cloned into each generated instance.
-  template    Json             @default("{}")
-  weekdays    Int[]            @default([])
-  hour        Int
-  minute      Int              @default(0)
-  timezone    String           @default("UTC")
-  startDate   DateTime         @map("start_date")
-  endDate     DateTime?        @map("end_date")
-  status      RecurrenceStatus @default(ACTIVE)
+  template      Json             @default("{}")
+  weekdays      Int[]            @default([])
+  hour          Int
+  minute        Int              @default(0)
+  timezone      String           @default("UTC")
+  startDate     DateTime         @map("start_date")
+  endDate       DateTime?        @map("end_date")
+  status        RecurrenceStatus @default(ACTIVE)
   /// Instances are materialised only up to this point; a background job rolls
   /// the window forward so the series never expands infinitely.
-  expandedUntil DateTime?      @map("expanded_until")
-  createdAt   DateTime         @default(now()) @map("created_at")
-  updatedAt   DateTime         @updatedAt @map("updated_at")
+  expandedUntil DateTime?        @map("expanded_until")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   posts     Post[]
@@ -804,19 +858,23 @@ model Notification {
 }
 
 model ApprovalComment {
-  id        String           @id @default(uuid()) @db.Uuid
-  postId    String           @map("post_id") @db.Uuid
-  workspaceId String         @map("workspace_id") @db.Uuid
-  authorId  String?          @map("author_id") @db.Uuid
-  body      String
-  decision  ApprovalDecision @default(COMMENT)
-  createdAt DateTime         @default(now()) @map("created_at")
+  id          String           @id @default(uuid()) @db.Uuid
+  postId      String           @map("post_id") @db.Uuid
+  workspaceId String           @map("workspace_id") @db.Uuid
+  authorId    String?          @map("author_id") @db.Uuid
+  body        String
+  decision    ApprovalDecision @default(COMMENT)
+  parentId    String?          @map("parent_id") @db.Uuid
+  createdAt   DateTime         @default(now()) @map("created_at")
 
-  post   Post  @relation(fields: [postId], references: [id], onDelete: Cascade)
-  author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  post    Post              @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author  User?             @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  parent  ApprovalComment?  @relation("ApprovalReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies ApprovalComment[] @relation("ApprovalReplies")
 
   @@index([postId])
   @@index([workspaceId])
+  @@index([parentId])
   @@index([createdAt])
   @@map("approval_comments")
 }
@@ -861,23 +919,24 @@ model AiMessage {
 }
 
 model AiGeneration {
-  id           String      @id @default(uuid()) @db.Uuid
-  workspaceId  String      @map("workspace_id") @db.Uuid
-  userId       String?     @map("user_id") @db.Uuid
-  provider     String
-  model        String
-  operation    AiOperation
-  promptTokens Int?        @map("prompt_tokens")
-  completionTokens Int?    @map("completion_tokens")
-  totalTokens  Int?        @map("total_tokens")
+  id               String      @id @default(uuid()) @db.Uuid
+  workspaceId      String      @map("workspace_id") @db.Uuid
+  userId           String?     @map("user_id") @db.Uuid
+  provider         String
+  model            String
+  operation        AiOperation
+  promptTokens     Int?        @map("prompt_tokens")
+  completionTokens Int?        @map("completion_tokens")
+  totalTokens      Int?        @map("total_tokens")
   /// USD, six decimal places.
-  estimatedCost Decimal?   @map("estimated_cost") @db.Decimal(12, 6)
-  succeeded    Boolean     @default(true)
-  errorMessage String?     @map("error_message")
-  createdAt    DateTime    @default(now()) @map("created_at")
+  estimatedCost    Decimal?    @map("estimated_cost") @db.Decimal(12, 6)
+  succeeded        Boolean     @default(true)
+  errorMessage     String?     @map("error_message")
+  createdAt        DateTime    @default(now()) @map("created_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  mediaAssets MediaAsset[]
 
   @@index([workspaceId])
   @@index([workspaceId, createdAt])
@@ -908,12 +967,32 @@ model AiMediaJob {
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  outputAsset MediaAsset? @relation("AiJobOutput", fields: [outputAssetId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId])
   @@index([workspaceId, status])
+  @@index([outputAssetId])
   @@index([createdAt])
   @@map("ai_media_jobs")
+}
+
+model SavedSearchView {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  ownerId     String   @map("owner_id") @db.Uuid
+  name        String
+  query       Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner     User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@index([ownerId])
+  @@map("saved_search_views")
 }
 
 // ---------------------------------------------------------------- billing

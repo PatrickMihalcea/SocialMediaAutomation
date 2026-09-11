@@ -28,6 +28,14 @@ import {
 
 export type FormState = ActionState;
 
+export async function updateThemePreferenceAction(formData: FormData): Promise<void> {
+  const { requireUser } = await import('@/lib/auth/guard');
+  const user = await requireUser();
+  const themePreference = z.enum(['LIGHT', 'DARK', 'SYSTEM']).parse(formData.get('themePreference'));
+  await db.user.update({ where: { id: user.id }, data: { themePreference } });
+  revalidatePath('/', 'layout');
+}
+
 export async function signUpAction(_state: FormState, formData: FormData): Promise<FormState> {
   const parsed = signUpSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return actionError(parsed.error);

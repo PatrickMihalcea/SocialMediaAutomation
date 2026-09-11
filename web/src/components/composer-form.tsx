@@ -54,7 +54,13 @@ type ComposerFormProps = {
   canSubmitForApproval?: boolean;
   initial?: ComposerInitial;
   attachAssetId?: string;
-  contextDefaults?: { scheduledAt?: string; campaignId?: string };
+  contextDefaults?: {
+    scheduledAt?: string;
+    campaignId?: string;
+    defaultHashtags?: string[];
+    defaultCta?: string;
+    defaultPostDestination?: 'DRAFT' | 'QUEUE' | 'SCHEDULE';
+  };
 };
 
 export function ComposerForm({
@@ -692,6 +698,15 @@ export function ComposerForm({
 
           <div className="pb-16">
             <p className="b88-label">What happens next?</p>
+            {contextDefaults?.defaultPostDestination && (
+              <p className="b88-caption mt-1">
+                Workspace default: {{
+                  DRAFT: 'Save as draft',
+                  QUEUE: 'Add to queue after saving',
+                  SCHEDULE: 'Schedule at the chosen time',
+                }[contextDefaults.defaultPostDestination]}
+              </p>
+            )}
             <div
               className="b88-selection-bar"
               role="region"

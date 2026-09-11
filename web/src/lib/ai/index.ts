@@ -30,8 +30,17 @@ export async function generateObject<T>(input: {
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);
 
   const provider = aiProvider();
+  const preferences = await db.workspacePreferences.findUnique({
+    where: { workspaceId: input.workspaceId },
+    select: { aiCreativity: true },
+  });
+  const temperature = input.temperature ?? {
+    PRECISE: 0.25,
+    BALANCED: 0.7,
+    CREATIVE: 1,
+  }[preferences?.aiCreativity ?? 'BALANCED'];
   try {
-    const result = await provider.completeObject(input);
+    const result = await provider.completeObject({ ...input, temperature });
     await Promise.all([
       incrementUsage(input.workspaceId, 'ai_generations'),
       recordGeneration({

@@ -1,5 +1,25 @@
 # Deferred schema changes
 
+## Applied 2026-09-10
+
+Migration `20260910223000_deferred_persistence` applied workspace/user preferences,
+notification category flags and AI completion events, AI provenance relations, saved
+search views, `PostStatus.REJECTED`, threaded approval comments, `Post.archivedAt`,
+and skipped queue-slot reservations. Consumer wiring now persists and displays these
+features.
+
+`archivedAt` was chosen instead of `ARCHIVED` so a post retains its publishing
+lifecycle state while archived. Archive and restore are available for inactive posts.
+
+Still deferred:
+
+- Undo tokens/deletion history remain deferred because there is no complete restore
+  workflow; adding an unused history table would not make deletion undoable.
+- Invoice/payment-method records remain deferred because this environment has no real
+  provider customer data or truthful records for the billing UI to display.
+- Weekly digest generation remains deferred; the delivery preference is persisted,
+  but no digest scheduler/content producer exists yet.
+
 Every item here was found by a story-testing agent that could implement everything
 except the persistence it needed. None of them were applied, because a dozen agents
 share one database and one workspace: a migration mid-flight would have reset or

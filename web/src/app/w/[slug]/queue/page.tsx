@@ -10,10 +10,11 @@ import { PLATFORM_LABELS } from '@/lib/social/registry';
 export default async function QueuePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const ctx = await requireWorkspace(slug, 'post:view');
-  const [rules, items, drafts, slots, recurrences, accounts, campaigns] = await Promise.all([
+  const [rules, items, skippedItems, drafts, slots, recurrences, accounts, campaigns] = await Promise.all([
     db.schedulingRule.findMany({ where: { workspaceId: ctx.workspace.id }, orderBy: [{ weekday: 'asc' }, { hour: 'asc' }, { minute: 'asc' }] }),
-    db.queueItem.findMany({ where: { workspaceId: ctx.workspace.id }, include: { post: { include: { platforms: { take: 1 } } } }, orderBy: { position: 'asc' } }),
-    db.post.findMany({ where: { workspaceId: ctx.workspace.id, status: { in: ['DRAFT', 'APPROVED', 'SCHEDULED'] }, queueItem: null, recurringScheduleId: null }, include: { platforms: { take: 1 } }, orderBy: { updatedAt: 'desc' }, take: 12 }),
+    db.queueItem.findMany({ where: { workspaceId: ctx.workspace.id, postId: { not: null } }, include: { post: { include: { platforms: { take: 1 } } } }, orderBy: { position: 'asc' } }),
+    db.queueItem.findMany({ where: { workspaceId: ctx.workspace.id, skipped: true, postId: null }, orderBy: { slotAt: 'asc' } }),
+    db.post.findMany({ where: { workspaceId: ctx.workspace.id, status: { in: ['DRAFT', 'REJECTED', 'APPROVED', 'SCHEDULED'] }, queueItem: null, recurringScheduleId: null }, include: { platforms: { take: 1 } }, orderBy: { updatedAt: 'desc' }, take: 12 }),
     listSlots(ctx.workspace.id, 50),
     db.recurringSchedule.findMany({
       where: { workspaceId: ctx.workspace.id },
@@ -43,7 +44,8 @@ export default async function QueuePage({ params }: { params: Promise<{ slug: st
         timezone={ctx.workspace.timezone}
         paused={ctx.workspace.queuePaused}
         rules={rules.map((rule) => ({ id: rule.id, weekday: rule.weekday, hour: rule.hour, minute: rule.minute, enabled: rule.enabled }))}
-        queuePosts={items.map((item) => ({ id: item.postId, title: item.post.title ?? item.post.platforms[0]?.text.slice(0, 60) ?? 'Untitled post', slotAt: item.slotAt.toISOString() }))}
+        queuePosts={items.flatMap((item) => item.postId && item.post ? [{ id: item.postId, title: item.post.title ?? item.post.platforms[0]?.text.slice(0, 60) ?? 'Untitled post', slotAt: item.slotAt.toISOString() }] : [])}
+        skippedSlots={skippedItems.map((item) => ({ id: item.id, slotAt: item.slotAt.toISOString() }))}
         drafts={drafts.map((post) => ({ id: post.id, title: post.title ?? post.platforms[0]?.text.slice(0, 30) ?? 'Untitled post' }))}
         nextSlot={nextSlot}
         recurrences={recurrences.map((recurrence) => {

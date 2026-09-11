@@ -33,7 +33,7 @@ export default async function DraftsPage({
   const where = {
     workspaceId: ctx.workspace.id,
     scheduledAt: null,
-    status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'] },
+    status: { in: ['DRAFT', 'REJECTED', 'PENDING_APPROVAL', 'APPROVED'] },
   } satisfies Prisma.PostWhereInput;
   const [drafts, total] = await Promise.all([
     db.post.findMany({

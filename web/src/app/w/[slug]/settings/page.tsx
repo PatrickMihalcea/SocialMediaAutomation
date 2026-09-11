@@ -1,4 +1,4 @@
-import { Field, MediaUploader, Select, TextArea } from '@/bridge88/components';
+import { Checkbox, Field, MediaUploader, Select, TextArea } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { COMMON_TIMEZONES } from '@/lib/scheduling/time';
@@ -6,6 +6,7 @@ import {
   deleteWorkspaceAction,
   transferWorkspaceOwnershipAction,
   updateWorkspaceAction,
+  updateWorkspacePreferencesAction,
   uploadWorkspaceLogoAction,
 } from '@/app/actions/workspace';
 import { ActionForm } from '@/components/action-form';
@@ -16,7 +17,10 @@ import { BrandVoiceForms } from './brand-voice-forms';
 export default async function SettingsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const ctx = await requireWorkspace(slug, 'workspace:view');
-  const brand = await db.brandSettings.findUnique({ where: { workspaceId: ctx.workspace.id } });
+  const [brand, preferences] = await Promise.all([
+    db.brandSettings.findUnique({ where: { workspaceId: ctx.workspace.id } }),
+    db.workspacePreferences.findUnique({ where: { workspaceId: ctx.workspace.id } }),
+  ]);
   const logoUrl = ctx.workspace.logoStorageKey
     ? await storage().signedUrl(ctx.workspace.logoStorageKey)
     : ctx.workspace.logoUrl;
@@ -64,6 +68,28 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
           />
         )}
       </div>
+
+      {ctx.can('workspace:update') && (
+        <ActionForm action={updateWorkspacePreferencesAction.bind(null, slug)} className="b88-card mt-6 space-y-6">
+          <div><p className="b88-caption">Workflow defaults</p><h2 className="b88-heading mt-2">Posting and AI</h2></div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Select name="defaultPostDestination" label="New post destination" defaultValue={preferences?.defaultPostDestination ?? 'DRAFT'}>
+              <option value="DRAFT">Save as draft</option><option value="QUEUE">Add to queue</option><option value="SCHEDULE">Schedule</option>
+            </Select>
+            <Field name="defaultPublishHour" label="Default hour" type="number" min={0} max={23} defaultValue={preferences?.defaultPublishHour ?? 9} />
+            <Field name="defaultPublishMinute" label="Default minute" type="number" min={0} max={59} defaultValue={preferences?.defaultPublishMinute ?? 0} />
+          </div>
+          <Field name="defaultHashtags" label="Default hashtags" defaultValue={(preferences?.defaultHashtags ?? []).map((tag) => `#${tag}`).join(', ')} />
+          <Field name="defaultCta" label="Default call to action" defaultValue={preferences?.defaultCta ?? ''} />
+          <Select name="aiCreativity" label="AI creativity" defaultValue={preferences?.aiCreativity ?? 'BALANCED'}>
+            <option value="PRECISE">Precise</option><option value="BALANCED">Balanced</option><option value="CREATIVE">Creative</option>
+          </Select>
+          <Checkbox name="requireApprovalByDefault" label="Require approval by default" defaultChecked={preferences?.requireApprovalByDefault ?? false} />
+          <Checkbox name="aiUseBrandVoice" label="Use brand voice for AI" defaultChecked={preferences?.aiUseBrandVoice ?? true} />
+          <Checkbox name="aiAutoAdaptPlatforms" label="Automatically adapt AI copy per platform" defaultChecked={preferences?.aiAutoAdaptPlatforms ?? true} />
+          <PendingButton type="submit" pendingLabel="Saving defaults">Save defaults</PendingButton>
+        </ActionForm>
+      )}
 
       {ctx.can('workspace:update') && (
         <ActionForm action={uploadWorkspaceLogoAction.bind(null, slug)} className="b88-card mt-6 space-y-6" encType="multipart/form-data">

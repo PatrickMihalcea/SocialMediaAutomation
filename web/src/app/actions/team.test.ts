@@ -93,6 +93,19 @@ describe('approval actions', () => {
     );
   });
 
+  it.each([
+    ['APPROVED', 'APPROVED'],
+    ['REJECTED', 'REJECTED'],
+    ['CHANGES_REQUESTED', 'DRAFT'],
+  ] as const)('moves a %s post to %s', async (decision, status) => {
+    await approvalAction('northwind-studio', 'post-1', decision, new FormData());
+
+    expect(mocks.postUpdate).toHaveBeenCalledWith({
+      where: { id: 'post-1' },
+      data: { status },
+    });
+  });
+
   it('rejects a direct Viewer approval call before reading or mutating the post', async () => {
     mocks.requireWorkspace.mockRejectedValueOnce(new Error('Viewer cannot approve posts.'));
 

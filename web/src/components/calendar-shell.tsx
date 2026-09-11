@@ -48,11 +48,12 @@ export type CalendarPost = {
 
 type Option = { value: string; label: string };
 const tones: Record<string, 'outline' | 'cream' | 'mint' | 'lime' | 'lilac' | 'coral'> = {
-  DRAFT: 'outline', PENDING_APPROVAL: 'cream', APPROVED: 'mint', SCHEDULED: 'lime',
+  DRAFT: 'outline', REJECTED: 'coral', PENDING_APPROVAL: 'cream', APPROVED: 'mint', SCHEDULED: 'lime',
   PUBLISHING: 'lilac', PUBLISHED: 'mint', FAILED: 'coral', CANCELLED: 'outline',
 };
 const statusBlocks: Record<string, string> = {
   DRAFT: 'bg-surface-soft',
+  REJECTED: 'bg-[var(--block-coral)]',
   PENDING_APPROVAL: 'bg-[var(--block-cream)]',
   APPROVED: 'bg-[var(--block-mint)]',
   SCHEDULED: 'bg-[var(--block-lime)]',
@@ -349,7 +350,7 @@ export function CalendarShell({
       <div className="mt-4 grid gap-3 md:grid-cols-4">
         <Filter label="Platform" value={filters.platform} options={platformOptions} onChange={(value) => navigate({ platform: value })} />
         <Filter label="Status" value={filters.status} options={[
-          { value: 'DRAFT', label: 'Draft' }, { value: 'PENDING_APPROVAL', label: 'In review' },
+          { value: 'DRAFT', label: 'Draft' }, { value: 'REJECTED', label: 'Rejected' }, { value: 'PENDING_APPROVAL', label: 'In review' },
           { value: 'APPROVED', label: 'Approved' }, { value: 'SCHEDULED', label: 'Scheduled' },
           { value: 'PUBLISHING', label: 'Publishing' }, { value: 'PUBLISHED', label: 'Published' },
           { value: 'FAILED', label: 'Failed' }, { value: 'CANCELLED', label: 'Cancelled' },

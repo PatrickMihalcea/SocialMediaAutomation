@@ -78,6 +78,11 @@ export function emptyVersion(account: ComposerAccount): PlatformVersionState {
   };
 }
 
+export type ComposerWorkspaceDefaults = {
+  defaultHashtags?: string[];
+  defaultCta?: string;
+};
+
 const attachedMedia = (assetId: string) => [
   { mediaAssetId: assetId, altText: '', thumbnailOffset: '' },
 ];
@@ -86,7 +91,7 @@ export function buildInitialDraft(
   accounts: ComposerAccount[],
   initial?: ComposerInitial,
   attachAssetId?: string,
-  defaults: { scheduledAt?: string; campaignId?: string } = {},
+  defaults: { scheduledAt?: string; campaignId?: string } & ComposerWorkspaceDefaults = {},
 ): ComposerDraft {
   const versions: Record<string, PlatformVersionState> = {};
   for (const account of accounts) {
@@ -106,7 +111,11 @@ export function buildInitialDraft(
             thumbnailOffset: m.thumbnailOffset != null ? String(m.thumbnailOffset) : '',
           })),
         }
-      : emptyVersion(account);
+      : {
+          ...emptyVersion(account),
+          text: defaults.defaultCta ?? '',
+          hashtags: (defaults.defaultHashtags ?? []).map((tag) => `#${tag.replace(/^#/, '')}`).join(', '),
+        };
   }
   if (attachAssetId) {
     for (const account of accounts) {

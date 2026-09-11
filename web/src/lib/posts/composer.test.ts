@@ -80,6 +80,21 @@ describe('composer helpers', () => {
     expect(draft.campaignId).toBe('campaign-1');
   });
 
+  it('seeds every new platform version from workspace posting defaults', () => {
+    const draft = buildInitialDraft(accounts, undefined, undefined, {
+      defaultHashtags: ['launch', '#northwind'],
+      defaultCta: 'See what is new.',
+    });
+    expect(draft.versions[accounts[0].id]).toMatchObject({
+      text: 'See what is new.',
+      hashtags: '#launch, #northwind',
+    });
+    expect(draft.versions[accounts[1].id]).toMatchObject({
+      text: 'See what is new.',
+      hashtags: '#launch, #northwind',
+    });
+  });
+
   it('appends a requested asset to existing post media without duplicating it', () => {
     const initial = {
       title: 'Media post',

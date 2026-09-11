@@ -16,13 +16,15 @@ export async function buildSystemPrompt(input: {
 }): Promise<string> {
   const workspace = await db.workspace.findUnique({
     where: { id: input.workspaceId },
-    include: { brandSettings: true },
+    include: { brandSettings: true, preferences: true },
   });
   if (!workspace) return BASE_PROMPT;
 
   const parts = [BASE_PROMPT, describeWorkspace(workspace)];
 
-  if (workspace.brandSettings) parts.push(describeVoice(workspace.brandSettings));
+  if (workspace.brandSettings && workspace.preferences?.aiUseBrandVoice !== false) {
+    parts.push(describeVoice(workspace.brandSettings));
+  }
   if (input.platform) parts.push(describePlatform(input.platform));
   if (input.extra) parts.push(input.extra);
 

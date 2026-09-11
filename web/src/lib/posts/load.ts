@@ -11,11 +11,12 @@ export async function loadComposerContext(
   postId?: string,
   requestedAssetId?: string,
 ) {
-  const [workspace, accounts, campaigns, post] = await Promise.all([
+  const [workspace, preferences, accounts, campaigns, post] = await Promise.all([
     db.workspace.findUniqueOrThrow({
       where: { id: workspaceId },
       select: { timezone: true },
     }),
+    db.workspacePreferences.findUnique({ where: { workspaceId } }),
     db.socialAccount.findMany({
       where: { workspaceId, status: 'ACTIVE' },
       orderBy: { createdAt: 'asc' },
@@ -139,6 +140,7 @@ export async function loadComposerContext(
     accounts: mergedAccounts,
     assets,
     campaigns: campaigns as ComposerCampaign[],
+    preferences,
     post: post ? { id: post.id, status: post.status } : null,
     initial,
   };

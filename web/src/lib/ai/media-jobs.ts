@@ -96,7 +96,7 @@ export async function runAiMediaJob(aiMediaJobId: string): Promise<void> {
       await notify({
         workspaceId: job.workspaceId,
         userIds: [job.userId],
-        type: 'MEDIA_PROCESSING_COMPLETE',
+        type: 'AI_GENERATION_COMPLETE',
         title: 'AI media is ready',
         body: 'The generated asset is available in AI studio and the Media Library.',
         href: `/w/${job.workspace.slug}/studio`,

@@ -41,6 +41,23 @@ import type { ComposerAsset } from '@/lib/posts/composer';
 export type ComposerState = ActionState & { redirectTo?: string; savedUpdatedAt?: string };
 export type PostCommandState = ActionState & { redirectTo?: string };
 
+export async function setPostArchivedAction(slug: string, postId: string, archived: boolean) {
+  const ctx = await requireWorkspace(slug, 'post:update');
+  const result = await db.post.updateMany({
+    where: {
+      id: postId,
+      workspaceId: ctx.workspace.id,
+      ...(archived ? { status: { in: ['DRAFT', 'REJECTED', 'PUBLISHED', 'FAILED', 'CANCELLED'] } } : { archivedAt: { not: null } }),
+    },
+    data: { archivedAt: archived ? new Date() : null },
+  });
+  if (!result.count) throw invalid(archived
+    ? 'Only inactive posts can be archived. Cancel or finish the post first.'
+    : 'That archived post is no longer available.');
+  revalidatePath(`/w/${slug}/posts/${postId}`);
+  revalidatePath(`/w/${slug}/calendar`);
+}
+
 export async function createPostAction(
   slug: string,
   _previous: ComposerState,
@@ -338,7 +355,7 @@ export async function listAttachableDraftsAction(
   const posts = await db.post.findMany({
     where: {
       workspaceId: ctx.workspace.id,
-      status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SCHEDULED', 'FAILED', 'CANCELLED'] },
+      status: { in: ['DRAFT', 'REJECTED', 'PENDING_APPROVAL', 'APPROVED', 'SCHEDULED', 'FAILED', 'CANCELLED'] },
     },
     orderBy: { updatedAt: 'desc' },
     take: 100,

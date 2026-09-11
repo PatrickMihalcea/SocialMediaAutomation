@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Badge, Button, EmptyState, MediaFrame, StatCard, StatusMessage } from '@/bridge88/components';
 import { ConfirmationButton, PendingButton } from '@/components/action-ui';
-import { postCommandAction } from '@/app/actions/posts';
+import { postCommandAction, setPostArchivedAction } from '@/app/actions/posts';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { formatMetric } from '@/lib/analytics/aggregate';
@@ -9,9 +9,12 @@ import { PLATFORM_LABELS } from '@/lib/social/registry';
 import { formatInZone } from '@/lib/scheduling/time';
 import { storage } from '@/lib/storage';
 import { notFound } from 'next/navigation';
+import type { PostStatus } from '@prisma/client';
+import { replyToApprovalCommentAction } from '@/app/actions/team';
 
 const statusTone = {
   DRAFT: 'outline',
+  REJECTED: 'coral',
   PENDING_APPROVAL: 'cream',
   APPROVED: 'mint',
   SCHEDULED: 'lime',
@@ -90,6 +93,7 @@ export default async function PostDetailPage({
           canDelete={ctx.can('post:delete')}
           canPublish={ctx.can('post:publish')}
           canSchedule={ctx.can('post:schedule')}
+          archived={Boolean(post.archivedAt)}
         />
       </div>
 
@@ -102,6 +106,11 @@ export default async function PostDetailPage({
       {post.status === 'CANCELLED' && (
         <StatusMessage tone="neutral" className="mt-6">
           This post is cancelled. Edit it to save it as a draft, choose a new time, or publish it now.
+        </StatusMessage>
+      )}
+      {post.status === 'REJECTED' && (
+        <StatusMessage tone="error" className="mt-6">
+          This post was rejected. Review the approval conversation, edit the post, and submit it again.
         </StatusMessage>
       )}
       {post.status === 'FAILED' && (
@@ -186,13 +195,19 @@ export default async function PostDetailPage({
         {post.approvalComments.length ? (
           <div className="mt-5">
             {post.approvalComments.map((comment) => (
-              <article key={comment.id} className="border-t border-hairline-soft py-4 first:border-0">
+              <article key={comment.id} className={`border-t border-hairline-soft py-4 first:border-0 ${comment.parentId ? 'ml-8 border-l border-l-hairline pl-4' : ''}`}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-[480]">{comment.author?.name ?? comment.author?.email ?? 'Former member'}</span>
                   <Badge tone="outline">{sentenceCase(comment.decision)}</Badge>
                   <span className="b88-caption">{formatInZone(comment.createdAt, ctx.workspace.timezone)}</span>
                 </div>
                 <p className="mt-2 whitespace-pre-wrap">{comment.body}</p>
+                {ctx.can('post:approve') && (
+                  <form action={async (formData) => { 'use server'; await replyToApprovalCommentAction(slug, post.id, comment.id, formData); }} className="mt-3 flex gap-2">
+                    <input name="body" className="b88-filter-control min-w-0 flex-1" aria-label={`Reply to ${comment.author?.name ?? 'comment'}`} placeholder="Write a reply" required />
+                    <Button type="submit" variant="tertiary">Reply</Button>
+                  </form>
+                )}
               </article>
             ))}
           </div>
@@ -240,23 +255,32 @@ function PostActions({
   canDelete,
   canPublish,
   canSchedule,
+  archived,
 }: {
   slug: string;
   postId: string;
-  status: keyof typeof statusTone;
+  status: PostStatus;
   timezone: string;
   canUpdate: boolean;
   canDelete: boolean;
   canPublish: boolean;
   canSchedule: boolean;
+  archived: boolean;
 }) {
-  const editStatuses = ['DRAFT', 'APPROVED', 'SCHEDULED', 'PUBLISHED', 'FAILED', 'CANCELLED'];
-  const duplicateStatuses = ['DRAFT', 'APPROVED', 'SCHEDULED', 'PUBLISHED', 'FAILED', 'CANCELLED'];
-  const deletableStatuses = ['DRAFT', 'APPROVED', 'SCHEDULED', 'PUBLISHED', 'FAILED', 'CANCELLED'];
-  const publishStatuses = ['DRAFT', 'APPROVED', 'FAILED', 'CANCELLED'];
+  const editStatuses: PostStatus[] = ['DRAFT', 'REJECTED', 'APPROVED', 'SCHEDULED', 'PUBLISHED', 'FAILED', 'CANCELLED'];
+  const duplicateStatuses: PostStatus[] = ['DRAFT', 'REJECTED', 'APPROVED', 'SCHEDULED', 'PUBLISHED', 'FAILED', 'CANCELLED'];
+  const deletableStatuses: PostStatus[] = ['DRAFT', 'REJECTED', 'APPROVED', 'SCHEDULED', 'PUBLISHED', 'FAILED', 'CANCELLED'];
+  const publishStatuses: PostStatus[] = ['DRAFT', 'REJECTED', 'APPROVED', 'FAILED', 'CANCELLED'];
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {canUpdate && (archived || ['DRAFT', 'REJECTED', 'PUBLISHED', 'FAILED', 'CANCELLED'].includes(status)) && (
+        <form action={setPostArchivedAction.bind(null, slug, postId, !archived)}>
+          <PendingButton type="submit" variant="tertiary" pendingLabel={archived ? 'Restoring' : 'Archiving'}>
+            {archived ? 'Restore from archive' : 'Archive post'}
+          </PendingButton>
+        </form>
+      )}
       {canUpdate && editStatuses.includes(status) && <Button href={`/w/${slug}/compose/${postId}`}>Edit post</Button>}
       {canSchedule && ['DRAFT', 'APPROVED', 'CANCELLED'].includes(status) && (
         <Button href={`/w/${slug}/compose/${postId}`} variant="secondary">Schedule</Button>
