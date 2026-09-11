@@ -3,12 +3,16 @@ import type { PostStatus } from '@prisma/client';
 import { ComposerForm } from '@/components/composer-form';
 import { ConfirmationButton, PendingButton } from '@/components/action-ui';
 import { requireWorkspace } from '@/lib/auth/guard';
+import { db } from '@/lib/db';
 import { loadComposerContext } from '@/lib/posts/load';
 import { parseComposerContext } from '@/lib/posts/lifecycle';
 import { legalPostActions } from '@/lib/posts/lifecycle';
 import { PLATFORM_LABELS } from '@/lib/social/labels';
 import { postCommandAction, updatePostAction, type ComposerState } from '@/app/actions/posts';
 import { cancelApprovalRequestAction } from '@/app/actions/team';
+import { POST_STATUS_LABELS } from '@/lib/posts/labels';
+import { timezoneLabel } from '@/lib/scheduling/time';
+import { DateTime } from 'luxon';
 
 const statusTone = {
   DRAFT: 'outline',
@@ -21,6 +25,20 @@ const statusTone = {
   FAILED: 'coral',
   CANCELLED: 'outline',
 } as const;
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string; postId: string }>;
+}) {
+  const { slug, postId } = await params;
+  const ctx = await requireWorkspace(slug, 'post:view');
+  const post = await db.post.findFirst({
+    where: { id: postId, workspaceId: ctx.workspace.id },
+    select: { title: true },
+  });
+  return { title: post?.title?.trim() || 'Post' };
+}
 
 export default async function EditComposePage({
   params,
@@ -44,7 +62,7 @@ export default async function EditComposePage({
     return updatePostAction(slug, postId, state, formData);
   }
   const scheduledLabel = data.initial?.scheduledAt
-    ? data.initial.scheduledAt.replace('T', ' ')
+    ? DateTime.fromISO(data.initial.scheduledAt, { zone: data.timezone }).toFormat('ccc d LLL yyyy, HH:mm')
     : 'Not scheduled';
 
   return (
@@ -54,7 +72,7 @@ export default async function EditComposePage({
           <p className="b88-eyebrow">Composer</p>
           <h1 className="b88-page-title mt-3">Edit post</h1>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Badge tone={statusTone[data.post.status]}>{data.post.status.toLowerCase().replace('_', ' ')}</Badge>
+            <Badge tone={statusTone[data.post.status]}>{POST_STATUS_LABELS[data.post.status]}</Badge>
             <span className="b88-caption">{scheduledLabel}</span>
           </div>
         </div>
@@ -166,7 +184,7 @@ function PostCommands({
       )}
       {actions.includes('reschedule') && canSchedule && (
         <form action={async (formData: FormData) => { 'use server'; await postCommandAction(slug, postId, 'reschedule', formData); }} className="flex items-center gap-2">
-          <input type="datetime-local" name="scheduledAt" className="b88-filter-control w-auto" aria-label={`Reschedule (${timezone})`} />
+          <input type="datetime-local" name="scheduledAt" className="b88-filter-control w-auto" aria-label={`Reschedule (${timezoneLabel(timezone)})`} />
           <PendingButton type="submit" variant="secondary" pendingLabel="Rescheduling">Reschedule</PendingButton>
         </form>
       )}

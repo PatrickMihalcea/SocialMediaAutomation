@@ -95,16 +95,26 @@ export function assertCan(ctx: WorkspaceContext, capability: Capability): void {
 }
 
 /** Workspaces the current user belongs to, for the switcher. */
-export async function listMyWorkspaces() {
+export const listMyWorkspaces = cache(async () => {
   const user = await getCurrentUser();
   if (!user) return [];
   const memberships = await db.workspaceMember.findMany({
     where: { userId: user.id },
-    include: { workspace: true },
+    select: {
+      role: true,
+      workspace: {
+        select: {
+          id: true,
+          slug: true,
+          name: true,
+          onboardedAt: true,
+        },
+      },
+    },
     orderBy: { createdAt: 'asc' },
   });
   return memberships.map((m) => ({ ...m.workspace, role: m.role }));
-}
+});
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (v: string) => UUID_RE.test(v);

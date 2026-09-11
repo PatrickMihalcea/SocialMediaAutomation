@@ -17,6 +17,7 @@ import {
   renameTagAction, retryMediaAction, updateFolderAction, updateMediaDetailsAction,
   uploadMediaAction,
 } from '@/app/actions/media';
+import { MEDIA_KIND_LABELS, MEDIA_STATUS_LABELS, MEDIA_TYPE_LABELS } from '@/lib/media/labels';
 
 export interface MediaLibraryAsset {
   id: string;
@@ -237,7 +238,7 @@ export function MediaLibrary({
           <section className="b88-card p-4">
             <p className="b88-caption">Tags</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {tags.map((tag) => <Badge key={tag.id} tone="outline">{tag.name}</Badge>)}
+              {tags.map((tag) => <Badge key={tag.id} tone="outline">{humanizeMachineValue(tag.name)}</Badge>)}
             </div>
             {canEdit && (
               <details className="mt-4">
@@ -255,10 +256,10 @@ export function MediaLibrary({
                     <form
                       action={deleteTagAction.bind(null, slug, tag.id)}
                       onSubmit={(event) => {
-                        if (!window.confirm(`Delete tag ${tag.name}? Assets will be retained.`)) event.preventDefault();
+                        if (!window.confirm(`Delete tag ${humanizeMachineValue(tag.name)}? Assets will be retained.`)) event.preventDefault();
                       }}
                     >
-                      <IconButton type="submit" icon={Trash2} label={`Delete tag ${tag.name}`} />
+                      <IconButton type="submit" icon={Trash2} label={`Delete tag ${humanizeMachineValue(tag.name)}`} />
                     </form>
                   </div>
                 ))}
@@ -295,11 +296,7 @@ export function MediaLibrary({
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-soft p-3">
                   <div className="min-w-0">
                     <p className="font-[480]">{queuedFiles.length === 1 ? humanizeMachineValue(queuedFiles[0].name) : `${queuedFiles.length} files selected`}</p>
-                    <p className="b88-caption mt-1">
-                      {uploading
-                        ? 'Uploading now. Active uploads cannot be canceled; keep this page open until the upload finishes.'
-                        : 'Review the selection before upload.'}
-                    </p>
+                    {uploading && <p className="b88-caption mt-1">Keep this page open until the upload finishes.</p>}
                   </div>
                   <div className="flex gap-2">
                     {!uploading && <Button type="button" variant="tertiary" onClick={clearStagedFiles}>Cancel</Button>}
@@ -348,7 +345,7 @@ export function MediaLibrary({
                       <span className="min-w-0 self-center">
                         <span className="block truncate text-sm font-[540]">{displayName}</span>
                         <Badge tone={asset.status === 'READY' ? 'mint' : asset.status === 'FAILED' ? 'coral' : 'cream'}>
-                          {humanizeMachineValue(asset.status)}
+                          {MEDIA_STATUS_LABELS[asset.status]}
                         </Badge>
                         <span className="b88-caption mt-2 block">
                           {asset.usageCount} {asset.usageCount === 1 ? 'post' : 'posts'} · {asset.sizeLabel}
@@ -375,10 +372,10 @@ export function MediaLibrary({
                     <AssetPreview asset={asset} />
                     <div className="mt-4 flex items-start justify-between gap-2">
                       <p className="min-w-0 truncate font-[480]">{displayName}</p>
-                      <Badge tone={asset.status === 'READY' ? 'mint' : asset.status === 'FAILED' ? 'coral' : 'cream'}>{humanizeMachineValue(asset.status)}</Badge>
+                      <Badge tone={asset.status === 'READY' ? 'mint' : asset.status === 'FAILED' ? 'coral' : 'cream'}>{MEDIA_STATUS_LABELS[asset.status]}</Badge>
                     </div>
                     <div className="mt-2 hidden flex-wrap gap-2 sm:flex">
-                      <Badge tone="outline">{humanizeMachineValue(asset.assetKind)}</Badge>
+                      <Badge tone="outline">{MEDIA_KIND_LABELS[asset.assetKind]}</Badge>
                       {asset.id === createdDerivativeId && <Badge tone="ink">New derivative</Badge>}
                       {asset.usageCount > 0 && <Badge tone="ink">Post attachment</Badge>}
                     </div>
@@ -386,7 +383,7 @@ export function MediaLibrary({
                   </button>
                   {asset.status === 'FAILED' && (
                     <div className="mt-4 border-t border-hairline pt-4">
-                      <p className="break-words text-sm font-[480]">{asset.errorMessage}</p>
+                      <p className="break-words text-sm font-[480]">This asset could not be prepared. Try processing it again or remove it from the library.</p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         {canEdit && <Button type="button" variant="secondary" disabled={pending} onClick={() => runRetry(asset.id)}>Retry</Button>}
                         {canDelete && <Button type="button" variant="tertiary" disabled={pending} onClick={() => runDelete(asset)}><Trash2 size={15} /> Remove</Button>}
@@ -414,9 +411,7 @@ export function MediaLibrary({
             </>
           ) : (
             <div className="mt-6">
-              <EmptyState eyebrow="No matching assets" title="The library is clear">
-                Upload files above, or pick another folder to see what is already stored.
-              </EmptyState>
+              <EmptyState eyebrow="No matching assets" title="The library is clear" />
             </div>
           )}
         </main>
@@ -462,7 +457,7 @@ function AssetPreview({ asset }: { asset: MediaLibraryAsset }) {
       type={asset.previewUrl ? 'image' : placeholderType}
       src={asset.previewUrl || null}
       alt={asset.altText ?? ''}
-      label={humanizeMachineValue(asset.type)}
+      label={MEDIA_TYPE_LABELS[asset.type]}
       showAltWarning={asset.type !== 'AUDIO'}
     />
   );
@@ -548,9 +543,9 @@ function PreviewDrawer({ asset, displayName, slug, canEdit, canDelete, pending, 
               : <AssetPreview asset={asset} />}
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Badge tone="outline">{humanizeMachineValue(asset.assetKind)}</Badge>
+          <Badge tone="outline">{MEDIA_KIND_LABELS[asset.assetKind]}</Badge>
           {asset.usageCount > 0 && <Badge tone="ink">Post attachment</Badge>}
-          <span className="b88-caption">{asset.mimeType} · {asset.sizeLabel}</span>
+          <span className="b88-caption">{MEDIA_TYPE_LABELS[asset.type]} · {asset.sizeLabel}</span>
         </div>
         <div className="mt-6 flex flex-wrap gap-2">
           <Button type="button" variant="secondary" onClick={() => downloadAsset(asset)}><Download size={15} /> Download</Button>
@@ -591,7 +586,7 @@ function PreviewDrawer({ asset, displayName, slug, canEdit, canDelete, pending, 
               {asset.usages.map((usage) => (
                 <Link key={usage.id} href={`/w/${slug}/posts/${usage.id}`} className="flex min-h-10 items-center justify-between gap-3 rounded-md bg-surface-soft px-3 text-sm transition-opacity hover:opacity-80">
                   <span className="min-w-0 truncate">{usage.title}</span>
-                  <span className="b88-caption shrink-0">{humanizeMachineValue(usage.status)} · {humanizeMachineValue(usage.platform)}</span>
+                  <span className="b88-caption shrink-0">{usageStatusLabel(usage.status)} · {humanizeMachineValue(usage.platform)}</span>
                 </Link>
               ))}
               <p className="text-sm">Remove or replace this attachment in every post before deleting the library asset. Published posts on external platforms are not changed by library edits.</p>
@@ -603,7 +598,7 @@ function PreviewDrawer({ asset, displayName, slug, canEdit, canDelete, pending, 
 
         {asset.status === 'FAILED' && (
           <StatusMessage className="mt-6" tone="error">
-            <span className="font-[480]">Processing failed.</span> {asset.errorMessage}
+            <span className="font-[480]">Processing failed.</span> This asset could not be prepared. Try processing it again or remove it from the library.
             {canEdit && <span className="mt-3 block"><Button type="button" variant="secondary" disabled={pending} onClick={onRetry}>Retry processing</Button></span>}
           </StatusMessage>
         )}
@@ -729,4 +724,18 @@ function errorMessage(error: unknown, fallback: string) {
 function formatDuration(seconds: number) {
   const whole = Math.max(0, Math.round(seconds));
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+}
+
+function usageStatusLabel(status: string) {
+  return {
+    DRAFT: 'Draft',
+    REJECTED: 'Rejected',
+    PENDING_APPROVAL: 'In review',
+    APPROVED: 'Approved',
+    SCHEDULED: 'Scheduled',
+    PUBLISHING: 'Publishing',
+    PUBLISHED: 'Published',
+    FAILED: 'Failed',
+    CANCELLED: 'Cancelled',
+  }[status] ?? 'Post';
 }

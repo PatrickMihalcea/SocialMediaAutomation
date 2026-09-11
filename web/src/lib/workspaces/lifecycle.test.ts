@@ -45,10 +45,10 @@ describe('workspace lifecycle', () => {
 
   it('explains timezone changes without implying stored publication instants moved', () => {
     expect(timezoneChangeNotice('Europe/Bucharest', 0)).toBe(
-      'Calendar and future scheduling now use Europe/Bucharest.',
+      'Calendar and future scheduling now use Eastern European Time (Bucharest).',
     );
     expect(timezoneChangeNotice('Europe/Bucharest', 2)).toBe(
-      '2 existing publication instants remain unchanged; calendar times now display in Europe/Bucharest.',
+      '2 existing publication instants remain unchanged; calendar times now display in Eastern European Time (Bucharest).',
     );
   });
 

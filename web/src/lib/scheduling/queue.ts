@@ -62,17 +62,19 @@ export async function listSlots(workspaceId: string, limit = 40): Promise<Slot[]
 }
 
 async function listSlotsWithClient(client: QueueDb, workspaceId: string, limit: number): Promise<Slot[]> {
-  const workspace = await client.workspace.findUniqueOrThrow({
-    where: { id: workspaceId },
-    select: { timezone: true },
-  });
-  const rules = await client.schedulingRule.findMany({
-    where: { workspaceId, enabled: true },
-    orderBy: [{ weekday: 'asc' }, { hour: 'asc' }, { minute: 'asc' }],
-  });
+  const [workspace, rules, occupied] = await Promise.all([
+    client.workspace.findUniqueOrThrow({
+      where: { id: workspaceId },
+      select: { timezone: true },
+    }),
+    client.schedulingRule.findMany({
+      where: { workspaceId, enabled: true },
+      orderBy: [{ weekday: 'asc' }, { hour: 'asc' }, { minute: 'asc' }],
+    }),
+    occupiedInstants(client, workspaceId),
+  ]);
   if (rules.length === 0) return [];
 
-  const occupied = await occupiedInstants(client, workspaceId);
   const slots: Slot[] = [];
   const horizon = Date.now() + HORIZON_DAYS * 24 * 60 * 60 * 1000;
   let cursor = new Date();

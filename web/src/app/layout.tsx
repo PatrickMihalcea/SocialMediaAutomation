@@ -15,9 +15,8 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const preference = session?.user?.id
     ? await db.user.findUnique({ where: { id: session.user.id }, select: { themePreference: true } })
     : null;
-  const theme = preference?.themePreference === 'SYSTEM'
-    ? undefined
-    : preference?.themePreference.toLowerCase();
+  // Rows may still hold the retired SYSTEM value; anything but DARK renders light.
+  const theme = preference?.themePreference === 'DARK' ? 'dark' : 'light';
   return (
     <html lang="en" data-theme={theme}>
       <body>

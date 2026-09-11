@@ -11,12 +11,14 @@ import {
   generateStudioImageAction,
   retryAiMediaJobAction,
 } from '@/app/actions/ai';
+import type { AiMediaJobKind, JobStatus } from '@prisma/client';
+import { AI_MEDIA_JOB_LABELS, JOB_STATUS_LABELS } from '@/lib/ai/labels';
 
 type Asset = { id: string; filename: string; type: string; url: string; generated: boolean };
 type Job = {
   id: string;
-  kind: string;
-  status: string;
+  kind: AiMediaJobKind;
+  status: JobStatus;
   error: string | null;
   prompt: string;
   outputAssetId: string | null;
@@ -29,11 +31,6 @@ const ACTIVE_STATUSES = ['QUEUED', 'RUNNING'];
 // Jobs finish in the worker, so the page has to ask the server again to see the
 // result. Four seconds is short enough to feel live and only runs while work is open.
 const POLL_MS = 4000;
-
-function sentenceCase(value: string) {
-  const words = value.replaceAll('_', ' ').toLowerCase();
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
 
 function statusTone(status: string) {
   if (status === 'COMPLETED') return 'lime' as const;
@@ -89,11 +86,11 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
   const activeJobs = jobs.filter((job) => ACTIVE_STATUSES.includes(job.status));
   const recentJobs = jobs.slice(0, 3);
   const selectedAsset = assets.find((asset) => asset.id === selected);
-  const firstAssets = assets.slice(0, 6);
+  const firstAssets = assets.slice(0, 4);
   const visibleAssets = showAllAssets || !selectedAsset || firstAssets.some((asset) => asset.id === selectedAsset.id)
     ? (showAllAssets ? assets : firstAssets)
-    : [selectedAsset, ...firstAssets.slice(0, 5)];
-  const visibleJobs = showAllJobs ? jobs : jobs.slice(0, 5);
+    : [selectedAsset, ...firstAssets.slice(0, 3)];
+  const visibleJobs = showAllJobs ? jobs : jobs.slice(0, 3);
 
   useEffect(() => {
     setAssets((current) => mergeLocalFirst(initialAssets, current, localAssetIds.current));
@@ -158,7 +155,7 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
         outputAssetId: null,
         createdAt: new Date().toISOString(),
       }, ...current]);
-      setNotice(`${humanizeMachineValue(kind)} queued. You can leave this page; processing continues on the server.`);
+      setNotice(`${AI_MEDIA_JOB_LABELS[kind]} queued. You can leave this page; processing continues on the server.`);
     }, 'The media job could not be queued.');
   }
 
@@ -214,7 +211,7 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
   const isPending = (action: Action) => pending.includes(action);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <StatusMessage tone="neutral">
         {simulated
           ? 'Demo mode is active. Image, video, and audio results are labelled fixtures, not real model output.'
@@ -272,10 +269,10 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
             <div className="mt-3 space-y-3" aria-live="polite">
               {recentJobs.map((job) => (
                 <div key={job.id} className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="text-sm font-[480]">{humanizeMachineValue(job.kind)}</span>
+                  <span className="text-sm font-[480]">{AI_MEDIA_JOB_LABELS[job.kind]}</span>
                   <span className="flex items-center gap-2">
                     {ACTIVE_STATUSES.includes(job.status) && <span className="b88-caption">{elapsed(job)}</span>}
-                    <Badge tone={statusTone(job.status)}>{sentenceCase(job.status)}</Badge>
+                    <Badge tone={statusTone(job.status)}>{JOB_STATUS_LABELS[job.status]}</Badge>
                   </span>
                 </div>
               ))}
@@ -304,12 +301,12 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
           </div>}
         </div>
         {assets.length ? (
-          <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-6 xl:grid-cols-3">
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
             {visibleAssets.map((asset) => (
-              <button key={asset.id} type="button" onClick={() => setSelected(asset.id)} className="relative rounded-[24px] border bg-canvas p-4 text-left transition-opacity hover:opacity-80" style={{ borderColor: selected === asset.id ? 'var(--ink)' : 'var(--hairline)' }}>
+              <button key={asset.id} type="button" onClick={() => setSelected(asset.id)} className="relative grid min-h-28 grid-cols-[80px_minmax(0,1fr)] items-center gap-3 rounded-lg border bg-canvas p-3 text-left transition-opacity hover:opacity-80 sm:block sm:rounded-[24px] sm:p-4" style={{ borderColor: selected === asset.id ? 'var(--ink)' : 'var(--hairline)' }}>
                 {selected === asset.id && <span className="absolute right-6 top-6 z-10 flex size-7 items-center justify-center rounded-full bg-ink text-canvas" aria-label="Selected"><Check size={16} /></span>}
                 {asset.type === 'IMAGE' ? (
-                  <img src={asset.url} alt={humanizeMachineValue(asset.filename)} className="aspect-square w-full rounded-md bg-surface-soft object-contain" />
+                  <img src={asset.url} alt={humanizeMachineValue(asset.filename)} className="size-20 rounded-md bg-surface-soft object-contain sm:aspect-square sm:size-auto sm:w-full" />
                 ) : asset.type === 'VIDEO' && !simulated ? (
                   <video src={asset.url} controls className="aspect-video w-full rounded-md bg-surface-soft object-contain" onClick={(event) => event.stopPropagation()} />
                 ) : asset.type === 'VIDEO' ? (
@@ -321,23 +318,21 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
                     <audio src={asset.url} controls className="w-full" />
                   </div>
                 )}
-                <p className="mt-4 truncate font-[480]">
+                <p className="min-w-0 truncate font-[480] sm:mt-4">
                   {humanizeMachineValue(asset.filename, {
                     sequence: assets.filter((entry, index) => index <= assets.indexOf(asset) && entry.filename === asset.filename).length,
                   })}
                 </p>
-                <p className="b88-caption mt-2">{asset.generated ? (simulated ? 'Simulated generation' : 'AI generated') : 'Source asset'}</p>
+                <p className="b88-caption col-start-2 mt-1 sm:mt-2">{asset.generated ? (simulated ? 'Simulated generation' : 'AI generated') : 'Source asset'}</p>
               </button>
             ))}
           </div>
         ) : (
           <div className="mt-6">
-            <EmptyState eyebrow="Nothing generated yet" title="Start from a creative brief">
-              Write the brief above and generate an image. Bridge88 keeps every asset here, ready to attach to a post.
-            </EmptyState>
+            <EmptyState eyebrow="Nothing generated yet" title="Start from a creative brief" />
           </div>
         )}
-        {assets.length > 6 && (
+        {assets.length > 4 && (
           <div className="mt-5 flex justify-center">
             <Button type="button" variant="secondary" onClick={() => setShowAllAssets((current) => !current)}>
               {showAllAssets ? 'Show fewer assets' : `View all ${assets.length} assets`}
@@ -352,8 +347,8 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
           {visibleJobs.map((job) => (
             <div key={job.id} className="py-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <span className="font-[480]">{humanizeMachineValue(job.kind)}</span>
-                <Badge tone={statusTone(job.status)}>{sentenceCase(job.status)}</Badge>
+                <span className="font-[480]">{AI_MEDIA_JOB_LABELS[job.kind]}</span>
+                <Badge tone={statusTone(job.status)}>{JOB_STATUS_LABELS[job.status]}</Badge>
               </div>
               <p className="mt-2 line-clamp-2 text-sm">{job.prompt}</p>
               {ACTIVE_STATUSES.includes(job.status) && (
@@ -367,7 +362,7 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
                   </Button>
                 </div>
               )}
-              {job.error && <p className="mt-2 text-sm">{job.error}</p>}
+              {job.error && <p className="mt-2 text-sm">The generation stopped before the media was ready. Review the brief and try again.</p>}
               {!ACTIVE_STATUSES.includes(job.status) && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {(job.status === 'FAILED' || job.status === 'CANCELLED') && (
@@ -384,27 +379,15 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
               )}
             </div>
           ))}
-          {!jobs.length && <p className="py-4">Video and audio jobs appear here after they are queued.</p>}
+          {!jobs.length && <p className="py-4">No generation jobs</p>}
         </div>
-        {jobs.length > 5 && (
+        {jobs.length > 3 && (
           <div className="mt-4 flex justify-center">
             <Button type="button" variant="secondary" onClick={() => setShowAllJobs((current) => !current)}>
               {showAllJobs ? 'Show recent jobs' : `View all ${jobs.length} jobs`}
             </Button>
           </div>
         )}
-      </section>
-
-      <section className="b88-card">
-        <p className="b88-eyebrow">Available in this build</p>
-        <h2 className="b88-heading mt-2">Generation scope</h2>
-        <p className="mt-3">
-          Image prompts, three image formats, AI image variation, Video from text,
-          image animation, and Spoken audio are connected. Advanced editing,
-          background and object removal, outpainting, upscaling, trimming, thumbnails,
-          captions, translation, dubbing, transcription, voice selection, and multi-result
-          batches are not implemented yet, so this studio does not present inactive controls for them.
-        </p>
       </section>
 
       <Dialog

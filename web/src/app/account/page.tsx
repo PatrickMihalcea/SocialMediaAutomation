@@ -1,10 +1,13 @@
 import Link from 'next/link';
-import { Button, Field, Select, StatusMessage } from '@/bridge88/components';
+import { Button, Field, StatusMessage } from '@/bridge88/components';
 import { requireUser, listMyWorkspaces } from '@/lib/auth/guard';
-import { deleteAccountAction, logoutAction, updateThemePreferenceAction } from '@/app/actions/auth';
+import { deleteAccountAction, logoutAction } from '@/app/actions/auth';
 import { ConfirmationButton, PendingButton } from '@/components/action-ui';
+import { ThemePreferenceControl } from '@/components/theme-preference-control';
 import { db } from '@/lib/db';
 import { PasswordForm, ProfileForm } from './account-forms';
+
+export const metadata = { title: 'Account' };
 
 export default async function AccountPage({
   searchParams,
@@ -53,15 +56,12 @@ export default async function AccountPage({
         <p className="text-sm">Email changes are not supported yet. Your workspace access remains tied to this address.</p>
       </section>
       <PasswordForm hasPassword={Boolean(credential?.passwordHash)} />
-      <form action={updateThemePreferenceAction} className="b88-card mt-8 space-y-4">
-        <div><h2 className="b88-heading">Appearance</h2><p className="mt-1 text-sm">Your theme follows you across devices and reloads.</p></div>
-        <Select name="themePreference" label="Theme" defaultValue={credential?.themePreference ?? 'SYSTEM'}>
-          <option value="SYSTEM">Use device setting</option>
-          <option value="LIGHT">Light</option>
-          <option value="DARK">Dark</option>
-        </Select>
-        <PendingButton type="submit" variant="secondary" pendingLabel="Saving theme">Save theme</PendingButton>
-      </form>
+      <section className="b88-card mt-8 space-y-4">
+        <h2 className="b88-heading">Appearance</h2>
+        <ThemePreferenceControl
+          initialPreference={credential?.themePreference === 'DARK' ? 'DARK' : 'LIGHT'}
+        />
+      </section>
       <section className="mt-8 rounded-lg bg-[var(--block-pink)] p-6">
         <p className="b88-caption">Danger zone</p><h2 className="b88-heading mt-2">Delete account</h2>
         <p className="mt-2">Transfer or delete every workspace you own first. Deletion removes your profile and workspace memberships, signs you out, and cannot be undone.</p>

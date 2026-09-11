@@ -1,12 +1,33 @@
+import { Suspense } from 'react';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { storage } from '@/lib/storage';
 import { formatBytes } from '@/lib/social/base';
+import { MediaPagePreview } from '@/components/page-previews';
 import { MediaFilters } from '@/components/media-filters';
 import { MediaLibrary } from '@/components/media-library';
 import { classifyMediaAsset, GENERATED_MEDIA_PRESETS } from '@/lib/media/classification';
 
-export default async function MediaPage({
+export const metadata = { title: 'Media' };
+
+export default function MediaPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ q?: string; type?: string; tag?: string; folder?: string; filter?: string; sort?: string }>;
+}) {
+  return (
+    <>
+      <div><p className="b88-eyebrow">Library</p><h1 className="b88-page-title mt-3">Media</h1></div>
+      <Suspense fallback={<MediaPagePreview />}>
+        <MediaData params={params} searchParams={searchParams} />
+      </Suspense>
+    </>
+  );
+}
+
+async function MediaData({
   params,
   searchParams,
 }: {
@@ -129,11 +150,7 @@ export default async function MediaPage({
   }));
 
   return (
-    <>
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div><p className="b88-eyebrow">Library</p><h1 className="b88-page-title mt-3">Media</h1></div>
-      </div>
-      <p className="mt-3 max-w-2xl">Originals are preserved. Edits create derivative assets, so a crop for Instagram never overwrites the source file.</p>
+    <div className="flow-root min-h-[680px]">
       <MediaFilters slug={slug} tags={tags} current={query} />
       <MediaLibrary
         slug={slug}
@@ -144,7 +161,7 @@ export default async function MediaPage({
         canDelete={ctx.can('media:delete')}
         currentFolder={query.folder ?? null}
       />
-    </>
+    </div>
   );
 }
 

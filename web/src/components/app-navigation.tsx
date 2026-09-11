@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link, { useLinkStatus } from 'next/link';
+import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Select } from '@/bridge88/components';
+import { Dropdown } from '@/bridge88/components';
 import {
   BarChart3,
   Bot,
@@ -64,14 +64,6 @@ const overflowItems = [
   ['Search', '/search', Search] as const,
 ] as const;
 
-// Pending feedback sits on the destination the user clicked, so the current page
-// stays readable instead of being replaced by a full-page loading state.
-function NavPendingDot() {
-  const { pending } = useLinkStatus();
-  if (!pending) return null;
-  return <span className="b88-spinner-inline shrink-0" aria-label="Loading" role="status" />;
-}
-
 export function AppNavigation({
   slug,
   workspaces,
@@ -84,6 +76,10 @@ export function AppNavigation({
   const [overflowOpen, setOverflowOpen] = useState(false);
   const root = `/w/${slug}`;
   const moreActive = overflowItems.some(([, path]) => pathname.startsWith(`${root}${path}`));
+  const workspaceOptions = workspaces.map((workspace) => ({
+    value: workspace.slug,
+    label: workspace.name,
+  }));
 
   useEffect(() => {
     if (!overflowOpen) return;
@@ -99,22 +95,30 @@ export function AppNavigation({
       <aside
         className="b88-desktop-sidebar fixed inset-y-0 left-0 z-30 flex w-[248px] flex-col border-r border-hairline bg-canvas p-4"
       >
-        <Link href={root} className="mb-6 px-4 py-2 text-xl font-[540]">Bridge88</Link>
-        <div className="mb-4 rounded-md bg-surface-soft p-4">
-          <Select
+        <Link href={root} prefetch className="mb-6 px-4 py-2 text-xl font-[540]">Bridge88</Link>
+        <div className="mb-3 border-b border-hairline-soft pb-3">
+          <Dropdown
             id="workspace-switcher"
             label="Workspace"
-            variant="pill"
             className="w-full font-[480]"
+            containerClassName="[&>.b88-label]:sr-only"
             value={slug}
-            onChange={(event) => router.push(`/w/${event.target.value}`)}
+            options={workspaceOptions}
+            onChange={(nextSlug) => router.push(`/w/${nextSlug}`)}
             aria-label="Switch workspace"
+          />
+          <Link
+            href="/w/new"
+            className="mt-2 flex min-h-10 items-center gap-2 rounded-pill px-3 text-sm transition-opacity hover:opacity-80"
           >
-            {workspaces.map((workspace) => <option key={workspace.slug} value={workspace.slug}>{workspace.name}</option>)}
-          </Select>
-          <Link href="/w/new" className="mt-2 inline-block text-sm">Create workspace</Link>
+            <Plus size={16} strokeWidth={1.75} aria-hidden="true" />
+            <span>Create workspace</span>
+          </Link>
         </div>
-        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+        {/* Scroll padding and proximity snapping keep rows whole: without them a
+            scrolled list rests mid-row against the block above, and the sliced
+            row reads as the switcher colliding with the navigation. */}
+        <nav className="min-h-0 flex-1 snap-y snap-proximity space-y-1 overflow-y-auto overscroll-contain py-1 scroll-py-1">
           {items.map(([label, path, Icon]) => {
             const href = `${root}${path}`;
             const active = path === '' ? pathname === root : pathname.startsWith(href);
@@ -122,17 +126,16 @@ export function AppNavigation({
               <Link
                 key={label}
                 href={href}
+                prefetch
                 aria-current={active ? 'page' : undefined}
-                className="flex items-center gap-3 rounded-pill px-4 py-3 text-sm transition-opacity hover:opacity-80"
+                className="flex snap-start items-center gap-3 rounded-pill px-4 py-3 text-sm transition-opacity hover:opacity-80"
                 style={active ? { background: 'var(--primary)', color: 'var(--on-primary)' } : undefined}
               >
                 <Icon size={17} strokeWidth={1.75} /> <span className="min-w-0 flex-1 truncate">{label}</span>
-                <NavPendingDot />
               </Link>
             );
           })}
         </nav>
-        <p className="b88-caption mt-auto px-4 py-2">Production queue · mock integrations</p>
       </aside>
 
       {overflowOpen && (
@@ -150,6 +153,27 @@ export function AppNavigation({
             onClick={(event) => event.stopPropagation()}
           >
             <p className="b88-eyebrow mb-4">More</p>
+            <div className="mb-4 border-b border-hairline-soft pb-4">
+              <Dropdown
+                id="mobile-workspace-switcher"
+                label="Workspace"
+                value={slug}
+                options={workspaceOptions}
+                onChange={(nextSlug) => {
+                  setOverflowOpen(false);
+                  router.push(`/w/${nextSlug}`);
+                }}
+                aria-label="Switch workspace"
+              />
+              <Link
+                href="/w/new"
+                onClick={() => setOverflowOpen(false)}
+                className="mt-2 flex min-h-11 items-center gap-2 rounded-pill px-3 text-sm transition-opacity hover:opacity-80"
+              >
+                <Plus size={16} strokeWidth={1.75} aria-hidden="true" />
+                <span>Create workspace</span>
+              </Link>
+            </div>
             <div className="grid grid-cols-2 gap-2">
               {overflowItems.map(([label, path, Icon]) => {
                 const href = `${root}${path}`;
@@ -158,6 +182,7 @@ export function AppNavigation({
                   <Link
                     key={label}
                     href={href}
+                    prefetch
                     onClick={() => setOverflowOpen(false)}
                     aria-current={active ? 'page' : undefined}
                     className="flex items-center gap-2 rounded-pill px-4 py-3 text-sm transition-opacity hover:opacity-80"
@@ -182,6 +207,7 @@ export function AppNavigation({
             <Link
               key={label}
               href={href}
+              prefetch
               aria-current={active ? 'page' : undefined}
               aria-label={label}
               className="flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-pill px-1 text-[10px] transition-opacity hover:opacity-80"

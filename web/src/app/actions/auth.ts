@@ -31,7 +31,7 @@ export type FormState = ActionState;
 export async function updateThemePreferenceAction(formData: FormData): Promise<void> {
   const { requireUser } = await import('@/lib/auth/guard');
   const user = await requireUser();
-  const themePreference = z.enum(['LIGHT', 'DARK', 'SYSTEM']).parse(formData.get('themePreference'));
+  const themePreference = z.enum(['LIGHT', 'DARK']).parse(formData.get('themePreference'));
   await db.user.update({ where: { id: user.id }, data: { themePreference } });
   revalidatePath('/', 'layout');
 }

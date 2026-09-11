@@ -26,7 +26,8 @@ import {
   isPostActionLegal,
   type ComposerIntent,
 } from '@/lib/posts/lifecycle';
-import { formatInZone, localInputToUtc } from '@/lib/scheduling/time';
+import { POST_STATUS_LABELS } from '@/lib/posts/labels';
+import { formatInZone, localInputToUtc, timezoneLabel } from '@/lib/scheduling/time';
 import { enqueue } from '@/lib/queue';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
 import { PLATFORM_LABELS } from '@/lib/social/labels';
@@ -95,7 +96,7 @@ async function persistPost(
     if (postId && !source) throw invalid('That post no longer exists.');
     if (source && !isComposerIntentLegal(source.status, intent)) {
       throw invalid(
-        `This post is ${source.status.toLowerCase().replaceAll('_', ' ')}. ${composerIntentLabel(intent)} is not available in this state. Refresh to see the current actions.`,
+        `This post is ${POST_STATUS_LABELS[source.status].toLowerCase()}. ${composerIntentLabel(intent)} is not available in this state. Refresh to see the current actions.`,
       );
     }
     if (intent === 'approval') assertCan(ctx, 'post:submit_for_approval');
@@ -113,7 +114,7 @@ async function persistPost(
     const scheduledLocal = String(formData.get('scheduledAt') || '');
     const status = composerTargetStatus(source?.status, intent);
     if (status === PostStatus.SCHEDULED && !scheduledLocal) {
-      throw invalid(`Pick a date and time (${ctx.workspace.timezone}) before scheduling.`);
+      throw invalid(`Pick a date and time (${timezoneLabel(ctx.workspace.timezone)}) before scheduling.`);
     }
     // Preserve a contextual calendar slot on drafts and approval submissions;
     // scheduling is still the only intent that requires the value.
@@ -258,7 +259,7 @@ export async function postCommandAction(
     }
     if (command === 'reschedule') {
       const local = String(formData?.get('scheduledAt') || '');
-      if (!local) throw invalid(`Pick a date and time (${ctx.workspace.timezone}) before rescheduling.`);
+      if (!local) throw invalid(`Pick a date and time (${timezoneLabel(ctx.workspace.timezone)}) before rescheduling.`);
       const scheduledAt = localInputToUtc(local, ctx.workspace.timezone);
       assertPostNotLive(post);
       if (scheduledAt.getTime() <= Date.now()) {

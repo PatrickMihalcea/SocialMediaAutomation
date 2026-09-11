@@ -184,7 +184,7 @@ export abstract class BaseAdapter implements SocialPlatformAdapter {
       issues.push({
         ...base,
         code: 'FILE_TOO_LARGE',
-        message: `"${item.filename}" is ${formatBytes(item.size)} — over the ${formatBytes(rules.maxBytes)} ${name} limit.`,
+        message: `This asset is ${formatBytes(item.size)} — over the ${formatBytes(rules.maxBytes)} ${name} limit.`,
       });
     }
     if (item.width && item.height) {
@@ -192,21 +192,21 @@ export abstract class BaseAdapter implements SocialPlatformAdapter {
         issues.push({
           ...base,
           code: 'TOO_NARROW',
-          message: `"${item.filename}" is ${item.width}px wide. ${name} needs at least ${rules.minWidth}px.`,
+          message: `This asset is ${item.width}px wide. ${name} needs at least ${rules.minWidth}px.`,
         });
       }
       if (rules.minHeight && item.height < rules.minHeight) {
         issues.push({
           ...base,
           code: 'TOO_SHORT',
-          message: `"${item.filename}" is ${item.height}px tall. ${name} needs at least ${rules.minHeight}px.`,
+          message: `This asset is ${item.height}px tall. ${name} needs at least ${rules.minHeight}px.`,
         });
       }
       if (rules.maxWidth && item.width > rules.maxWidth) {
         issues.push({
           ...base,
           code: 'TOO_WIDE',
-          message: `"${item.filename}" is ${item.width}px wide. ${name} allows up to ${rules.maxWidth}px.`,
+          message: `This asset is ${item.width}px wide. ${name} allows up to ${rules.maxWidth}px.`,
         });
       }
       if (rules.aspectRatio) {
@@ -216,7 +216,7 @@ export abstract class BaseAdapter implements SocialPlatformAdapter {
           issues.push({
             ...base,
             code: 'ASPECT_RATIO',
-            message: `"${item.filename}" is ${ratio.toFixed(2)}:1. ${name} needs a ratio between ${min}:1 and ${max}:1 — crop it in the editor.`,
+            message: `This asset has a ${ratio.toFixed(2)}:1 ratio. ${name} needs a ratio between ${min}:1 and ${max}:1 — crop it in the editor.`,
           });
         }
       }

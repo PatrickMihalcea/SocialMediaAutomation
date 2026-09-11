@@ -1,13 +1,27 @@
+import { Suspense } from 'react';
 import { Button } from '@/bridge88/components';
+import { QueuePagePreview } from '@/components/page-previews';
 import { QueueManager } from '@/components/queue-manager';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { listSlots } from '@/lib/scheduling/queue';
 import type { RecurrenceTemplate } from '@/lib/scheduling/recurrence';
-import { formatInZone } from '@/lib/scheduling/time';
+import { formatInZone, timezoneLabel } from '@/lib/scheduling/time';
 import { PLATFORM_LABELS } from '@/lib/social/registry';
 
-export default async function QueuePage({ params }: { params: Promise<{ slug: string }> }) {
+export const metadata = { title: 'Queue' };
+
+export default function QueuePage({ params }: { params: Promise<{ slug: string }> }) {
+  return (
+    <>
+      <div><p className="b88-eyebrow">Queue</p><h1 className="b88-page-title mt-3">Smart publishing queue</h1></div>
+      <Suspense fallback={<QueuePagePreview />}>
+        <QueueData params={params} />
+      </Suspense>
+    </>
+  );
+}
+async function QueueData({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const ctx = await requireWorkspace(slug, 'post:view');
   const [rules, items, skippedItems, drafts, slots, recurrences, accounts, campaigns] = await Promise.all([
@@ -34,9 +48,9 @@ export default async function QueuePage({ params }: { params: Promise<{ slug: st
   const nextSlot = slots.find((slot) => !slot.taken)?.at.toISOString() ?? null;
 
   return (
-    <>
+    <div className="mt-6 min-h-[680px]">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div><p className="b88-eyebrow">Queue · {ctx.workspace.timezone}</p><h1 className="b88-page-title mt-3">Smart publishing queue</h1></div>
+        <p className="b88-caption">Queue · {timezoneLabel(ctx.workspace.timezone)}</p>
         <Button href={`/w/${slug}/compose`}>Create post</Button>
       </div>
       <QueueManager
@@ -76,6 +90,6 @@ export default async function QueuePage({ params }: { params: Promise<{ slug: st
         campaigns={campaigns.map((campaign) => ({ value: campaign.id, label: campaign.name }))}
         canManage={ctx.can('schedule:manage')}
       />
-    </>
+    </div>
   );
 }

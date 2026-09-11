@@ -6,6 +6,8 @@ import { PendingButton } from '@/components/action-ui';
 import { COMMON_TIMEZONES } from '@/lib/scheduling/time';
 import { requireUser } from '@/lib/auth/guard';
 
+export const metadata = { title: 'New workspace' };
+
 export default async function NewWorkspacePage() {
   await requireUser();
   return (
@@ -13,8 +15,7 @@ export default async function NewWorkspacePage() {
       <Link href="/w" className="text-xl font-[540]">Bridge88</Link>
       <p className="b88-eyebrow mt-14">New workspace</p>
       <h1 className="b88-page-title mt-3">Create another workspace.</h1>
-      <p className="mt-3">Each workspace keeps its channels, posts, members, and brand voice isolated.</p>
-      <ActionForm action={createWorkspaceAction} className="b88-card mt-8 grid gap-5" encType="multipart/form-data">
+      <ActionForm action={createWorkspaceAction} className="b88-card mt-8 grid gap-5">
         <Field name="name" label="Workspace name" required />
         <Field name="website" label="Website" type="url" placeholder="https://" />
         <TextArea name="description" label="What does the business do?" rows={4} required />

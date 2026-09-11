@@ -5,15 +5,13 @@ import { StatusGlyph } from '@/components/visuals';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { PLATFORM_LABELS } from '@/lib/social/registry';
-import { formatInZone } from '@/lib/scheduling/time';
+import { formatInZone, timezoneLabel } from '@/lib/scheduling/time';
 import type { Prisma } from '@prisma/client';
+import { POST_STATUS_LABELS } from '@/lib/posts/labels';
 
 const PAGE_SIZE = 30;
 
-function statusLabel(status: string) {
-  const words = status.toLowerCase().replaceAll('_', ' ');
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
+export const metadata = { title: 'Drafts' };
 
 export default async function DraftsPage({
   params,
@@ -56,15 +54,11 @@ export default async function DraftsPage({
     <>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="b88-eyebrow">Posts · {ctx.workspace.timezone}</p>
+          <p className="b88-eyebrow">Posts · {timezoneLabel(ctx.workspace.timezone)}</p>
           <h1 className="b88-page-title mt-3">Drafts</h1>
         </div>
         <Button href={`/w/${slug}/compose`}>Create post</Button>
       </div>
-      <p className="mt-4 max-w-2xl">
-        Posts saved without a publishing time. Give one a time to move it onto the calendar, or add it to the
-        queue to publish it in the next open slot.
-      </p>
 
       {drafts.length ? (
         <section className="b88-card mt-8">
@@ -105,7 +99,7 @@ export default async function DraftsPage({
                 </Link>
                 {post.queueItem && <Badge tone="lilac">Queued</Badge>}
                 <Badge tone={post.status === 'PENDING_APPROVAL' ? 'cream' : post.status === 'APPROVED' ? 'mint' : 'outline'}>
-                  {statusLabel(post.status)}
+                  {POST_STATUS_LABELS[post.status]}
                 </Badge>
               </article>
             );
@@ -128,9 +122,7 @@ export default async function DraftsPage({
             eyebrow="No drafts"
             title="Nothing waiting to be scheduled"
             action={<Button href={`/w/${slug}/compose`}>Create post</Button>}
-          >
-            Posts you save without a publishing time collect here.
-          </EmptyState>
+          />
         </div>
       )}
     </>

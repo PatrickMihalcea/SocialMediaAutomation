@@ -1,6 +1,6 @@
 # Bridge88 components — API reference
 
-32 components. Each is a named export from `components/<group>/<Name>.js` (JSX inside `.js`, which Vite/Next/CRA all handle). Types are listed here rather than as `.d.ts` files — paste them into your own types if you want them.
+33 components. Each is a named export from `components/<group>/<Name>.js` (JSX inside `.js`, which Vite/Next/CRA all handle). Types are listed here rather than as `.d.ts` files — paste them into your own types if you want them.
 
 
 ## buttons
@@ -75,6 +75,24 @@ export interface IconButtonProps extends React.HTMLAttributes<HTMLButtonElement>
 export function IconButton(props: IconButtonProps): JSX.Element;
 ```
 
+### Selection bar
+`className="b88-selection-bar"`
+
+One-line: a viewport-pinned action group for bulk operations and persistent form actions.
+
+```jsx
+<div className="b88-selection-bar-reserve">
+  <div className="b88-selection-bar" role="region" aria-label="Post actions">
+    <Button variant="secondary">Save draft</Button>
+    <Button variant="primary">Publish now</Button>
+  </div>
+</div>
+```
+
+- Actions keep their standard 40px button geometry and wrap to additional rows when they do not fit.
+- The bar never scrolls horizontally; every action remains visible and directly clickable.
+- Use `b88-selection-bar-reserve` around a form-ending bar so its one-row desktop and two-row compact layouts do not cover the final field.
+
 ## forms
 
 ### Checkbox
@@ -147,10 +165,13 @@ One-line: pill tab toggle — use whenever a view switches between 2–5 named s
 
 ```jsx
 <SegmentedTabs items={['Starter','Team','Business','Enterprise']} value={plan} onChange={setPlan} />
+<SegmentedTabs variant="setting" aria-label="Theme" items={['Light','Dark']} value={theme} onChange={setTheme} />
 ```
 
 - Selected tab is the black primary surface; unselected is transparent with ink text. Never colour the selected tab.
 - Scrolls horizontally rather than wrapping below 560px.
+- `variant="setting"` adds the hairline border, `--surface-soft` background and 4px pill inset used when the control changes a persisted setting rather than switching a view.
+- Standard `div` attributes are forwarded to the tablist, including `aria-label`, `aria-busy`, `className`, `id`, and `style`.
 - Uses the ARIA tabs keyboard pattern: one tab stop, arrow keys move and select,
   and Home/End jump to the first/last item.
 
@@ -162,10 +183,11 @@ import * as React from 'react';
  * channel filters, billing period toggles.
  * @startingPoint section="Core" subtitle="Pill tab toggle — selected = primary surface" viewport="700x120"
  */
-export interface SegmentedTabsProps extends React.HTMLAttributes<HTMLDivElement> {
+export interface SegmentedTabsProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange'> {
   items: string[];
   value?: string;
   onChange?: (item: string) => void;
+  variant?: 'plain' | 'setting';
   style?: React.CSSProperties;
 }
 export function SegmentedTabs(props: SegmentedTabsProps): JSX.Element;
@@ -195,6 +217,52 @@ export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElemen
   style?: React.CSSProperties;
 }
 export function Select(props: SelectProps): JSX.Element;
+```
+
+### Dropdown
+`import { Dropdown } from '@/bridge88/components';`
+
+One-line: custom-rendered single-select for application chrome where the open menu must carry the Bridge88 design language.
+
+```jsx
+<Dropdown
+  label="Workspace"
+  value="northwind"
+  options={[
+    { value: 'northwind', label: 'Northwind studio' },
+    { value: 'kettle', label: 'Kettle & Co' },
+  ]}
+  onChange={setWorkspace}
+/>
+```
+
+- Use `Select` for forms and `Dropdown` for persistent product chrome such as workspace or account switchers.
+- The 48px trigger and open menu use 8px field corners and hairline borders. Opening darkens the trigger border to ink; the chevron never rotates.
+- Selection inside the menu is the `AssetTile` idiom — a 1px ink outline plus a check glyph — not the primary surface, which stays reserved for the active `SidebarNav` row so a menu opening over the sidebar cannot show two identical black pills. The soft fill marks the active (hovered or arrowed) row.
+- The panel carries `--elevation-2`, the documented soft lift for floating menus. It never uses `--scrim-modal`, which belongs to `Dialog` alone.
+- The listbox opens in a fixed-position portal aligned to the trigger's left edge and width, flips above when needed, and stays inside the viewport.
+- Enter, Space, or an arrow opens; arrows, Home/End, typeahead, Enter, Escape, and Tab follow the single-select listbox pattern.
+
+```ts
+export interface DropdownOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+export interface DropdownProps {
+  label: string;
+  options: DropdownOption[];
+  value?: string;
+  defaultValue?: string;
+  onChange?: (value: string) => void;
+  id?: string;
+  className?: string;
+  containerClassName?: string;
+  disabled?: boolean;
+  'aria-label'?: string;
+}
+export function Dropdown(props: DropdownProps): JSX.Element;
 ```
 
 ### Switch
@@ -770,6 +838,20 @@ export interface EmptyStateProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 export function EmptyState(props: EmptyStateProps): JSX.Element;
 ```
+
+### Shimmer
+`import { Shimmer, PagePreview } from '@/bridge88/preview';`
+
+One-line: the grey gradient sweep that stands in for content that has not arrived yet.
+
+```jsx
+<PagePreview label="Loading media">
+  <Shimmer className="aspect-square w-full" radius="8px" />
+</PagePreview>
+```
+
+- Use the shape of the real asset — square tiles, calendar cells, table rows — not a spinner.
+- Lives in a server-safe module so route `loading.tsx` files can import it.
 
 ## media
 

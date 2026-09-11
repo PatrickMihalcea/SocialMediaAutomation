@@ -20,19 +20,20 @@ export function DemoChannelConnectForm({
   label: string;
 }) {
   const [state, submit] = useActionState(
-    connectDemoChannelAction.bind(null, slug),
+    connectDemoChannelAction,
     INITIAL_STATE,
   );
 
   return (
     <form action={submit}>
+      <input type="hidden" name="slug" value={slug} />
       <input type="hidden" name="platform" value={platform} />
       {state.error && (
         <StatusMessage tone="error" className="mt-4">
           <p>{state.error}</p>
           {state.billingHref && (
             <Button href={state.billingHref} variant="secondary" className="mt-3">
-              Open Billing
+              Open billing
             </Button>
           )}
         </StatusMessage>

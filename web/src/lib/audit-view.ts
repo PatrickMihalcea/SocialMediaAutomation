@@ -188,12 +188,13 @@ function friendlyError(value: unknown): string {
   const known: Record<string, string> = {
     UNKNOWN: 'The publishing service did not provide an error reason.',
     TOKEN_EXPIRED: 'The social account needs to be reconnected.',
+    NEEDS_REAUTH: 'The social account needs to be reconnected.',
+    AUTH: 'The social account needs to be reconnected.',
     RATE_LIMITED: 'The social network temporarily limited publishing.',
     VALIDATION_FAILED: 'The post did not meet the social network’s publishing requirements.',
   };
   if (known[value]) return known[value];
-  const words = value.replace(/[_\-.]+/g, ' ').trim().toLowerCase();
-  return `${words.charAt(0).toUpperCase()}${words.slice(1)}.`;
+  return 'The publishing service did not provide a user-facing error reason.';
 }
 
 export function historyTypeLabel(entityType: string): string {

@@ -1,6 +1,8 @@
 import { googleEnabled } from '@/auth';
 import { SignUpForm } from '../auth-form';
 
+export const metadata = { title: 'Create account' };
+
 export default async function SignUpPage({
   searchParams,
 }: {

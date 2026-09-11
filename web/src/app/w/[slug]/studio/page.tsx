@@ -4,6 +4,8 @@ import { db } from '@/lib/db';
 import { storage } from '@/lib/storage';
 import { env } from '@/lib/env';
 
+export const metadata = { title: 'AI studio' };
+
 export default async function StudioPage({
   params,
   searchParams,
@@ -71,7 +73,6 @@ export default async function StudioPage({
       <div className="mb-8">
         <p className="b88-eyebrow">AI studio</p>
         <h1 className="b88-page-title mt-3">Generate media</h1>
-        <p className="mt-3 max-w-2xl">Create attach-ready images, or queue video and audio work for the generation worker.</p>
       </div>
       <AiStudio
         slug={slug}

@@ -39,6 +39,7 @@ import {
   writeStoredDraft,
 } from '@/lib/posts/composer';
 import { legalPostActions } from '@/lib/posts/lifecycle';
+import { timezoneLabel } from '@/lib/scheduling/time';
 
 type ComposerFormProps = {
   slug: string;
@@ -154,6 +155,7 @@ export function ComposerForm({
   const readOnly = !lifecycleActions.includes('edit');
   const selectedAccounts = accounts.filter((account) => draft.selectedAccountIds.includes(account.id));
   const demoMode = selectedAccounts.some((account) => account.isDemo);
+  const displayTimezone = timezoneLabel(timezone);
 
   function updateDraft(patch: Partial<ComposerDraft>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -353,6 +355,12 @@ export function ComposerForm({
 
   const accountErrors = fieldErrors[activeAccount.id] ?? [];
   const isPendingApproval = postStatus === 'PENDING_APPROVAL';
+  const showSaveAction = lifecycleActions.includes('edit');
+  const showPublishAction = canPublish && lifecycleActions.includes('publish') && !isPendingApproval;
+  const showScheduleAction = canSchedule
+    && (lifecycleActions.includes('schedule') || lifecycleActions.includes('reschedule'));
+  const showApprovalAction = canSubmitForApproval && lifecycleActions.includes('submitForApproval');
+  const hasPostActions = showSaveAction || showPublishAction || showScheduleAction || showApprovalAction;
   return (
     <>
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)]">
@@ -367,13 +375,11 @@ export function ComposerForm({
             This post is publishing and cannot be edited right now.
           </StatusMessage>
         )}
-        <StatusMessage tone="neutral" className="mb-6">
-          Changes are recovered from this browser as you type. Use Save draft to keep the post in your workspace across devices and sign-ins.
-        </StatusMessage>
         {demoMode && (
-          <StatusMessage tone="neutral" className="mb-6">
-            Demo mode is active. Publish now simulates delivery and does not create a real platform post.
-          </StatusMessage>
+          <p className="mb-6 text-sm">
+            <span className="b88-caption mr-2">Demo mode</span>
+            Publishing is simulated; no platform post will be created.
+          </p>
         )}
         {state.error && (
           <div ref={errorSummaryRef} tabIndex={-1}>
@@ -406,8 +412,7 @@ export function ComposerForm({
 
           <div>
             <p className="b88-label">Publishing channels</p>
-            <p className="mb-3 text-sm">Choose every account that should receive its own editable version.</p>
-            <div className="grid gap-x-4 sm:grid-cols-2">
+            <div className="mt-3 grid gap-x-4 sm:grid-cols-2">
               {accounts.map((account) => {
                 const selected = draft.selectedAccountIds.includes(account.id);
                 const handle = account.accountHandle ?? account.accountName;
@@ -415,7 +420,6 @@ export function ComposerForm({
                   <Checkbox
                     key={account.id}
                     label={`${PLATFORM_LABELS[account.platform]} · ${handle}`}
-                    description={account.isDemo ? 'Simulated publishing' : undefined}
                     checked={selected}
                     disabled={readOnly || (selected && draft.selectedAccountIds.length === 1)}
                     onChange={(event) => toggleAccount(account.id, event.target.checked)}
@@ -551,9 +555,7 @@ export function ComposerForm({
               />
             </fieldset>
             {uploadError && <p role="alert" className="mt-3 text-sm text-[var(--accent-magenta)]">{uploadError}</p>}
-            <p className="mt-3 text-sm">
-              Select assets for this channel. Select an attached asset again to remove it.
-            </p>
+            <p className="mt-3 text-sm">Select an asset to add or remove it.</p>
             {replacement?.accountId === activeAccount.id && (
               <StatusMessage tone="neutral" className="mt-3">
                 Choose a different asset below. The replacement is not saved until you save the post.
@@ -688,32 +690,20 @@ export function ComposerForm({
           </div>
 
           <Field
-            label={`Schedule (${timezone})`}
+            label={`Schedule (${displayTimezone})`}
             type="datetime-local"
             value={draft.scheduledAt}
             onChange={(event) => updateDraft({ scheduledAt: event.target.value })}
-            hint="Required when scheduling. Times use your workspace timezone."
             disabled={readOnly}
           />
 
-          <div className="pb-16">
-            <p className="b88-label">What happens next?</p>
-            {contextDefaults?.defaultPostDestination && (
-              <p className="b88-caption mt-1">
-                Workspace default: {{
-                  DRAFT: 'Save as draft',
-                  QUEUE: 'Add to queue after saving',
-                  SCHEDULE: 'Schedule at the chosen time',
-                }[contextDefaults.defaultPostDestination]}
-              </p>
-            )}
-            <div
+          {(hasPostActions || isPendingApproval) && <div className={hasPostActions ? 'b88-selection-bar-reserve' : undefined}>
+            {hasPostActions && <div
               className="b88-selection-bar"
               role="region"
               aria-label="Post actions"
-              style={{ flexWrap: 'nowrap', justifyContent: 'flex-start', overflowX: 'auto' }}
             >
-              {lifecycleActions.includes('edit') && <PendingButton
+              {showSaveAction && <PendingButton
                 type="submit"
                 variant="secondary"
                 className="shrink-0 whitespace-nowrap"
@@ -724,7 +714,7 @@ export function ComposerForm({
                 <Save size={16} />
                 Save draft
               </PendingButton>}
-              {canPublish && lifecycleActions.includes('publish') && !isPendingApproval && (
+              {showPublishAction && (
                 <PendingButton
                   type="button"
                   variant="promo"
@@ -738,7 +728,7 @@ export function ComposerForm({
                   Publish now
                 </PendingButton>
               )}
-              {canSchedule && (lifecycleActions.includes('schedule') || lifecycleActions.includes('reschedule')) && (
+              {showScheduleAction && (
                 <PendingButton
                   type="button"
                   variant="secondary"
@@ -752,7 +742,7 @@ export function ComposerForm({
                   Schedule
                 </PendingButton>
               )}
-              {canSubmitForApproval && lifecycleActions.includes('submitForApproval') && (
+              {showApprovalAction && (
                 <PendingButton
                   type="button"
                   variant="secondary"
@@ -766,21 +756,18 @@ export function ComposerForm({
                   Submit for approval
                 </PendingButton>
               )}
-            </div>
+            </div>}
             {isPendingApproval && (
               <p className="b88-caption mt-3">
                 This post is awaiting approval. Save your changes or wait for a reviewer before publishing.
               </p>
             )}
-          </div>
+          </div>}
         </form>
       </section>
 
       <aside className="space-y-3 self-start">
         <ComposerPreview account={activeAccount} version={activeVersion} assets={libraryAssets} />
-        <p className="b88-caption">
-          Draft autosaved locally · {postId ? `Post ${postId.slice(0, 8)}` : 'New post'}
-        </p>
       </aside>
     </div>
     <Dialog

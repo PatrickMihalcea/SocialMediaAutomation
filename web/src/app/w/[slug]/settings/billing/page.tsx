@@ -9,13 +9,11 @@ import {
   nextMonthlyReset,
   PLAN_LIMITS,
 } from '@/lib/billing/limits';
+import { planLabel, subscriptionStatusLabel } from '@/lib/billing/labels';
 import { billingProvider } from '@/lib/billing/provider';
 import { BillingControls, PaymentDocuments } from './billing-controls';
 
-function sentenceCase(value: string) {
-  const words = value.replaceAll('_', ' ').toLowerCase();
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
+export const metadata = { title: 'Plan and usage' };
 
 export default async function BillingPage({
   params,
@@ -65,19 +63,15 @@ export default async function BillingPage({
         {limitNotice && <StatusMessage className="mb-5" tone="error">{limitNotice}</StatusMessage>}
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <Badge tone="ink">{sentenceCase(paidPlan)}</Badge>
+            <Badge tone="ink">{planLabel(paidPlan)}</Badge>
             <h2 className="b88-heading mt-4">Current plan</h2>
-            <p className="mt-2">Status: {sentenceCase(subscription?.status ?? 'ACTIVE')}</p>
+            <p className="mt-2">Status: {subscriptionStatusLabel(subscription?.status)}</p>
             {effectivePlan !== paidPlan && <p className="mt-2 text-sm">Free limits apply until the subscription is active again.</p>}
           </div>
           <div className="text-right text-sm">
             <p>{subscription?.cancelAtPeriodEnd ? `Access changes ${periodEndLabel}` : subscription?.currentPeriodEnd ? `Renews ${periodEndLabel}` : 'No payment renewal is scheduled'}</p>
-            <p className="mt-1">{billingProvider().kind === 'mock' ? 'Development billing simulator' : 'Secure provider billing'}</p>
           </div>
         </div>
-        <p className="mt-5 text-sm">
-          {socialAccounts} of {limits.socialAccounts} accounts · {scheduledPosts} of {limits.scheduledPosts?.toLocaleString() ?? 'unlimited'} scheduled posts · {aiGenerations.toLocaleString()} of {limits.aiGenerations.toLocaleString()} AI generations · {formatBytes(storageBytes)} of {formatBytes(limits.storageBytes)} storage
-        </p>
         <div className="mt-5">
           <BillingControls
             slug={slug}

@@ -1,16 +1,23 @@
+import { Suspense } from 'react';
 import Form from 'next/form';
 import Link from 'next/link';
 import { Badge, Button, EmptyState, Field, Select, StatusMessage } from '@/bridge88/components';
+import { humanizeMachineValue } from '@/bridge88/humanize';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import {
   buildAuditWhere,
   formatAuditTimestamp,
-  HISTORY_PAGE_SIZE,
   historyTypeLabel,
   humanizeAuditEvent,
   parseHistoryFilters,
 } from '@/lib/audit-view';
+import { HistoryPagePreview } from '@/components/page-previews';
+import { timezoneLabel } from '@/lib/scheduling/time';
+
+const PAGE_SIZE = 10;
+
+export const metadata = { title: 'History' };
 
 type SearchParams = {
   type?: string;
@@ -28,7 +35,25 @@ type EntityDestination = {
 
 const CONTROL_CLASS = 'b88-filter-control h-10 min-h-10';
 
-export default async function HistoryPage({
+export default function HistoryPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<SearchParams>;
+}) {
+  return (
+    <>
+      <p className="b88-eyebrow">Workspace activity</p>
+      <h1 className="b88-page-title mt-3">History</h1>
+      <Suspense fallback={<HistoryPagePreview />}>
+        <HistoryData params={params} searchParams={searchParams} />
+      </Suspense>
+    </>
+  );
+}
+
+async function HistoryData({
   params,
   searchParams,
 }: {
@@ -40,14 +65,12 @@ export default async function HistoryPage({
   const ctx = await requireWorkspace(slug, 'workspace:view');
   if (!ctx.can('post:update')) {
     return (
-      <>
-        <p className="b88-eyebrow">Workspace activity</p>
-        <h1 className="b88-page-title mt-3">History is not available for your role</h1>
+      <div className="min-h-[360px]">
         <StatusMessage tone="neutral" className="mt-6 max-w-2xl">
           Viewers can read workspace content, but audit history is limited to members who can edit posts.
         </StatusMessage>
         <Button href={`/w/${slug}`} variant="secondary" className="mt-5">Return to dashboard</Button>
-      </>
+      </div>
     );
   }
   const filters = parseHistoryFilters(raw, ctx.workspace.timezone);
@@ -72,14 +95,14 @@ export default async function HistoryPage({
     approvalIds.map(({ id }) => id),
   );
   const total = await db.auditLog.count({ where });
-  const totalPages = Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const page = Math.min(filters.page, totalPages);
   const audits = await db.auditLog.findMany({
     where,
     include: { user: { select: { name: true, email: true } } },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    skip: (page - 1) * HISTORY_PAGE_SIZE,
-    take: HISTORY_PAGE_SIZE,
+    skip: (page - 1) * PAGE_SIZE,
+    take: PAGE_SIZE,
   });
 
   const destinations = await resolveDestinations(
@@ -90,21 +113,15 @@ export default async function HistoryPage({
   );
 
   const filtered = Boolean(raw.type || raw.from || raw.to || raw.post);
-  const firstResult = total ? (page - 1) * HISTORY_PAGE_SIZE + 1 : 0;
-  const lastResult = Math.min(page * HISTORY_PAGE_SIZE, total);
+  const firstResult = total ? (page - 1) * PAGE_SIZE + 1 : 0;
+  const lastResult = Math.min(page * PAGE_SIZE, total);
 
   return (
-    <>
+    <div className="mt-6 min-h-[460px] max-w-5xl">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="b88-eyebrow">Workspace · {ctx.workspace.timezone}</p>
-          <h1 className="b88-page-title mt-3">History</h1>
-        </div>
+        <p className="b88-caption">Workspace · {timezoneLabel(ctx.workspace.timezone)}</p>
         {filters.postId && <Button href={`/w/${slug}/posts/${filters.postId}`} variant="secondary">Open post</Button>}
       </div>
-      <p className="mt-4 max-w-3xl">
-        See who changed posts, campaigns, approvals and social accounts, including each recorded publishing outcome.
-      </p>
 
       <Form
         action={`/w/${slug}/history`}
@@ -139,10 +156,7 @@ export default async function HistoryPage({
 
       {audits.length ? (
         <section className="b88-card mt-5 max-w-5xl" aria-label="Workspace activity">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="b88-caption">Showing {firstResult}–{lastResult} of {total} events</p>
-            <p className="text-sm">Newest first</p>
-          </div>
+          <p className="b88-caption">Showing {firstResult}–{lastResult} of {total} events</p>
           <ol className="mt-3">
             {audits.map((audit) => {
               const key = `${audit.entityType}:${audit.entityId ?? ''}`;
@@ -157,7 +171,7 @@ export default async function HistoryPage({
               return (
                 <li
                   key={audit.id}
-                  className="grid grid-cols-[minmax(0,1fr)] gap-3 border-t border-hairline-soft py-4 first:border-0 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-start"
+                  className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 border-t border-hairline-soft py-3 first:border-0 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-start"
                 >
                   <Badge tone={badgeTone(audit.entityType)}>{historyTypeLabel(audit.entityType)}</Badge>
                   <div className="min-w-0">
@@ -170,7 +184,7 @@ export default async function HistoryPage({
                     )}
                     {destination.deleted && <p className="mt-1 text-sm">The original item was deleted, so this event has no destination.</p>}
                   </div>
-                  <time className="b88-caption whitespace-nowrap" dateTime={audit.createdAt.toISOString()}>
+                  <time className="b88-caption col-start-2 whitespace-nowrap sm:col-start-3 sm:row-start-1" dateTime={audit.createdAt.toISOString()}>
                     {formatAuditTimestamp(audit.createdAt, ctx.workspace.timezone)}
                   </time>
                 </li>
@@ -198,13 +212,11 @@ export default async function HistoryPage({
               ? <Button href={`/w/${slug}/history`} variant="secondary">Clear filters</Button>
               : <Button href={`/w/${slug}/compose`}>Create a post</Button>}
           >
-            {filtered
-              ? 'Try another activity type, clear the post timeline, or widen the selected dates.'
-              : 'Post changes, publishing attempts, campaign updates, approvals and social account changes collect here.'}
+            {filtered ? 'Try broader filters.' : undefined}
           </EmptyState>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -266,7 +278,7 @@ async function resolveDestinations(
   }
   for (const asset of media) {
     result.set(`media_asset:${asset.id}`, {
-      label: `the media file “${asset.filename}”`,
+      label: `the media asset “${humanizeMachineValue(asset.filename)}”`,
       href: `/w/${slug}/media?asset=${encodeURIComponent(asset.id)}`,
     });
   }

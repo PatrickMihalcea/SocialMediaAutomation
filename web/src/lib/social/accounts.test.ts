@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Platform } from '@prisma/client';
 
 const dbMock = vi.hoisted(() => ({
   socialAccount: {
     findUnique: vi.fn(),
     update: vi.fn(),
+    upsert: vi.fn(),
   },
 }));
 const adapter = vi.hoisted(() => ({
@@ -20,7 +22,7 @@ vi.mock('@/lib/social/registry', () => ({
 }));
 vi.mock('@/lib/notifications/service', () => ({ notify: vi.fn() }));
 
-import { getUsableAccount } from '@/lib/social/accounts';
+import { createDemoAccount, getUsableAccount } from '@/lib/social/accounts';
 
 function account(overrides: Record<string, unknown> = {}) {
   return {
@@ -75,5 +77,30 @@ describe('publishable social accounts', () => {
       code: 'AUTH',
       needsReconnect: true,
     });
+  });
+
+  it('uses one stable external identity for repeated demo connections', async () => {
+    dbMock.socialAccount.upsert.mockImplementation(async ({ create }: { create: Record<string, unknown> }) => create);
+
+    await createDemoAccount({
+      workspaceId: 'workspace-1',
+      platform: Platform.INSTAGRAM,
+      accountName: 'Studio Instagram',
+      handle: '@studio',
+    });
+    await createDemoAccount({
+      workspaceId: 'workspace-1',
+      platform: Platform.INSTAGRAM,
+      accountName: 'Studio Instagram',
+      handle: '@studio',
+    });
+
+    const first = dbMock.socialAccount.upsert.mock.calls[0][0];
+    const second = dbMock.socialAccount.upsert.mock.calls[1][0];
+    expect(first.where.workspaceId_platform_externalAccountId).toEqual(
+      second.where.workspaceId_platform_externalAccountId,
+    );
+    expect(first.create.externalAccountId).toBe('demo-workspace-1-instagram');
+    expect(second.update.status).toBe('ACTIVE');
   });
 });

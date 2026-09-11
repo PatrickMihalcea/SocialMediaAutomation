@@ -22,13 +22,18 @@
   --gutter-desktop:48px; --gutter-mobile:24px;
   --duration-fast:120ms; --duration-base:200ms; --ease-standard:cubic-bezier(.2,0,.2,1);
   --press-scale:0.97; --hover-opacity:0.80;
-  --elevation-3:0 24px 64px rgba(0,0,0,0.24); --scrim-modal:rgba(0,0,0,0.60);
+  --elevation-2:0 4px 16px rgba(0,0,0,0.06); --elevation-3:0 24px 64px rgba(0,0,0,0.24); --scrim-modal:rgba(0,0,0,0.60);
+  --select-chevron:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
 }
 [data-theme="dark"] {
   --ink:#fff; --canvas:#0b0b0c; --primary:#fff; --on-primary:#0b0b0c;
   --surface-soft:#17181a; --hairline:#2a2b2e; --hairline-soft:#1e1f22;
   --block-lime:#28331a; --block-lilac:#2a2350; --block-cream:#332d1e;
   --block-pink:#3a2727; --block-mint:#1d3325; --block-coral:#3a2a20;
+  --select-chevron:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  /* A 6% shadow disappears on the near-black canvas, so the soft lift is deepened
+     to keep a floating menu legible as a layer above the rows it covers. */
+  --elevation-2:0 4px 16px rgba(0,0,0,0.48);
 }
 *,*::before,*::after{box-sizing:border-box}
 html,body{margin:0;min-height:100%;background:var(--canvas);color:var(--ink)}
@@ -60,18 +65,52 @@ label:has(>.b88-label){display:block}
    (not min-height) is required: native selects and inputs otherwise keep an
    intrinsic height of 41-42px and miss --control-size. */
 .b88-pill-select,.b88-filter-control{height:var(--control-size);padding:0 var(--space-md);background:var(--canvas);color:var(--ink);border:1px solid var(--hairline);border-radius:var(--radius-pill)}
+select.b88-input,.b88-pill-select,.b88-filter-control{appearance:none;background-image:var(--select-chevron);background-position:right var(--space-md) center;background-repeat:no-repeat;background-size:16px 16px;padding-right:var(--space-2xl)}
 .b88-filter-control:focus-visible{outline:3px solid var(--ink);outline-offset:3px;box-shadow:0 0 0 2px var(--canvas)}
+.b88-dropdown{display:block;min-width:0}
+.b88-dropdown-trigger{display:flex;width:100%;height:48px;min-width:0;align-items:center;gap:var(--space-sm);padding:0 var(--space-sm);background:var(--canvas);color:var(--ink);border:1px solid var(--hairline);border-radius:var(--radius-md);text-align:left;transition:opacity var(--duration-fast) var(--ease-standard),transform var(--duration-fast) var(--ease-standard)}
+.b88-dropdown-trigger:hover{opacity:var(--hover-opacity)}
+.b88-dropdown-trigger:active{transform:scale(var(--press-scale))}
+.b88-dropdown-trigger:disabled{cursor:not-allowed;opacity:.4}
+/* Open state darkens the border to ink — the documented highlighted-card device —
+   rather than rotating the chevron. A 180deg spin is outside the sanctioned motion
+   vocabulary (fades and small translations only) and any frame that lands mid-turn
+   renders the glyph sheared, which reads as a clipped icon. */
+.b88-dropdown-trigger[aria-expanded="true"]{border-color:var(--ink)}
+.b88-dropdown-trigger svg{flex:0 0 auto}
+.b88-dropdown-value,.b88-dropdown-option-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.b88-dropdown-value{flex:1;font-weight:var(--weight-medium)}
+/* 4px of padding keeps the row box close to the panel box, so the menu reads as
+   the trigger's own surface rather than a narrower panel floating inside it. */
+.b88-dropdown-listbox{z-index:120;overflow-y:auto;overscroll-behavior:contain;padding:var(--space-xxs);background:var(--canvas);color:var(--ink);border:1px solid var(--hairline);border-radius:var(--radius-md);box-shadow:var(--elevation-2)}
+.b88-dropdown-option{display:flex;min-height:40px;align-items:center;gap:var(--space-sm);padding:0 var(--space-xs);border-radius:var(--radius-sm);cursor:pointer;font-size:15px}
+.b88-dropdown-option-label{flex:1}
+/* The primary surface stays reserved for the sidebar's active row, which sits in
+   this same column: a second black pill in the menu makes "current page" and
+   "current workspace" indistinguishable. Selection therefore uses the AssetTile
+   idiom — a 1px ink outline plus a check — and the soft fill marks the transient
+   active row, so the two states stay separable while arrowing. Inset rather than
+   outline so the ring follows the radius and cannot bleed onto the next row. */
+.b88-dropdown-option[data-active]{background:var(--surface-soft)}
+.b88-dropdown-option[data-selected]{box-shadow:inset 0 0 0 1px var(--ink)}
+.b88-dropdown-option[aria-disabled="true"]{cursor:not-allowed;opacity:.4}
 /* Icon buttons keep their 40px desktop geometry and meet the documented
    44px minimum only when the primary pointer is touch-capable. */
-@media (pointer:coarse){.b88-icon-button{min-width:var(--touch-min);min-height:var(--touch-min)}}
+@media (pointer:coarse){.b88-icon-button{min-width:var(--touch-min);min-height:var(--touch-min)}.b88-dropdown-trigger,.b88-dropdown-option{min-height:var(--touch-min)}}
 .b88-checkbox{appearance:none;border:1px solid var(--hairline);border-radius:var(--radius-sm);background:var(--canvas);background-position:center;background-repeat:no-repeat;background-size:14px 14px}
 .b88-checkbox:checked{border-color:var(--primary);background-color:var(--primary);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='m5 10 3 3 7-7' fill='none' stroke='white' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
 .b88-uploader:has(input:focus-visible){outline:3px solid var(--ink);outline-offset:3px;box-shadow:0 0 0 2px var(--canvas)}
 /* Bulk actions follow the viewport instead of scrolling away above a long grid. */
 @keyframes b88-rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 /* Centred with auto margins, not translateX: a fixed box with `left` set resolves
-   max-content against the space left of it and wraps far too early. */
-.b88-selection-bar{position:fixed;bottom:var(--space-lg);left:var(--sidebar-width);right:0;margin-inline:auto;z-index:30;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:var(--space-sm);width:max-content;max-width:calc(100vw - var(--sidebar-width) - var(--gutter-desktop));background:var(--primary);color:var(--on-primary);border-radius:var(--radius-lg);padding:var(--space-sm) var(--space-md);box-shadow:var(--elevation-3);animation:b88-rise var(--duration-base) var(--ease-standard)}
+   max-content against the space left of it and wraps far too early. Actions wrap
+   instead of scrolling: every primary action must remain visible without discovery. */
+.b88-selection-bar{position:fixed;bottom:var(--space-lg);left:var(--sidebar-width);right:0;margin-inline:auto;z-index:30;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:var(--space-sm);width:max-content;max-width:calc(100vw - var(--sidebar-width) - var(--gutter-desktop));overflow:visible;background:var(--primary);color:var(--on-primary);border-radius:var(--radius-lg);padding:var(--space-sm) var(--space-md);box-shadow:var(--elevation-3);animation:b88-rise var(--duration-base) var(--ease-standard)}
+.b88-selection-bar>*{flex:0 0 auto}
+/* Fixed bars do not contribute to document flow. This companion reserves one
+   standard row, then two rows where the four-action composer wraps. */
+.b88-selection-bar-reserve{padding-bottom:calc(var(--control-size) + var(--space-lg))}
+@media (max-width:700px){.b88-selection-bar-reserve{padding-bottom:calc(var(--control-size) * 2 + var(--space-sm) + var(--space-lg))}}
 @media (max-width:900px){.b88-selection-bar{left:0;bottom:calc(var(--mobile-nav-height) + var(--space-sm));max-width:calc(100vw - var(--gutter-mobile))}}
 @media (prefers-reduced-motion:reduce){.b88-selection-bar{animation:none}}
 .b88-grid{display:grid;gap:24px}
@@ -86,6 +125,9 @@ label:has(>.b88-label){display:block}
 .b88-mobile-nav{display:none}
 .b88-skip-link{position:fixed;left:16px;top:12px;z-index:1000;transform:translateY(-160%);border-radius:var(--radius-pill);background:var(--primary);color:var(--on-primary);padding:10px 16px;font-weight:480}
 .b88-skip-link:focus{transform:translateY(0)}
+.b88-shimmer{position:relative;overflow:hidden;background:var(--surface-soft);border-radius:var(--radius-md)}
+.b88-shimmer::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent 0%,color-mix(in srgb,var(--canvas) 70%,transparent) 50%,transparent 100%);background-size:200% 100%;animation:b88-shimmer 1.4s ease-in-out infinite}
+@keyframes b88-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .b88-spinner{width:18px;height:18px;border:2px solid var(--hairline);border-top-color:var(--ink);border-radius:9999px;animation:b88-spin .8s linear infinite}
 /* Inherits colour so it stays visible on both cream and inverted nav rows. */
 .b88-spinner-inline{width:12px;height:12px;border:2px solid transparent;border-top-color:currentColor;border-right-color:currentColor;border-radius:9999px;animation:b88-spin .8s linear infinite}

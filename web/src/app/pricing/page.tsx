@@ -2,6 +2,8 @@ import { Button, PricingCard } from '@/bridge88/components';
 import { formatBytes, PLAN_LIMITS } from '@/lib/billing/limits';
 import Link from 'next/link';
 
+export const metadata = { title: 'Pricing' };
+
 const plans = [
   { key: 'FREE', name: 'Free', price: '$0', blurb: 'For a single operator starting a publishing queue.' },
   { key: 'PRO', name: 'Pro', price: '$29', blurb: 'For teams running several channels every week.' },

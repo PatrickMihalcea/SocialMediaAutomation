@@ -23,13 +23,8 @@ import {
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import type { ActionState } from '@/lib/actions/state';
-import { CAMPAIGN_COLORS, CAMPAIGN_STATUSES } from '@/lib/campaigns/validation';
-
-function label(value: string) {
-  if (value === 'PLANNED') return 'Draft';
-  const text = value.toLowerCase();
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
+import { CAMPAIGN_COLOR_LABELS, CAMPAIGN_COLORS, CAMPAIGN_STATUS_LABELS, CAMPAIGN_STATUSES } from '@/lib/campaigns/validation';
+import { POST_STATUS_LABELS } from '@/lib/posts/labels';
 
 function dateValue(value: Date | null) {
   return value?.toISOString().slice(0, 10) ?? '';
@@ -39,7 +34,7 @@ function postDescription(post: { status: string; scheduledAt: Date | null; campa
   const timing = post.scheduledAt
     ? new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(post.scheduledAt)
     : 'Not scheduled';
-  return `${label(post.status)} · ${timing}${post.campaign ? ` · currently in ${post.campaign.name}` : ' · uncategorized'}`;
+  return `${POST_STATUS_LABELS[post.status as keyof typeof POST_STATUS_LABELS] ?? 'Post'} · ${timing}${post.campaign ? ` · currently in ${post.campaign.name}` : ' · uncategorized'}`;
 }
 
 async function updateAction(slug: string, campaignId: string, _state: ActionState, formData: FormData) {
@@ -71,6 +66,20 @@ async function duplicateAction(slug: string, campaignId: string, _state: ActionS
 async function deleteAction(slug: string, campaignId: string, _state: ActionState, formData: FormData) {
   'use server';
   return deleteCampaignAction(slug, campaignId, formData);
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string; campaignId: string }>;
+}) {
+  const { slug, campaignId } = await params;
+  const ctx = await requireWorkspace(slug, 'campaign:view');
+  const campaign = await db.campaign.findFirst({
+    where: { id: campaignId, workspaceId: ctx.workspace.id },
+    select: { name: true },
+  });
+  return { title: campaign?.name.trim() || 'Campaign' };
 }
 
 export default async function CampaignDetailPage({
@@ -117,7 +126,7 @@ export default async function CampaignDetailPage({
             <p className="mt-2 max-w-2xl">{campaign.description ?? 'No description yet.'}</p>
           </div>
         </div>
-        <Badge tone={campaign.status === 'ACTIVE' ? 'lime' : campaign.status === 'ARCHIVED' ? 'neutral' : 'outline'}>{label(campaign.status)}</Badge>
+        <Badge tone={campaign.status === 'ACTIVE' ? 'lime' : campaign.status === 'ARCHIVED' ? 'neutral' : 'outline'}>{CAMPAIGN_STATUS_LABELS[campaign.status]}</Badge>
       </div>
 
       <div className="mt-6 flex flex-wrap gap-2">
@@ -161,7 +170,7 @@ export default async function CampaignDetailPage({
               </div>
             )
           ) : (
-            <div className="mt-5"><EmptyState eyebrow="No posts assigned" title="Build this campaign’s content plan" action={canManage ? <Button href={`/w/${slug}/compose?campaign=${campaign.id}`}>Create a post</Button> : undefined}>Create a new post in this campaign, or assign existing posts below.</EmptyState></div>
+            <div className="mt-5"><EmptyState eyebrow="No posts assigned" title="Build this campaign’s content plan" action={canManage ? <Button href={`/w/${slug}/compose?campaign=${campaign.id}`}>Create a post</Button> : undefined} /></div>
           )}
         </section>
 
@@ -178,8 +187,8 @@ export default async function CampaignDetailPage({
                 <Field name="name" label="Name" defaultValue={campaign.name} required />
                 <TextArea name="description" label="Description" defaultValue={campaign.description ?? ''} rows={3} />
                 <div className="grid grid-cols-2 gap-3"><Field name="startDate" label="Start date" type="date" defaultValue={dateValue(campaign.startDate)} /><Field name="endDate" label="End date" type="date" defaultValue={dateValue(campaign.endDate)} /></div>
-                <Select name="status" label="Status" defaultValue={campaign.status}>{CAMPAIGN_STATUSES.map((status) => <option key={status} value={status}>{label(status)}</option>)}</Select>
-                <Select name="color" label="Color" defaultValue={campaign.color}>{CAMPAIGN_COLORS.map((color) => <option key={color} value={color}>{label(color)}</option>)}</Select>
+                <Select name="status" label="Status" defaultValue={campaign.status}>{CAMPAIGN_STATUSES.map((status) => <option key={status} value={status}>{CAMPAIGN_STATUS_LABELS[status]}</option>)}</Select>
+                <Select name="color" label="Color" defaultValue={campaign.color}>{CAMPAIGN_COLORS.map((color) => <option key={color} value={color}>{CAMPAIGN_COLOR_LABELS[color]}</option>)}</Select>
                 <PendingButton type="submit" pendingLabel="Saving campaign">Save changes</PendingButton>
               </ActionForm>
             </details>
@@ -188,7 +197,6 @@ export default async function CampaignDetailPage({
           {canManage && (
             <ActionForm action={statusAction.bind(null, slug, campaignId, campaign.status === 'ARCHIVED' ? 'ACTIVE' : 'ARCHIVED')} className="b88-card">
               <p className="font-[540]">{campaign.status === 'ARCHIVED' ? 'Restore campaign' : 'Archive campaign'}</p>
-              <p className="mt-2 text-sm">{campaign.status === 'ARCHIVED' ? 'Return this campaign to active work. Its posts and history are unchanged.' : 'Keep the campaign and its posts available historically.'}</p>
               <PendingButton type="submit" variant="secondary" className="mt-4" pendingLabel="Updating campaign">{campaign.status === 'ARCHIVED' ? 'Restore as active' : 'Archive campaign'}</PendingButton>
             </ActionForm>
           )}
@@ -217,7 +225,6 @@ export default async function CampaignDetailPage({
           <details className="b88-card">
             <summary className="cursor-pointer font-[540]">Duplicate campaign</summary>
             <ActionForm action={duplicateAction.bind(null, slug, campaignId)} className="mt-5 space-y-4">
-              <p className="text-sm">The copy starts as a draft and remains independent from this campaign.</p>
               <Checkbox name="includePosts" label="Copy posts" description="Creates independent copies; originals stay here." />
               <Checkbox name="includeSchedule" label="Copy schedule" description="Keeps campaign dates and copied post publish times." />
               <PendingButton type="submit" variant="secondary" pendingLabel="Duplicating campaign">Duplicate campaign</PendingButton>
@@ -235,7 +242,6 @@ export default async function CampaignDetailPage({
               </Select>
               {otherCampaigns.length > 0 && <Select name="destinationId" label="Destination campaign"><option value="">Choose campaign</option>{otherCampaigns.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select>}
               <ConfirmationButton type="submit" variant="tertiary" confirmMessage={`Delete ${campaign.name}? Its posts will not be deleted.`} pendingLabel="Deleting campaign">Delete campaign</ConfirmationButton>
-              <p className="text-sm">Cancel by closing this section or leaving the page.</p>
             </ActionForm>
           </details>
         </div>

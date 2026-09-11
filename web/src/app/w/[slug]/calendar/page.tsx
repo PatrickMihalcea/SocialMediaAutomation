@@ -1,12 +1,36 @@
+import { Suspense } from 'react';
 import { Platform, PostStatus } from '@prisma/client';
 import { Button } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
-import { formatInZone } from '@/lib/scheduling/time';
+import { formatInZone, timezoneLabel } from '@/lib/scheduling/time';
 import { PLATFORM_LABELS } from '@/lib/social/registry';
+import { CalendarPagePreview } from '@/components/page-previews';
 import { CalendarShell, type CalendarPost } from '@/components/calendar-shell';
 
-export default async function CalendarPage({
+export const metadata = { title: 'Calendar' };
+
+export default function CalendarPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{
+    status?: string; platform?: string; campaign?: string; account?: string;
+    view?: string; date?: string; post?: string;
+  }>;
+}) {
+  return (
+    <>
+      <div><p className="b88-eyebrow">Calendar</p><h1 className="b88-page-title mt-3">Content calendar</h1></div>
+      <Suspense fallback={<CalendarPagePreview />}>
+        <CalendarData params={params} searchParams={searchParams} />
+      </Suspense>
+    </>
+  );
+}
+
+async function CalendarData({
   params,
   searchParams,
 }: {
@@ -75,12 +99,9 @@ export default async function CalendarPage({
   }).filter((entry): entry is [string, string] => Boolean(entry[1])));
 
   return (
-    <>
+    <div className="mt-6 min-h-[680px]">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="b88-eyebrow">Calendar · {ctx.workspace.timezone}</p>
-          <h1 className="b88-page-title mt-3">Content calendar</h1>
-        </div>
+        <p className="b88-caption">Calendar · {timezoneLabel(ctx.workspace.timezone)}</p>
         <Button href={`/w/${slug}/compose`}>Create post</Button>
       </div>
       <CalendarShell
@@ -96,7 +117,7 @@ export default async function CalendarPage({
         campaignOptions={campaigns.map((campaign) => ({ value: campaign.id, label: campaign.name }))}
         canDelete={ctx.can('post:delete')}
       />
-    </>
+    </div>
   );
 }
 

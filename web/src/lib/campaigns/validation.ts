@@ -4,6 +4,22 @@ export const CAMPAIGN_COLORS = ['lime', 'lilac', 'cream', 'mint', 'coral'] as co
 export const CAMPAIGN_STATUSES = ['PLANNED', 'ACTIVE', 'COMPLETED', 'ARCHIVED'] as const;
 
 export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
+export type CampaignColor = (typeof CAMPAIGN_COLORS)[number];
+
+export const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = {
+  PLANNED: 'Draft',
+  ACTIVE: 'Active',
+  COMPLETED: 'Completed',
+  ARCHIVED: 'Archived',
+};
+
+export const CAMPAIGN_COLOR_LABELS: Record<CampaignColor, string> = {
+  lime: 'Lime',
+  lilac: 'Lilac',
+  cream: 'Cream',
+  mint: 'Mint',
+  coral: 'Coral',
+};
 
 export function parseCampaignDate(value: FormDataEntryValue | null) {
   if (!value) return null;

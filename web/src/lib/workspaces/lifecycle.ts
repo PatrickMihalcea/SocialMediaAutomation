@@ -1,5 +1,6 @@
 import 'server-only';
 import { db } from '@/lib/db';
+import { timezoneLabel } from '@/lib/scheduling/time';
 import { storage } from '@/lib/storage';
 
 export function slugifyWorkspace(value: string): string {
@@ -11,9 +12,9 @@ export function slugifyWorkspace(value: string): string {
 }
 
 export function timezoneChangeNotice(timezone: string, scheduledPosts: number): string {
-  if (!scheduledPosts) return `Calendar and future scheduling now use ${timezone}.`;
+  if (!scheduledPosts) return `Calendar and future scheduling now use ${timezoneLabel(timezone)}.`;
   const subject = scheduledPosts === 1 ? 'publication instant remains' : 'publication instants remain';
-  return `${scheduledPosts} existing ${subject} unchanged; calendar times now display in ${timezone}.`;
+  return `${scheduledPosts} existing ${subject} unchanged; calendar times now display in ${timezoneLabel(timezone)}.`;
 }
 
 export async function availableWorkspaceSlug(name: string, currentId?: string): Promise<string> {

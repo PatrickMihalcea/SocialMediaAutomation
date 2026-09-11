@@ -15,6 +15,7 @@ import { redirect } from 'next/navigation';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
 import { conflict, invalid } from '@/lib/errors';
 import { audit } from '@/lib/audit';
+import { APPROVAL_DECISION_LABELS } from '@/lib/posts/labels';
 
 const inviteMemberSchema = z.object({
   email: z.string().email(),
@@ -138,7 +139,7 @@ export async function approvalAction(
   const post = await db.post.findFirst({ where: { id: postId, workspaceId: ctx.workspace.id } });
   if (!post) throw invalid('That post is no longer available in this workspace.');
   const providedComment = String(formData.get('body') || '').trim();
-  const body = providedComment || decision.toLowerCase().replaceAll('_', ' ');
+  const body = providedComment || APPROVAL_DECISION_LABELS[decision];
   const [comment] = await db.$transaction([
     db.approvalComment.create({
       data: { postId, workspaceId: ctx.workspace.id, authorId: ctx.user.id, decision, body },

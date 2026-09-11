@@ -77,7 +77,7 @@ export async function processMediaAsset(mediaAssetId: string): Promise<void> {
         workspaceId: asset.workspaceId,
         userIds: [asset.uploadedById],
         type: 'MEDIA_PROCESSING_COMPLETE',
-        title: `${asset.filename} is ready`,
+        title: 'Media is ready',
         href: `/w/${asset.workspace.slug}/media`,
       });
     }

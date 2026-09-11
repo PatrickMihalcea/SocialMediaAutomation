@@ -16,7 +16,7 @@ export interface WallClock {
 /** Wall-clock in a zone → the UTC instant it names. */
 export function toUtc(wall: WallClock, timezone: string): Date {
   const dt = DateTime.fromObject(wall, { zone: timezone });
-  if (!dt.isValid) throw new Error(`Invalid time for zone ${timezone}: ${dt.invalidExplanation}`);
+  if (!dt.isValid) throw new Error(`That time is not valid in ${timezoneLabel(timezone)}.`);
   if (
     dt.year !== wall.year ||
     dt.month !== wall.month ||
@@ -25,7 +25,7 @@ export function toUtc(wall: WallClock, timezone: string): Date {
     dt.minute !== wall.minute
   ) {
     throw new Error(
-      `${formatWallClock(wall)} does not exist in ${timezone} because the clock changes for daylight saving time.`,
+      `${formatWallClock(wall)} does not exist in ${timezoneLabel(timezone)} because the clock changes for daylight saving time.`,
     );
   }
   return dt.toUTC().toJSDate();
@@ -34,21 +34,31 @@ export function toUtc(wall: WallClock, timezone: string): Date {
 /** "2026-09-15T09:00" plus a zone → the UTC instant. */
 export function localInputToUtc(value: string, timezone: string): Date {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
-    throw new Error(`"${value}" is not a complete local date and time.`);
+    throw new Error('Enter a complete local date and time.');
   }
   const dt = DateTime.fromISO(value, { zone: timezone });
-  if (!dt.isValid) throw new Error(`Invalid date-time "${value}" for zone ${timezone}`);
+  if (!dt.isValid) throw new Error(`That date and time is not valid in ${timezoneLabel(timezone)}.`);
   if (dt.toFormat("yyyy-MM-dd'T'HH:mm") !== value) {
     throw new Error(
-      `${value.replace('T', ' ')} does not exist in ${timezone} because the clock changes for daylight saving time.`,
+      `${formatLocalInput(value)} does not exist in ${timezoneLabel(timezone)} because the clock changes for daylight saving time.`,
     );
   }
   return dt.toUTC().toJSDate();
 }
 
 function formatWallClock(wall: WallClock): string {
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${wall.year}-${pad(wall.month)}-${pad(wall.day)} ${pad(wall.hour)}:${pad(wall.minute)}`;
+  return new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute)));
+}
+
+function formatLocalInput(value: string): string {
+  const [date, time] = value.split('T');
+  const [year, month, day] = date.split('-').map(Number);
+  const [hour, minute] = time.split(':').map(Number);
+  return formatWallClock({ year, month, day, hour, minute });
 }
 
 /** UTC instant → the value a <input type="datetime-local"> expects in that zone. */
@@ -112,6 +122,45 @@ export function startOfMonthInZone(date: Date, timezone: string): Date {
 
 export function relativeLabel(date: Date, timezone: string): string {
   return DateTime.fromJSDate(date, { zone: 'utc' }).setZone(timezone).toRelative() ?? '';
+}
+
+const TIMEZONE_LABELS: Record<string, string> = {
+  UTC: 'Coordinated Universal Time',
+  'America/Los_Angeles': 'Pacific Time',
+  'America/Denver': 'Mountain Time',
+  'America/Chicago': 'Central Time',
+  'America/New_York': 'Eastern Time',
+  'America/Toronto': 'Eastern Time (Toronto)',
+  'America/Sao_Paulo': 'Brasília Time',
+  'Europe/London': 'United Kingdom Time',
+  'Europe/Dublin': 'Ireland Time',
+  'Europe/Lisbon': 'Portugal Time',
+  'Europe/Madrid': 'Central European Time (Madrid)',
+  'Europe/Paris': 'Central European Time (Paris)',
+  'Europe/Berlin': 'Central European Time (Berlin)',
+  'Europe/Amsterdam': 'Central European Time (Amsterdam)',
+  'Europe/Stockholm': 'Central European Time (Stockholm)',
+  'Europe/Warsaw': 'Central European Time (Warsaw)',
+  'Europe/Bucharest': 'Eastern European Time (Bucharest)',
+  'Europe/Istanbul': 'Türkiye Time',
+  'Africa/Lagos': 'West Africa Time',
+  'Africa/Johannesburg': 'South Africa Time',
+  'Asia/Dubai': 'Gulf Time',
+  'Asia/Karachi': 'Pakistan Time',
+  'Asia/Kolkata': 'India Time',
+  'Asia/Bangkok': 'Indochina Time',
+  'Asia/Singapore': 'Singapore Time',
+  'Asia/Hong_Kong': 'Hong Kong Time',
+  'Asia/Shanghai': 'China Time',
+  'Asia/Tokyo': 'Japan Time',
+  'Asia/Seoul': 'Korea Time',
+  'Australia/Perth': 'Western Australia Time',
+  'Australia/Sydney': 'Sydney Time',
+  'Pacific/Auckland': 'New Zealand Time',
+};
+
+export function timezoneLabel(timezone: string): string {
+  return TIMEZONE_LABELS[timezone] ?? 'Workspace local time';
 }
 
 export const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];

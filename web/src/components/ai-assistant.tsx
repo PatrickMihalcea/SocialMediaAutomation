@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { Bot, Copy, Pencil, Plus, Send } from 'lucide-react';
-import { Button, Badge, Dialog, StatusMessage, Toast } from '@/bridge88/components';
+import { Button, Badge, Dialog, humanizeMachineValue, StatusMessage, Toast } from '@/bridge88/components';
 import { confirmAiProposalAction, sendAssistantMessageAction } from '@/app/actions/ai';
 
 type Proposal =
@@ -187,11 +187,7 @@ export function AiAssistant({
         <div ref={transcriptRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto py-6 pr-1" aria-live="polite">
           {!active?.messages.length && (
             <div className="mx-auto max-w-lg py-8 text-center">
-              <p>Ask for copy or a draft proposal. Bridge88 stores proposed actions separately and waits for confirmation.</p>
-              <p className="mt-3 text-sm">
-                Campaign creation, media generation or search, post moves, publishing, and deletion are not available in this assistant.
-              </p>
-              <div className="mt-5 flex flex-wrap justify-center gap-2">
+              <div className="flex flex-wrap justify-center gap-2">
                 <Button href={`/w/${slug}/compose`} variant="secondary">Create post</Button>
                 <Button href={`/w/${slug}/studio`} variant="secondary">Open AI studio</Button>
               </div>
@@ -200,7 +196,7 @@ export function AiAssistant({
           {active?.messages.map((message) => (
             <article key={message.id} className={`max-w-[94%] rounded-lg p-4 md:max-w-[82%] ${message.role === 'USER' ? 'ml-auto bg-[var(--primary)] text-[var(--on-primary)]' : 'bg-canvas'}`}>
               <p className="b88-caption mb-2">{message.role === 'USER' ? 'You' : 'Assistant'}</p>
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              <p className="whitespace-pre-wrap">{messageContent(message)}</p>
               {Boolean(message.proposal) && (
                 <div className="mt-4 border-t border-[var(--hairline-soft)] pt-4">
                   <div className="flex items-center justify-between gap-3">
@@ -286,7 +282,6 @@ export function AiAssistant({
           </>
         )}
       >
-        <p>The model proposed this change. Bridge88 will only write it after you confirm.</p>
         {proposalToConfirm?.proposal && <ProposalDetails proposal={proposalToConfirm.proposal} />}
       </Dialog>
       {notice && <div onClick={() => setNotice('')}><Toast tone="success">{notice}</Toast></div>}
@@ -338,7 +333,7 @@ function ProposalDetails({ proposal }: { proposal: Proposal }) {
         <ul className="mt-2 list-disc space-y-2 pl-5">
           {proposal.media.map((asset) => (
             <li key={asset.mediaAssetId}>
-              <span className="font-[540]">{asset.filename}</span>
+              <span className="font-[540]">{assistantAssetLabel(asset.filename)}</span>
               <span className="block">Alternative text: {asset.altText || 'none'}</span>
             </li>
           ))}
@@ -369,7 +364,29 @@ function ProposalDetails({ proposal }: { proposal: Proposal }) {
 }
 
 function proposalSummary(value: Proposal | null): string {
-  return value?.summary || 'Structured action';
+  if (!value) return 'Structured action';
+  if (value.kind !== 'attach_media') return value.summary;
+  return value.media.reduce(
+    (summary, asset) => summary.replaceAll(asset.filename, assistantAssetLabel(asset.filename)),
+    value.summary,
+  );
+}
+
+function messageContent(message: Message): string {
+  const hydrated = message.proposal?.kind === 'attach_media'
+    ? message.proposal.media.reduce(
+    (content, asset) => content.replaceAll(asset.filename, assistantAssetLabel(asset.filename)),
+    message.content,
+    )
+    : message.content;
+  return hydrated
+    .replace(/\bAI E2E \d+\.(?:png|jpe?g|webp|gif|mp4|mov|webm|mp3|wav)\b/gi, (filename) => assistantAssetLabel(filename))
+    .replace(/\b[a-z0-9]+(?:[-_][a-z0-9]+)+\.(?:png|jpe?g|webp|gif|mp4|mov|webm|mp3|wav)\b/gi, (filename) => humanizeMachineValue(filename));
+}
+
+function assistantAssetLabel(filename: string): string {
+  if (/^AI E2E \d+\.(?:png|jpe?g|webp)$/i.test(filename)) return 'Generated image';
+  return humanizeMachineValue(filename);
 }
 
 function proposalStatusLabel(status: string | null): string {

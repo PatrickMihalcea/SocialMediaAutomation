@@ -2,6 +2,7 @@ import 'server-only';
 import { Plan } from '@prisma/client';
 import { db } from '@/lib/db';
 import { limitReached } from '@/lib/errors';
+import { planLabel, PLAN_LABELS } from './labels';
 
 export const PLAN_LIMITS = {
   FREE: { socialAccounts: 3, scheduledPosts: 10, aiGenerations: 100, storageBytes: 1024 ** 3, teamMembers: 1 },
@@ -59,13 +60,12 @@ export function limitMessage(input: {
   now?: Date;
   audience?: LimitMessageAudience;
 }): string {
-  const planLabel = input.plan === Plan.FREE ? 'Free' : sentenceCase(input.plan);
   const amount = input.feature === 'storageBytes'
     ? `${formatBytes(input.used)} of ${formatBytes(input.limit)}`
     : `${input.used.toLocaleString()} of ${input.limit.toLocaleString()}`;
   const reset = resetExplanation(input.feature, input.now);
   const audience = input.audience ?? 'refusal';
-  return `You are using ${amount} ${label(input.feature)} on the ${planLabel} plan. ${reset} ${nextStep(input.feature, audience)}`;
+  return `You are using ${amount} ${label(input.feature)} on the ${planLabel(input.plan)} plan. ${reset} ${nextStep(input.feature, audience)}`;
 }
 
 /**
@@ -180,8 +180,9 @@ function knownLimitBody(message: string, feature: LimitedFeature): boolean {
     : feature === 'scheduledPosts'
       ? String.raw`This capacity has no fixed reset date; it becomes available when scheduled posts publish or are canceled\.`
       : String.raw`This capacity does not reset automatically\.`;
+  const plans = Object.values(PLAN_LABELS).join('|');
   return new RegExp(
-    `^You are using ${amount} ${label(feature)} on the (?:Free|Pro|Business) plan\\. ${reset} `,
+    `^You are using ${amount} ${label(feature)} on the (?:${plans}) plan\\. ${reset} `,
   ).test(message);
 }
 
@@ -207,9 +208,4 @@ export function formatBytes(bytes: number): string {
 
 function trim(value: number): string {
   return value.toLocaleString('en-US', { maximumFractionDigits: 1 });
-}
-
-function sentenceCase(value: string): string {
-  const lower = value.toLowerCase();
-  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }

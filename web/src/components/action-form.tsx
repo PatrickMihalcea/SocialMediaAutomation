@@ -8,16 +8,14 @@ export function ActionForm({
   action,
   children,
   className,
-  encType,
 }: {
   action: (state: ActionState, formData: FormData) => Promise<ActionState>;
   children: ReactNode;
   className?: string;
-  encType?: 'multipart/form-data';
 }) {
   const [state, submit] = useActionState(action, {});
   return (
-    <form action={submit} className={className} encType={encType}>
+    <form action={submit} className={className}>
       {state.error && <StatusMessage tone="error" className="col-span-full mb-4">{state.error}</StatusMessage>}
       {state.success && <StatusMessage tone="success" className="col-span-full mb-4">{state.success}</StatusMessage>}
       {children}

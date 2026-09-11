@@ -1,16 +1,18 @@
 import Link from 'next/link';
 import { Badge, Button, EmptyState, MediaFrame, StatCard, StatusMessage } from '@/bridge88/components';
+import { humanizeMachineValue } from '@/bridge88/humanize';
 import { ConfirmationButton, PendingButton } from '@/components/action-ui';
 import { postCommandAction, setPostArchivedAction } from '@/app/actions/posts';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { formatMetric } from '@/lib/analytics/aggregate';
 import { PLATFORM_LABELS } from '@/lib/social/registry';
-import { formatInZone } from '@/lib/scheduling/time';
+import { formatInZone, timezoneLabel } from '@/lib/scheduling/time';
 import { storage } from '@/lib/storage';
 import { notFound } from 'next/navigation';
 import type { PostStatus } from '@prisma/client';
 import { replyToApprovalCommentAction } from '@/app/actions/team';
+import { APPROVAL_DECISION_LABELS, POST_PLATFORM_STATUS_LABELS, POST_STATUS_LABELS } from '@/lib/posts/labels';
 
 const statusTone = {
   DRAFT: 'outline',
@@ -24,9 +26,18 @@ const statusTone = {
   CANCELLED: 'outline',
 } as const;
 
-function sentenceCase(value: string) {
-  const words = value.replaceAll('_', ' ').toLowerCase();
-  return words.charAt(0).toUpperCase() + words.slice(1);
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string; postId: string }>;
+}) {
+  const { slug, postId } = await params;
+  const ctx = await requireWorkspace(slug, 'post:view');
+  const post = await db.post.findFirst({
+    where: { id: postId, workspaceId: ctx.workspace.id },
+    select: { title: true },
+  });
+  return { title: post?.title?.trim() || 'Post' };
 }
 
 export default async function PostDetailPage({
@@ -80,7 +91,7 @@ export default async function PostDetailPage({
           <p className="b88-eyebrow">Post detail</p>
           <h1 className="b88-page-title mt-3 break-words">{title}</h1>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Badge tone={statusTone[post.status]}>{sentenceCase(post.status)}</Badge>
+            <Badge tone={statusTone[post.status]}>{POST_STATUS_LABELS[post.status]}</Badge>
             {post.campaign && <Badge tone="outline">{post.campaign.name}</Badge>}
           </div>
         </div>
@@ -128,7 +139,7 @@ export default async function PostDetailPage({
           <div><dt className="b88-label">Updated</dt><dd className="mt-2">{formatInZone(post.updatedAt, ctx.workspace.timezone)}</dd></div>
           <div><dt className="b88-label">Scheduled</dt><dd className="mt-2">{post.scheduledAt ? formatInZone(post.scheduledAt, ctx.workspace.timezone) : 'Not scheduled'}</dd></div>
           <div><dt className="b88-label">Published</dt><dd className="mt-2">{post.publishedAt ? formatInZone(post.publishedAt, ctx.workspace.timezone) : 'Not published'}</dd></div>
-          <div><dt className="b88-label">Timezone</dt><dd className="mt-2">{post.timezone}</dd></div>
+          <div><dt className="b88-label">Timezone</dt><dd className="mt-2">{timezoneLabel(post.timezone)}</dd></div>
           <div><dt className="b88-label">Channels</dt><dd className="mt-2">{channels.length}</dd></div>
         </dl>
       </section>
@@ -140,7 +151,7 @@ export default async function PostDetailPage({
               <div>
                 <h2 className="b88-heading">{channel.socialAccount.accountName}</h2>
                 <p className="b88-caption mt-2">
-                  {channel.socialAccount.accountHandle ?? PLATFORM_LABELS[channel.platform]} · {sentenceCase(channel.status)}
+                  {channel.socialAccount.accountHandle ?? PLATFORM_LABELS[channel.platform]} · {POST_PLATFORM_STATUS_LABELS[channel.status]}
                 </p>
               </div>
               <Badge tone="outline">{PLATFORM_LABELS[channel.platform]}</Badge>
@@ -161,14 +172,14 @@ export default async function PostDetailPage({
                       src={item.url}
                       type={item.mediaAsset.type === 'VIDEO' ? 'video' : 'image'}
                       ratio="1:1"
-                      alt={item.altText ?? item.mediaAsset.filename}
+                      alt={item.altText ?? humanizeMachineValue(item.mediaAsset.filename)}
                     />
-                    <p className="b88-caption mt-2 truncate">{item.mediaAsset.filename}</p>
+                    <p className="b88-caption mt-2 truncate">{humanizeMachineValue(item.mediaAsset.filename)}</p>
                   </div>
                 ))}
               </div>
             )}
-            {channel.errorMessage && <StatusMessage tone="error" className="mt-5">{channel.errorMessage}</StatusMessage>}
+            {channel.errorMessage && <StatusMessage tone="error" className="mt-5">This channel could not publish the post. Review the channel connection and post requirements, then try again.</StatusMessage>}
           </section>
         ))}
       </div>
@@ -182,7 +193,7 @@ export default async function PostDetailPage({
               <span className="min-w-0 flex-1">{PLATFORM_LABELS[channel.platform]} · {channel.socialAccount.accountName}</span>
               <span className="b88-caption">{channel.attempts} {channel.attempts === 1 ? 'attempt' : 'attempts'}</span>
               <Badge tone={channel.status === 'FAILED' ? 'coral' : channel.status === 'PUBLISHED' ? 'mint' : 'outline'}>
-                {sentenceCase(channel.status)}
+                {POST_PLATFORM_STATUS_LABELS[channel.status]}
               </Badge>
             </div>
           ))}
@@ -198,7 +209,7 @@ export default async function PostDetailPage({
               <article key={comment.id} className={`border-t border-hairline-soft py-4 first:border-0 ${comment.parentId ? 'ml-8 border-l border-l-hairline pl-4' : ''}`}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-[480]">{comment.author?.name ?? comment.author?.email ?? 'Former member'}</span>
-                  <Badge tone="outline">{sentenceCase(comment.decision)}</Badge>
+                  <Badge tone="outline">{APPROVAL_DECISION_LABELS[comment.decision]}</Badge>
                   <span className="b88-caption">{formatInZone(comment.createdAt, ctx.workspace.timezone)}</span>
                 </div>
                 <p className="mt-2 whitespace-pre-wrap">{comment.body}</p>
@@ -236,9 +247,7 @@ export default async function PostDetailPage({
               </div>
             </div>
           ) : null) : (
-            <EmptyState eyebrow="No metrics yet" title="Analytics are not available">
-              Metrics appear after a channel reports results for this post.
-            </EmptyState>
+            <EmptyState eyebrow="No metrics yet" title="Analytics are not available" />
           )}
         </div>
       </section>
@@ -294,7 +303,7 @@ function PostActions({
       )}
       {canSchedule && ['SCHEDULED', 'FAILED'].includes(status) && (
         <form action={async (formData: FormData) => { 'use server'; await postCommandAction(slug, postId, 'reschedule', formData); }} className="flex flex-wrap items-center gap-2">
-          <input type="datetime-local" name="scheduledAt" className="b88-filter-control h-10 w-auto" aria-label={`New publishing time (${timezone})`} required />
+          <input type="datetime-local" name="scheduledAt" className="b88-filter-control h-10 w-auto" aria-label={`New publishing time (${timezoneLabel(timezone)})`} required />
           <PendingButton type="submit" variant="secondary" pendingLabel="Rescheduling">Reschedule</PendingButton>
         </form>
       )}

@@ -34,6 +34,8 @@ import {
 } from '@/app/actions/queue';
 import { PlatformGlyph, StatusGlyph } from '@/components/visuals';
 import { legalPostActions } from '@/lib/posts/lifecycle';
+import { POST_STATUS_LABELS } from '@/lib/posts/labels';
+import { timezoneLabel } from '@/lib/scheduling/time';
 
 export type CalendarPost = {
   id: string;
@@ -73,11 +75,6 @@ function actionError(result: unknown): string | null {
 
 function errorMessage(error: unknown) {
   return error instanceof Error && error.message ? error.message : 'The action could not be completed.';
-}
-
-function statusLabel(status: string) {
-  const words = status.toLowerCase().replaceAll('_', ' ');
-  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /** A post that has gone out, or is going out right now, has no date left to plan. */
@@ -134,6 +131,7 @@ export function CalendarShell({
   const dayRefs = useMemo(() => new Map<string, HTMLDivElement>(), []);
   // Resolved after hydration so the server render never disagrees about the date.
   const [todayKey, setTodayKey] = useState<string | null>(null);
+  const displayTimezone = timezoneLabel(timezone);
   useEffect(() => setTodayKey(DateTime.now().setZone(timezone).toISODate()), [timezone]);
 
   useEffect(() => {
@@ -375,7 +373,7 @@ export function CalendarShell({
         <PostList posts={posts} selected={selected} setSelected={setSelected} slug={slug} timezone={timezone} />
       ) : (
         <div className="mt-6 overflow-x-auto">
-          <p className="b88-caption mb-3 md:hidden">Tap a post to open its details and change the publishing time. Swipe sideways to see the full week.</p>
+          <p className="b88-caption mb-3 md:hidden">Swipe sideways to see the full week.</p>
           <div role="grid" aria-label={`${view === 'month' ? 'Month' : 'Week'} calendar`} className="min-w-[720px] overflow-hidden rounded-lg border border-hairline">
             <div role="row" className="grid grid-cols-7 border-b border-hairline bg-surface-soft">
               {visibleDays.slice(0, 7).map((day) => (
@@ -468,7 +466,7 @@ export function CalendarShell({
         <>
           <div className="b88-selection-bar" role="region" aria-label={`Bulk schedule ${selected.length} posts`}>
             <span className="px-2 text-sm font-[480]">{selected.length} selected</span>
-            <Field label={`Start time (${timezone})`} type="datetime-local" value={bulkStart} onChange={(event) => setBulkStart(event.target.value)} />
+            <Field label={`Start time (${displayTimezone})`} type="datetime-local" value={bulkStart} onChange={(event) => setBulkStart(event.target.value)} />
             <Button type="button" disabled={pending} onClick={() => startTransition(async () => {
               try {
                 const slots = await previewBulkScheduleAction(slug, selected, bulkStart || undefined);
@@ -518,7 +516,7 @@ export function CalendarShell({
         {selectedPost && (
           <div className="max-h-[65vh] overflow-y-auto pr-2">
             {message?.tone === 'error' && <StatusMessage tone="error" className="mt-6">{message.text}</StatusMessage>}
-            <div className="mt-6 flex flex-wrap gap-2"><Badge tone={tones[selectedPost.status] ?? 'outline'}>{statusLabel(selectedPost.status)}</Badge>{selectedPost.platforms.map((p) => <Badge key={p} tone="outline">{p}</Badge>)}</div>
+            <div className="mt-6 flex flex-wrap gap-2"><Badge tone={tones[selectedPost.status] ?? 'outline'}>{POST_STATUS_LABELS[selectedPost.status]}</Badge>{selectedPost.platforms.map((p) => <Badge key={p} tone="outline">{p}</Badge>)}</div>
             {selectedPost.status === 'PUBLISHED' && (
               <StatusMessage tone="success" className="mt-6">
                 Published via a simulated integration.
@@ -535,7 +533,7 @@ export function CalendarShell({
                 <p className="b88-eyebrow">Move post</p>
                 <div className="mt-3 flex flex-wrap items-end gap-3">
                   <Field
-                    label={`New publishing time (${timezone})`}
+                    label={`New publishing time (${displayTimezone})`}
                     type="datetime-local"
                     value={moveLocal}
                     onChange={(event) => setMoveLocal(event.target.value)}
@@ -662,7 +660,7 @@ function Filter({ label, value, options, onChange }: { label: string; value?: st
 function PostList({ posts, selected, setSelected, slug, timezone }: {
   posts: CalendarPost[]; selected: string[]; setSelected: (ids: string[]) => void; slug: string; timezone: string;
 }) {
-  if (!posts.length) return <div className="mt-6"><EmptyState eyebrow="No matching posts" title="The calendar is clear" action={<Button href={`/w/${slug}/compose`}>Create post</Button>}>Clear the filters to see every post, or create a new one.</EmptyState></div>;
+  if (!posts.length) return <div className="mt-6"><EmptyState eyebrow="No matching posts" title="The calendar is clear" action={<Button href={`/w/${slug}/compose`}>Create post</Button>} /></div>;
   return (
     <section className="b88-card mt-6 overflow-x-auto">
       <table className="b88-table min-w-[760px] [&_td:first-child]:pl-0 [&_th:first-child]:pl-0"><thead><tr><th>Select</th><th>Post</th><th>Channels</th><th>Publishing time</th><th>Status</th><th>Campaign</th></tr></thead>
@@ -678,7 +676,7 @@ function PostList({ posts, selected, setSelected, slug, timezone }: {
           <td><Button type="button" variant="tertiary" href={`/w/${slug}/compose/${post.id}`}><PenLine size={15} strokeWidth={1.75} /> {post.title}</Button></td>
           <td>{post.platforms.join(', ') || '—'}</td>
           <td>{post.scheduledAt ? DateTime.fromISO(post.scheduledAt).setZone(timezone).toFormat('ccc d LLL, HH:mm') : 'Not scheduled'}</td>
-          <td><Badge tone={tones[post.status] ?? 'outline'}>{statusLabel(post.status)}</Badge></td><td>{post.campaign ?? '—'}</td>
+          <td><Badge tone={tones[post.status] ?? 'outline'}>{POST_STATUS_LABELS[post.status]}</Badge></td><td>{post.campaign ?? '—'}</td>
         </tr>)}</tbody>
       </table>
     </section>

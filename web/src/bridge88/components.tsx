@@ -2,8 +2,15 @@
 
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState } from 'react';
-import type { ButtonHTMLAttributes, CSSProperties, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes, VideoHTMLAttributes } from 'react';
+import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes, VideoHTMLAttributes } from 'react';
+import { Check, ChevronDown } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { createPortal } from 'react-dom';
+
+// Lives in a server-safe module; re-exported here for existing client imports.
+// Server components must import it from '@/bridge88/humanize' instead.
+export { humanizeMachineValue } from './humanize';
+export { PagePreview, Shimmer } from './preview';
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   children: ReactNode;
@@ -187,37 +194,255 @@ export function Select({
   );
 }
 
-const HUMAN_MACHINE_VALUES: Record<string, string> = {
-  'ai-image-variation': 'AI image variation',
-  'ai-video-generate': 'Generated video',
-  'ai-audio-tts': 'AI voiceover',
-  'ai-image-variation-edit': 'Edited AI image',
-  'text-to-video': 'Video from text',
-  'text-to-speech': 'Spoken audio',
-  'image-variation': 'AI image variation',
-  'video-generate': 'Generated video',
-  'audio-tts': 'AI voiceover',
+export type DropdownOption = {
+  value: string;
+  label: string;
+  disabled?: boolean;
+};
+
+export type DropdownProps = {
+  label: string;
+  options: DropdownOption[];
+  value?: string;
+  defaultValue?: string;
+  onChange?: (value: string) => void;
+  id?: string;
+  className?: string;
+  containerClassName?: string;
+  disabled?: boolean;
+  'aria-label'?: string;
 };
 
 /**
- * Converts provider tokens and generated filenames into user-facing labels.
- * A sequence can distinguish repeated generated-video fixtures.
+ * A custom-rendered single-select for application chrome. Native Select stays
+ * the form primitive; Dropdown owns its popup so menus share Bridge88 styling.
  */
-export function humanizeMachineValue(value: string, options: { sequence?: number } = {}) {
-  const normalized = value.trim().toLowerCase().replaceAll('_', '-');
-  if (/^ai-image-\d+\.(png|jpe?g|webp)$/i.test(normalized)) return 'Generated image';
-  if (normalized === 'ai-video-generate.webm') {
-    return options.sequence ? `Generated video ${options.sequence}` : 'Generated video';
-  }
-  const withoutExtension = normalized.replace(/\.[a-z0-9]{2,5}$/i, '');
-  const mapped = HUMAN_MACHINE_VALUES[withoutExtension];
-  if (mapped) return mapped;
-  const readable = withoutExtension
-    .replace(/\b\d{10,}\b/g, '')
-    .replace(/-+/g, ' ')
-    .trim();
-  if (!readable) return 'Generated asset';
-  return readable.charAt(0).toUpperCase() + readable.slice(1);
+export function Dropdown({
+  label,
+  options,
+  value,
+  defaultValue,
+  onChange,
+  id,
+  className = '',
+  containerClassName = '',
+  disabled = false,
+  'aria-label': ariaLabel,
+}: DropdownProps) {
+  const generatedId = useId();
+  const dropdownId = id ?? generatedId;
+  const labelId = `${dropdownId}-label`;
+  const valueId = `${dropdownId}-value`;
+  const listboxId = `${dropdownId}-listbox`;
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
+  const typeaheadRef = useRef({ value: '', at: 0 });
+  const [open, setOpen] = useState(false);
+  const [internalValue, setInternalValue] = useState(defaultValue ?? options.find((option) => !option.disabled)?.value ?? '');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [popupStyle, setPopupStyle] = useState<CSSProperties>({ visibility: 'hidden' });
+  const selectedValue = value ?? internalValue;
+  const selectedIndex = Math.max(0, options.findIndex((option) => option.value === selectedValue));
+  const selectedOption = options[selectedIndex];
+
+  const firstEnabled = () => options.findIndex((option) => !option.disabled);
+  const lastEnabled = () => {
+    for (let index = options.length - 1; index >= 0; index -= 1) {
+      if (!options[index].disabled) return index;
+    }
+    return -1;
+  };
+  const nextEnabled = (from: number, direction: 1 | -1) => {
+    if (!options.length) return -1;
+    for (let offset = 1; offset <= options.length; offset += 1) {
+      const index = (from + direction * offset + options.length) % options.length;
+      if (!options[index].disabled) return index;
+    }
+    return -1;
+  };
+  const openMenu = () => {
+    if (disabled || !options.length) return;
+    const initial = options[selectedIndex]?.disabled ? firstEnabled() : selectedIndex;
+    setActiveIndex(initial < 0 ? 0 : initial);
+    setOpen(true);
+  };
+  const closeMenu = (restoreFocus = false) => {
+    setOpen(false);
+    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+  const choose = (index: number) => {
+    const option = options[index];
+    if (!option || option.disabled) return;
+    if (value === undefined) setInternalValue(option.value);
+    onChange?.(option.value);
+    closeMenu(true);
+  };
+  const moveTabFocus = (backwards: boolean) => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const controls = Array.from(document.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )).filter((element) => element.getClientRects().length > 0 && !listboxRef.current?.contains(element));
+    const triggerIndex = controls.indexOf(trigger);
+    controls[triggerIndex + (backwards ? -1 : 1)]?.focus();
+  };
+  const typeahead = (key: string) => {
+    const now = Date.now();
+    const previous = typeaheadRef.current;
+    const search = `${now - previous.at > 500 ? '' : previous.value}${key}`.toLocaleLowerCase();
+    typeaheadRef.current = { value: search, at: now };
+    const start = activeIndex < 0 ? 0 : activeIndex + 1;
+    for (let offset = 0; offset < options.length; offset += 1) {
+      const index = (start + offset) % options.length;
+      if (!options[index].disabled && options[index].label.toLocaleLowerCase().startsWith(search)) {
+        setActiveIndex(index);
+        return;
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const updatePosition = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const viewportPadding = 8;
+      const gap = 8;
+      const desiredHeight = Math.min(options.length * 40 + 16, 320);
+      const below = window.innerHeight - rect.bottom - gap - viewportPadding;
+      const above = rect.top - gap - viewportPadding;
+      const placeBelow = below >= Math.min(desiredHeight, 200) || below >= above;
+      const maxHeight = Math.max(80, placeBelow ? below : above);
+      const width = Math.min(rect.width, window.innerWidth - viewportPadding * 2);
+      const left = Math.min(
+        Math.max(viewportPadding, rect.left),
+        window.innerWidth - viewportPadding - width,
+      );
+      setPopupStyle({
+        position: 'fixed',
+        left,
+        top: placeBelow ? rect.bottom + gap : Math.max(viewportPadding, rect.top - gap - Math.min(desiredHeight, maxHeight)),
+        width,
+        maxHeight,
+        visibility: 'visible',
+      });
+    };
+    updatePosition();
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !listboxRef.current?.contains(target)) closeMenu();
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [open, options.length]);
+
+  useEffect(() => {
+    if (open && popupStyle.visibility === 'visible') listboxRef.current?.focus();
+  }, [open, popupStyle.visibility]);
+
+  return (
+    <div className={`b88-dropdown ${containerClassName}`}>
+      <span id={labelId} className="b88-label">{label}</span>
+      <button
+        ref={triggerRef}
+        id={dropdownId}
+        type="button"
+        disabled={disabled}
+        aria-label={ariaLabel ? `${ariaLabel}: ${selectedOption?.label ?? 'Select'}` : undefined}
+        aria-labelledby={ariaLabel ? undefined : `${labelId} ${valueId}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? listboxId : undefined}
+        title={selectedOption?.label}
+        className={`b88-dropdown-trigger ${className}`}
+        onClick={() => open ? closeMenu() : openMenu()}
+        onKeyDown={(event) => {
+          if (open && event.key === 'Escape') {
+            event.preventDefault();
+            closeMenu(true);
+            return;
+          }
+          if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            if (!open) {
+              openMenu();
+            } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              const next = nextEnabled(activeIndex, event.key === 'ArrowDown' ? 1 : -1);
+              if (next >= 0) setActiveIndex(next);
+            }
+          }
+        }}
+      >
+        <span id={valueId} className="b88-dropdown-value">{selectedOption?.label ?? 'Select'}</span>
+        <ChevronDown size={16} strokeWidth={1.75} aria-hidden="true" />
+      </button>
+      {open && createPortal(
+        <div
+          ref={listboxRef}
+          id={listboxId}
+          role="listbox"
+          tabIndex={-1}
+          aria-labelledby={labelId}
+          aria-activedescendant={`${dropdownId}-option-${activeIndex}`}
+          className="b88-dropdown-listbox"
+          style={popupStyle}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault();
+              const next = nextEnabled(activeIndex, event.key === 'ArrowDown' ? 1 : -1);
+              if (next >= 0) setActiveIndex(next);
+            } else if (event.key === 'Home' || event.key === 'End') {
+              event.preventDefault();
+              const next = event.key === 'Home' ? firstEnabled() : lastEnabled();
+              if (next >= 0) setActiveIndex(next);
+            } else if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              choose(activeIndex);
+            } else if (event.key === 'Escape') {
+              event.preventDefault();
+              closeMenu(true);
+            } else if (event.key === 'Tab') {
+              event.preventDefault();
+              closeMenu();
+              requestAnimationFrame(() => moveTabFocus(event.shiftKey));
+            } else if (event.key.length === 1 && /\S/.test(event.key) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+              typeahead(event.key);
+            }
+          }}
+        >
+          {options.map((option, index) => {
+            const selected = option.value === selectedValue;
+            return (
+              <div
+                key={option.value}
+                id={`${dropdownId}-option-${index}`}
+                role="option"
+                aria-selected={selected}
+                aria-disabled={option.disabled || undefined}
+                className="b88-dropdown-option"
+                data-active={index === activeIndex || undefined}
+                data-selected={selected || undefined}
+                onPointerMove={() => { if (!option.disabled) setActiveIndex(index); }}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => choose(index)}
+              >
+                <span className="b88-dropdown-option-label">{option.label}</span>
+                {selected && <Check size={16} strokeWidth={1.75} aria-hidden="true" />}
+              </div>
+            );
+          })}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
 }
 
 export function TextArea({
@@ -321,14 +546,14 @@ export function EmptyState({
 }: {
   eyebrow: string;
   title: string;
-  children: ReactNode;
+  children?: ReactNode;
   action?: ReactNode;
 }) {
   return (
     <section className="rounded-lg border border-dashed border-hairline p-10 text-center">
       <p className="b88-caption">{eyebrow}</p>
       <h2 className="b88-heading mt-3">{title}</h2>
-      <div className="mx-auto mt-2 max-w-lg text-[15px]">{children}</div>
+      {children && <div className="mx-auto mt-2 max-w-lg text-[15px]">{children}</div>}
       {action && <div className="mt-5">{action}</div>}
     </section>
   );
@@ -635,15 +860,22 @@ export function MediaUploader({
   );
 }
 
+export type SegmentedTabsProps = Omit<HTMLAttributes<HTMLDivElement>, 'onChange'> & {
+  items: string[];
+  value?: string;
+  onChange?: (value: string) => void;
+  /** Adds the hairline, soft-surface inset used when tabs edit a setting. */
+  variant?: 'plain' | 'setting';
+};
+
 export function SegmentedTabs({
   items,
   value,
   onChange,
-}: {
-  items: string[];
-  value?: string;
-  onChange?: (value: string) => void;
-}) {
+  variant = 'plain',
+  className = '',
+  ...props
+}: SegmentedTabsProps) {
   const active = value ?? items[0];
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([]);
   const moveFocus = (index: number) => {
@@ -651,7 +883,14 @@ export function SegmentedTabs({
     tabsRef.current[(index + items.length) % items.length]?.focus();
   };
   return (
-    <div role="tablist" className="flex flex-wrap gap-1">
+    <div
+      {...props}
+      role="tablist"
+      className={`${variant === 'setting'
+        ? 'inline-flex rounded-pill border border-[var(--hairline)] bg-[var(--surface-soft)] p-1'
+        : 'flex flex-wrap'
+      } gap-1 ${className}`}
+    >
       {items.map((item, index) => (
         <button
           key={item}

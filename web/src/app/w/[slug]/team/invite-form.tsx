@@ -28,7 +28,7 @@ export function InviteForm({ slug }: { slug: string }) {
     >
       <p className="b88-caption">Invite member</p>
       <h2 className="b88-heading mt-2">Add a collaborator</h2>
-      <p className="mt-2 text-sm">The invitation expires after seven days. You can resend or cancel it from the member list.</p>
+      <p className="mt-2 text-sm">Invitations expire after seven days.</p>
       {message && <StatusMessage tone={message.tone} className="mt-5">{message.text}</StatusMessage>}
       <Field name="email" label="Email" type="email" containerClassName="mt-5" required />
       <Select name="role" label="Role" containerClassName="mt-4" defaultValue="EDITOR">

@@ -30,12 +30,7 @@ function BrandEditor({ slug, values }: { slug: string; values: BrandValues }) {
   const words = (value: string[] | undefined) => value?.join(', ') ?? '';
 
   return (
-    <form action={action} className="b88-card space-y-6">
-      <div>
-        <p className="b88-caption">AI context</p>
-        <h2 className="b88-heading mt-2">Brand voice</h2>
-        <p className="mt-2 text-sm">These saved rules guide copy generated across this workspace.</p>
-      </div>
+    <form action={action} className="space-y-6">
       {state.error && <StatusMessage tone="error">{state.error}</StatusMessage>}
       {state.success && <StatusMessage tone="success">{state.success}</StatusMessage>}
       <Field name="tone" label="Tone" defaultValue={values.tone ?? ''} />
@@ -82,14 +77,14 @@ export function BrandVoiceForms({
   return (
     <div className="space-y-6">
       <BrandEditor key={previewState.preview ? JSON.stringify(previewState.preview) : 'saved'} slug={slug} values={values} />
-      <form action={previewAction} className="rounded-lg bg-[var(--block-lilac)] p-8">
+      <form action={previewAction} className="rounded-lg bg-[var(--block-lilac)] p-5">
         <p className="b88-caption">AI preview</p>
-        <h2 className="b88-heading mt-2">Generate from business context</h2>
-        <p className="mt-2 text-sm">Generation does not change saved settings. Review the populated fields, then save.</p>
-        {previewState.error && <StatusMessage tone="error" className="mt-5">{previewState.error}</StatusMessage>}
-        {previewState.success && <StatusMessage tone="success" className="mt-5">{previewState.success}</StatusMessage>}
-        <TextArea name="description" label="Brand context" rows={4} containerClassName="mt-6" defaultValue={context} required />
-        <PendingButton type="submit" variant="secondary" className="mt-6" pendingLabel="Generating preview">
+        <h3 className="mt-2 text-lg font-[540]">Generate from business context</h3>
+        <p className="mt-2 text-sm">Previewing does not save changes.</p>
+        {previewState.error && <StatusMessage tone="error" className="mt-4">{previewState.error}</StatusMessage>}
+        {previewState.success && <StatusMessage tone="success" className="mt-4">{previewState.success}</StatusMessage>}
+        <TextArea name="description" label="Brand context" rows={3} containerClassName="mt-5" defaultValue={context} required />
+        <PendingButton type="submit" variant="secondary" className="mt-5" pendingLabel="Generating preview">
           Generate preview
         </PendingButton>
       </form>

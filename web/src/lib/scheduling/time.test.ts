@@ -21,17 +21,17 @@ describe('timezone conversion', () => {
 
   it('rejects a local time skipped by the spring DST transition', () => {
     expect(() => localInputToUtc('2027-03-14T02:30', 'America/New_York')).toThrow(
-      '2027-03-14 02:30 does not exist in America/New_York',
+      'Mar 14, 2027, 2:30 AM does not exist in Eastern Time',
     );
     expect(() => toUtc(
       { year: 2027, month: 3, day: 14, hour: 2, minute: 30 },
       'America/New_York',
-    )).toThrow('2027-03-14 02:30 does not exist in America/New_York');
+    )).toThrow('Mar 14, 2027, 2:30 AM does not exist in Eastern Time');
   });
 
   it('names an incomplete local date-time value', () => {
     expect(() => localInputToUtc('2026-09-15', 'America/New_York')).toThrow(
-      '"2026-09-15" is not a complete local date and time.',
+      'Enter a complete local date and time.',
     );
   });
 });

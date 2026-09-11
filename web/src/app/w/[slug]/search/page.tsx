@@ -1,6 +1,7 @@
 import Form from 'next/form';
 import Link from 'next/link';
 import { Badge, Button, EmptyState, Field, Select, StatusMessage } from '@/bridge88/components';
+import { humanizeMachineValue } from '@/bridge88/humanize';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { PLATFORM_LABELS, PLATFORMS } from '@/lib/social/registry';
@@ -8,6 +9,10 @@ import type { PostStatus } from '@prisma/client';
 import { hasSearchCriteria, parseSearchFilters } from '@/lib/search/filters';
 import { PostResultActions } from './result-actions';
 import { deleteSearchViewAction, saveSearchViewAction } from '@/app/actions/search';
+import { POST_STATUS_LABELS } from '@/lib/posts/labels';
+import { CAMPAIGN_STATUS_LABELS } from '@/lib/campaigns/validation';
+
+export const metadata = { title: 'Search' };
 
 // Every control on the filter rows has to match the Search pill at 40px. The
 // kit field wrappers always carry b88-input, whose 48px floor outlives the
@@ -104,9 +109,9 @@ export default async function SearchPage({
     }) : [],
   ]);
   const results = [
-    ...posts.map((item) => ({ id: item.id, type: 'Post' as const, label: item.title ?? 'Untitled post', meta: [item.status.replaceAll('_', ' ').toLowerCase(), item.campaign?.name].filter(Boolean).join(' · '), href: `/w/${slug}/posts/${item.id}` })),
-    ...media.map((item) => ({ id: item.id, type: 'Media' as const, label: item.filename, meta: `${item.type.toLowerCase()} · ${(item.size / 1024 / 1024).toFixed(1)} MB`, href: `/w/${slug}/media?asset=${item.id}` })),
-    ...campaigns.map((item) => ({ id: item.id, type: 'Campaign' as const, label: item.name, meta: item.status.toLowerCase(), href: `/w/${slug}/campaigns?campaign=${item.id}` })),
+    ...posts.map((item) => ({ id: item.id, type: 'Post' as const, label: item.title ?? 'Untitled post', meta: [POST_STATUS_LABELS[item.status], item.campaign?.name].filter(Boolean).join(' · '), href: `/w/${slug}/posts/${item.id}` })),
+    ...media.map((item) => ({ id: item.id, type: 'Media' as const, label: humanizeMachineValue(item.filename), meta: `${humanizeMachineValue(item.type)} · ${(item.size / 1024 / 1024).toFixed(1)} MB`, href: `/w/${slug}/media?asset=${item.id}` })),
+    ...campaigns.map((item) => ({ id: item.id, type: 'Campaign' as const, label: item.name, meta: CAMPAIGN_STATUS_LABELS[item.status], href: `/w/${slug}/campaigns?campaign=${item.id}` })),
     ...accounts.map((item) => ({ id: item.id, type: 'Account' as const, label: item.accountName, meta: PLATFORM_LABELS[item.platform], href: `/w/${slug}/channels?account=${item.id}` })),
   ];
   return (
@@ -157,7 +162,7 @@ export default async function SearchPage({
       {filters.error && <StatusMessage tone="error" className="mt-4 max-w-5xl">{filters.error}</StatusMessage>}
       {results.length ? (
         <section className="b88-card mt-6 max-w-5xl">
-          <div className="flex items-center justify-between gap-3"><p className="b88-caption">{results.length} results</p><p className="text-sm">Every result includes its next action.</p></div>
+          <p className="b88-caption">{results.length} results</p>
           <div className="mt-3">
           {results.map((result) => <article key={`${result.type}-${result.id}`} className="flex flex-col gap-3 border-t border-hairline-soft py-4 sm:flex-row sm:items-center">
             <Badge tone="outline">{result.type}</Badge>
@@ -170,11 +175,10 @@ export default async function SearchPage({
         </section>
       ) : (
         <div className="mt-6 max-w-5xl">
-          <EmptyState eyebrow={shouldSearch ? 'No matches' : 'Nothing searched yet'} title={shouldSearch ? 'No matching workspace items' : 'Enter a search term or choose a filter'}>
-            {shouldSearch
-              ? 'Use the focused search field above to try a shorter term, clear a filter, or widen the date range.'
-              : 'The search field above is focused and ready. Search post copy, titles, campaigns, platforms, media and connected accounts.'}
-          </EmptyState>
+          <EmptyState
+            eyebrow={shouldSearch ? 'No matches' : 'Nothing searched yet'}
+            title={shouldSearch ? 'Try broader filters' : 'Enter a search term'}
+          />
         </div>
       )}
     </>

@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { Avatar, Badge, Button, EmptyState, Field, Select, StatusMessage } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
@@ -8,19 +9,33 @@ import {
 import { ActionForm } from '@/components/action-form';
 import { ConfirmationButton, PendingButton } from '@/components/action-ui';
 import type { ActionState } from '@/lib/actions/state';
+import { TeamPagePreview } from '@/components/page-previews';
 import { InviteForm } from './invite-form';
+import { WORKSPACE_ROLE_LABELS } from '@/lib/workspaces/labels';
 
-function sentenceCase(value: string) {
-  const words = value.replaceAll('_', ' ').toLowerCase();
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
+export const metadata = { title: 'Team' };
 
 async function resendInviteFormAction(slug: string, inviteId: string, _state: ActionState, _formData: FormData) {
   'use server';
   return resendInviteAction(slug, inviteId);
 }
-
-export default async function TeamPage({
+export default function TeamPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ ownershipTransferred?: string }>;
+}) {
+  return (
+    <>
+      <p className="b88-eyebrow">Collaboration</p><h1 className="b88-page-title mt-3">Team and approvals</h1>
+      <Suspense fallback={<TeamPagePreview />}>
+        <TeamData params={params} searchParams={searchParams} />
+      </Suspense>
+    </>
+  );
+}
+async function TeamData({
   params,
   searchParams,
 }: {
@@ -46,14 +61,13 @@ export default async function TeamPage({
     }),
   ]);
   return (
-    <>
-      <p className="b88-eyebrow">Collaboration</p><h1 className="b88-page-title mt-3">Team and approvals</h1>
+    <div className="mt-8 min-h-[620px]">
       {query.ownershipTransferred === '1' && (
         <StatusMessage tone="success" className="mt-6">
           Ownership transferred. Your role is now Admin.
         </StatusMessage>
       )}
-      <div className="mt-8 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,.8fr)]">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,.8fr)]">
         <section className="b88-card">
           <p className="b88-caption">Members</p><h2 className="b88-heading mt-2">Workspace access</h2>
           <div className="mt-5">
@@ -62,7 +76,7 @@ export default async function TeamPage({
                 <Avatar name={member.user.name ?? member.user.email} src={member.user.image}/>
                 <div className="min-w-0 flex-1"><p className="truncate font-[480]">{member.user.name ?? member.user.email}</p><p className="text-sm">{member.user.email}</p></div>
                 {member.role === 'OWNER' || !ctx.can('member:update_role') ? (
-                  <Badge tone={member.role === 'OWNER' ? 'ink' : 'outline'}>{sentenceCase(member.role)}</Badge>
+                  <Badge tone={member.role === 'OWNER' ? 'ink' : 'outline'}>{WORKSPACE_ROLE_LABELS[member.role]}</Badge>
                 ) : (
                   <div className="col-span-3 flex flex-wrap items-end gap-2 sm:col-span-1 sm:col-start-3">
                     <form action={updateMemberRoleAction.bind(null, slug, member.id)} className="flex min-w-0 flex-1 flex-wrap items-end gap-2 sm:flex-nowrap">
@@ -89,7 +103,7 @@ export default async function TeamPage({
           </div>
           {!!invites.length && <div className="mt-5 rounded-md bg-surface-soft p-4"><p className="b88-caption">Pending invites</p>{invites.map((invite) => (
             <div key={invite.id} className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-              <span className="mr-auto">{invite.email} · {sentenceCase(invite.role)}</span>
+              <span className="mr-auto">{invite.email} · {WORKSPACE_ROLE_LABELS[invite.role]}</span>
               {ctx.can('member:invite') && <><ActionForm action={resendInviteFormAction.bind(null, slug, invite.id)}><PendingButton type="submit" variant="secondary" pendingLabel="Resending">Resend</PendingButton></ActionForm><form action={revokeInviteAction.bind(null, slug, invite.id)}><ConfirmationButton confirmMessage={`Revoke the invitation for ${invite.email}?`} variant="tertiary" pendingLabel="Revoking">Revoke</ConfirmationButton></form></>}
             </div>
           ))}</div>}
@@ -119,12 +133,10 @@ export default async function TeamPage({
               eyebrow="Queue clear"
               title="No posts are waiting for approval"
               action={<Button href={`/w/${slug}/drafts`}>Open drafts</Button>}
-            >
-              Submit a draft for approval when it is ready for a reviewer.
-            </EmptyState>
+            />
           </div>
         )}
       </section>
-    </>
+    </div>
   );
 }

@@ -1,5 +1,5 @@
 import 'server-only';
-import { Platform, SocialAccountStatus, type SocialAccount } from '@prisma/client';
+import { Platform, SocialAccountStatus, type Prisma, type SocialAccount } from '@prisma/client';
 import { db } from '@/lib/db';
 import { decryptOptional, encryptOptional } from '@/lib/crypto/tokens';
 import { getAdapterForAccount } from '@/lib/social/registry';
@@ -178,28 +178,40 @@ export async function createDemoAccount(input: {
   handle?: string;
   simulate?: 'flaky' | 'expired' | 'rejected';
 }): Promise<SocialAccount> {
-  const externalAccountId = `demo-${input.platform.toLowerCase()}-${Math.random().toString(36).slice(2, 10)}`;
-  return db.socialAccount.create({
-    data: {
-      workspaceId: input.workspaceId,
-      platform: input.platform,
-      accountName: input.accountName,
-      accountHandle: input.handle ?? `@${input.accountName.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
-      externalAccountId,
-      accessTokenEncrypted: encryptOptional(`demo-token-${externalAccountId}`),
-      tokenExpiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365),
-      scopes: ['read', 'publish', 'analytics'],
-      status: input.simulate === 'expired' ? SocialAccountStatus.EXPIRED : SocialAccountStatus.ACTIVE,
-      statusMessage:
-        input.simulate === 'expired'
-          ? `Authorization expired. Reconnect ${input.accountName} to continue publishing.`
-          : null,
-      lastSyncedAt: new Date(),
-      metadata: {
-        mock: true,
-        handle: input.handle,
-        ...(input.simulate ? { simulate: input.simulate } : {}),
+  const externalAccountId = `demo-${input.workspaceId}-${input.platform.toLowerCase()}`;
+  const data = {
+    accountName: input.accountName,
+    accountHandle: input.handle ?? `@${input.accountName.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+    accessTokenEncrypted: encryptOptional(`demo-token-${externalAccountId}`),
+    refreshTokenEncrypted: null,
+    tokenExpiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365),
+    scopes: ['read', 'publish', 'analytics'],
+    status: input.simulate === 'expired' ? SocialAccountStatus.EXPIRED : SocialAccountStatus.ACTIVE,
+    statusMessage:
+      input.simulate === 'expired'
+        ? `Authorization expired. Reconnect ${input.accountName} to continue publishing.`
+        : null,
+    lastSyncedAt: new Date(),
+    metadata: {
+      mock: true,
+      handle: input.handle,
+      ...(input.simulate ? { simulate: input.simulate } : {}),
+    },
+  } satisfies Prisma.SocialAccountUncheckedUpdateInput;
+  return db.socialAccount.upsert({
+    where: {
+      workspaceId_platform_externalAccountId: {
+        workspaceId: input.workspaceId,
+        platform: input.platform,
+        externalAccountId,
       },
     },
+    create: {
+      workspaceId: input.workspaceId,
+      platform: input.platform,
+      externalAccountId,
+      ...data,
+    },
+    update: data,
   });
 }

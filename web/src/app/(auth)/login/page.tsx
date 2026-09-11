@@ -1,6 +1,8 @@
 import { googleEnabled } from '@/auth';
 import { LoginForm } from '../auth-form';
 
+export const metadata = { title: 'Sign in' };
+
 export default async function LoginPage({
   searchParams,
 }: {

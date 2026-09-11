@@ -1,19 +1,40 @@
 import { DateTime } from 'luxon';
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { Badge, Button, EmptyState, StatCard } from '@/bridge88/components';
 import { StatusGlyph } from '@/components/visuals';
+import { DashboardPagePreview } from '@/components/page-previews';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { PLATFORM_LABELS } from '@/lib/social/registry';
-import { formatInZone } from '@/lib/scheduling/time';
+import { formatInZone, timezoneLabel } from '@/lib/scheduling/time';
+import { POST_STATUS_LABELS } from '@/lib/posts/labels';
 
-function statusLabel(status: string) {
-  const words = status.toLowerCase().replaceAll('_', ' ');
-  return words.charAt(0).toUpperCase() + words.slice(1);
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const { workspace } = await requireWorkspace(slug, 'workspace:view');
+  return { title: workspace.name.trim() || 'Workspace' };
 }
 
 export default async function DashboardPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  return (
+    <>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="b88-eyebrow">Dashboard</p>
+          <h1 className="b88-page-title mt-3">Publishing overview</h1>
+        </div>
+        <Button href={`/w/${slug}/compose`}>Create post</Button>
+      </div>
+      <Suspense fallback={<DashboardPagePreview />}>
+        <DashboardData slug={slug} />
+      </Suspense>
+    </>
+  );
+}
+
+async function DashboardData({ slug }: { slug: string }) {
   const { workspace } = await requireWorkspace(slug, 'workspace:view');
   const localNow = DateTime.now().setZone(workspace.timezone);
   const todayStart = localNow.startOf('day').toUTC().toJSDate();
@@ -66,13 +87,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ slug
 
   return (
     <>
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="b88-eyebrow">Dashboard · {workspace.timezone}</p>
-          <h1 className="b88-page-title mt-3">Publishing overview</h1>
-        </div>
-        <Button href={`/w/${slug}/compose`}>Create post</Button>
-      </div>
+      <p className="b88-caption mt-2">{timezoneLabel(workspace.timezone)}</p>
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Scheduled today" value={String(today)} />
@@ -108,15 +123,13 @@ export default async function DashboardPage({ params }: { params: Promise<{ slug
                     </p>
                   </div>
                   <Badge tone={post.status === 'FAILED' || post.status === 'REJECTED' ? 'coral' : post.status === 'PENDING_APPROVAL' ? 'cream' : post.status === 'DRAFT' ? 'outline' : 'lime'}>
-                    {statusLabel(post.status)}
+                    {POST_STATUS_LABELS[post.status]}
                   </Badge>
                 </Link>
               ))}
             </div>
           ) : (
-            <EmptyState eyebrow="No posts yet" title="Your queue is clear" action={<Button href={`/w/${slug}/compose`}>New post</Button>}>
-              Drafts and scheduled posts land here.
-            </EmptyState>
+            <EmptyState eyebrow="No posts yet" title="Your queue is clear" action={<Button href={`/w/${slug}/compose`}>New post</Button>} />
           )}
         </section>
 

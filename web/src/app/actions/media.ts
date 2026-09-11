@@ -298,7 +298,7 @@ export async function mutateAssetsAction(slug: string, formData: FormData) {
       where: { mediaAssetId: { in: ids }, mediaAsset: { workspaceId: ctx.workspace.id } },
       select: { mediaAsset: { select: { filename: true } } },
     });
-    if (used) throw new Error(`${used.mediaAsset.filename} is attached to a post. Remove or replace it there first.`);
+    if (used) throw new Error('This asset is attached to a post. Remove or replace it there first.');
     await Promise.all(assets.flatMap((asset) => [
       storage().delete(asset.storageKey),
       asset.thumbnailKey ? storage().delete(asset.thumbnailKey) : Promise.resolve(),

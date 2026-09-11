@@ -34,6 +34,7 @@ import {
   skipRecurrenceOccurrenceAction,
   updateRecurrenceAction,
 } from '@/app/actions/recurrence';
+import { timezoneLabel } from '@/lib/scheduling/time';
 
 type Rule = { id: string; weekday: number; hour: number; minute: number; enabled: boolean };
 type QueuePost = { id: string; title: string; slotAt: string };
@@ -65,7 +66,9 @@ export function QueueManager({
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState<string | null>(null);
   const [selectedDrafts, setSelectedDrafts] = useState<string[]>([]);
+  const [showAllDrafts, setShowAllDrafts] = useState(false);
   const [message, setMessage] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
+  const displayTimezone = timezoneLabel(timezone);
   const run = (work: () => Promise<unknown>, success?: string) => startTransition(async () => {
     try {
       await work();
@@ -95,7 +98,7 @@ export function QueueManager({
         <div className="b88-card">
           <p className="b88-caption">Next open slot</p>
           <p className="mt-3 text-2xl font-[340]">{nextSlot ? DateTime.fromISO(nextSlot).setZone(timezone).toFormat('ccc d LLL, HH:mm') : 'No open slot'}</p>
-          <p className="b88-caption mt-3">{timezone}</p>
+          <p className="b88-caption mt-3">{displayTimezone}</p>
         </div>
         <div className="b88-card">
           <p className="b88-caption">Queued posts</p>
@@ -133,14 +136,14 @@ export function QueueManager({
               <IconButton type="button" icon={X} label={`Remove ${post.title} from queue`} disabled={pending} onClick={() => confirm(`Remove “${post.title}” from the queue and return it to drafts?`) && run(() => removePostFromQueueAction(slug, post.id), 'Post returned to drafts.')} />
             </div>}
           </li>
-        ))}</ol> : <div className="mt-6"><EmptyState eyebrow="Queue clear" title="No posts are queued" action={<Button href={`/w/${slug}/compose`}>Create a draft</Button>}>Create a post, save it as a draft, then return here to assign the next open slot.</EmptyState></div>}
+        ))}</ol> : <div className="mt-6"><EmptyState eyebrow="Queue clear" title="No posts are queued" action={<Button href={`/w/${slug}/compose`}>Create a draft</Button>} /></div>}
         {canManage && <div className="mt-6 border-t border-hairline pt-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div><p className="b88-label">Posts ready to queue</p><p className="mt-1 text-sm">{paused ? 'Resume the queue before assigning new slots.' : 'Select drafts or scheduled posts. They will receive sequential open slots in this order.'}</p></div>
             {!drafts.length && <Button href={`/w/${slug}/compose`} variant="secondary">Create a draft</Button>}
           </div>
           {drafts.length > 0 && <div className="mt-3 grid gap-1 sm:grid-cols-2">
-            {drafts.map((post) => <Checkbox
+            {(showAllDrafts ? drafts : drafts.slice(0, 6)).map((post) => <Checkbox
               key={post.id}
               label={post.title}
               value={post.id}
@@ -150,8 +153,9 @@ export function QueueManager({
               containerClassName="rounded-md px-3 hover:bg-surface-soft"
             />)}
           </div>}
+          {drafts.length > 6 && <Button type="button" variant="tertiary" className="mt-3" onClick={() => setShowAllDrafts((current) => !current)}>{showAllDrafts ? 'Show fewer posts' : `View all ${drafts.length} posts`}</Button>}
         </div>}
-        {selectedDrafts.length > 0 && <div className="b88-selection-bar" role="region" aria-label={`Queue ${selectedDrafts.length} selected posts`} style={{ flexWrap: 'nowrap', justifyContent: 'flex-start', overflowX: 'auto' }}>
+        {selectedDrafts.length > 0 && <div className="b88-selection-bar" role="region" aria-label={`Queue ${selectedDrafts.length} selected posts`}>
           <span className="px-2 text-sm font-[480]">{selectedDrafts.length} selected</span>
           <Button type="button" variant="secondary" disabled={pending || paused} onClick={() => run(async () => {
             for (const id of selectedDrafts) await addPostToQueueAction(slug, id);
@@ -161,7 +165,12 @@ export function QueueManager({
         </div>}
       </section>
 
-      <section className="b88-card mt-6">
+      <details className="b88-card mt-6">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3">
+          <span><span className="b88-caption block">Queue settings</span><span className="mt-1 block text-lg font-[540]">Weekly posting times</span></span>
+          <span className="b88-caption whitespace-nowrap">{rules.length} rules · Open</span>
+        </summary>
+        <div className="mt-5 border-t border-hairline-soft pt-5">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="b88-eyebrow">Posting times</p><h2 className="b88-heading mt-2">Weekly slot rules</h2></div></div>
         <StatusMessage className="mt-4">Changes apply only to future queue assignments. Posts already queued keep their current publishing times.</StatusMessage>
         {rules.length ? <div className="mt-6 space-y-3">{rules.map((rule) => (
@@ -185,7 +194,7 @@ export function QueueManager({
             </div>
           </form>
           </details>
-        ))}</div> : <div className="mt-6"><EmptyState eyebrow="No posting times" title="Add your first slot">Queue posts need at least one weekly publishing time.</EmptyState></div>}
+        ))}</div> : <div className="mt-6"><EmptyState eyebrow="No posting times" title="Add your first slot" /></div>}
         {canManage && <form onSubmit={(event) => {
           event.preventDefault();
           const formData = new FormData(event.currentTarget);
@@ -196,16 +205,22 @@ export function QueueManager({
           <Field label="Minute" name="minute" type="number" min={0} max={59} step={5} defaultValue={0} className={compactInput} />
           <Button type="submit" disabled={pending}>Add slot</Button>
         </form>}
-      </section>
+        </div>
+      </details>
 
-      <section className="b88-card mt-6">
+      <details className="b88-card mt-6">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3">
+          <span><span className="b88-caption block">Automation</span><span className="mt-1 block text-lg font-[540]">Recurring schedules</span></span>
+          <span className="b88-caption whitespace-nowrap">{recurrences.length} series · Open</span>
+        </summary>
+        <div className="mt-5 border-t border-hairline-soft pt-5">
         <p className="b88-eyebrow">Recurring schedules</p><h2 className="b88-heading mt-2">Repeating content</h2>
         <p className="mt-2 text-sm">Edit an occurrence from its post detail without changing the series. Editing the series replaces all future, unpublished occurrences.</p>
         <div className="mt-6 space-y-4">{recurrences.map((recurrence) => editing === recurrence.id ? (
           <RecurrenceForm key={recurrence.id} slug={slug} recurrence={recurrence} accounts={accounts} campaigns={campaigns} pending={pending} run={run} onCancel={() => setEditing(null)} />
         ) : (
           <article key={recurrence.id} className="rounded-md bg-surface-soft p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-[480]">{recurrence.name}</h3><p className="b88-caption mt-1">{recurrenceFrequencyLabel(recurrence)} · {String(recurrence.hour).padStart(2, '0')}:{String(recurrence.minute).padStart(2, '0')} · {timezone}</p></div><Badge tone={recurrence.status === 'ACTIVE' ? 'lilac' : 'outline'}>{recurrence.status === 'ACTIVE' ? 'Active' : recurrence.status === 'PAUSED' ? 'Paused' : 'Ended'}</Badge></div>
+            <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-[480]">{recurrence.name}</h3><p className="b88-caption mt-1">{recurrenceFrequencyLabel(recurrence)} · {String(recurrence.hour).padStart(2, '0')}:{String(recurrence.minute).padStart(2, '0')} · {displayTimezone}</p></div><Badge tone={recurrence.status === 'ACTIVE' ? 'lilac' : 'outline'}>{recurrence.status === 'ACTIVE' ? 'Active' : recurrence.status === 'PAUSED' ? 'Paused' : 'Ended'}</Badge></div>
             {canManage && <div className="mt-3 flex flex-wrap gap-1">
               <Button type="button" variant="tertiary" disabled={pending} onClick={() => setEditing(recurrence.id)}><Pencil size={16} strokeWidth={1.75} /> Edit series</Button>
               <Button type="button" variant="tertiary" disabled={pending} onClick={() => run(() => setRecurrenceStatusAction(slug, recurrence.id, recurrence.status === 'ACTIVE'), recurrence.status === 'ACTIVE' ? 'Series paused. Upcoming occurrences will not publish.' : 'Series resumed. Upcoming occurrences are scheduled again.')}>{recurrence.status === 'ACTIVE' ? <Pause size={16} strokeWidth={1.75} /> : <Play size={16} strokeWidth={1.75} />}{recurrence.status === 'ACTIVE' ? 'Pause' : 'Resume'}</Button>
@@ -226,12 +241,13 @@ export function QueueManager({
             </div>
           </article>
         ))}</div>
-        {!recurrences.length && <EmptyState eyebrow="No recurring content" title="Create your first series">Choose a pattern, publishing time, start date, and optional end date below.</EmptyState>}
+        {!recurrences.length && <EmptyState eyebrow="No recurring content" title="Create your first series" />}
         {canManage && editing === null && <details className="mt-6 border-t border-hairline pt-4" open={!recurrences.length}>
           <summary className="flex min-h-11 cursor-pointer list-none items-center font-[480]">Create a recurring series</summary>
           <div className="mt-3"><RecurrenceForm slug={slug} accounts={accounts} campaigns={campaigns} pending={pending} run={run} /></div>
         </details>}
-      </section>
+        </div>
+      </details>
     </>
   );
 }

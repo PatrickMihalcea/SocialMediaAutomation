@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { Suspense } from 'react';
 import { Bell, Search } from 'lucide-react';
 import { AppNavigation } from '@/components/app-navigation';
-import { Avatar, Badge } from '@/bridge88/components';
+import { Avatar } from '@/bridge88/components';
 import { listMyWorkspaces, requireWorkspace } from '@/lib/auth/guard';
 import { unreadCount } from '@/lib/notifications/service';
 import { AppError } from '@/lib/errors';
@@ -15,6 +15,7 @@ function NotificationLink({
   slug: string;
   unread?: number;
 }) {
+  const visibleUnread = unread && unread > 99 ? '99+' : unread;
   return (
     <Link
       href={`/w/${slug}/notifications`}
@@ -22,7 +23,14 @@ function NotificationLink({
       className="relative flex size-10 items-center justify-center rounded-full"
     >
       <Bell size={19} />
-      {Boolean(unread) && <span className="absolute -right-1 -top-1"><Badge tone="ink">{unread}</Badge></span>}
+      {Boolean(unread) && (
+        <span
+          aria-hidden="true"
+          className="absolute right-0 top-0 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-[var(--canvas)] bg-[var(--primary)] px-[3px] font-mono text-[10px] font-bold leading-none tabular-nums text-[var(--on-primary)]"
+        >
+          {visibleUnread}
+        </span>
+      )}
     </Link>
   );
 }
@@ -51,13 +59,16 @@ export default async function WorkspaceLayout({
 }) {
   const { slug } = await params;
   let ctx: Awaited<ReturnType<typeof requireWorkspace>>;
+  let workspaces: Awaited<ReturnType<typeof listMyWorkspaces>>;
   try {
-    ctx = await requireWorkspace(slug, 'workspace:view');
+    [ctx, workspaces] = await Promise.all([
+      requireWorkspace(slug, 'workspace:view'),
+      listMyWorkspaces(),
+    ]);
   } catch (error) {
     if (error instanceof AppError && error.code === 'NOT_FOUND') notFound();
     throw error;
   }
-  const workspaces = await listMyWorkspaces();
   return (
     <div className="b88-app">
       <AppNavigation slug={slug} workspaces={workspaces.map(({ slug: workspaceSlug, name }) => ({ slug: workspaceSlug, name }))} />
@@ -69,8 +80,15 @@ export default async function WorkspaceLayout({
           <Suspense fallback={<NotificationLink slug={slug} />}>
             <NotificationStatus slug={slug} userId={ctx.user.id} workspaceId={ctx.workspace.id} />
           </Suspense>
-          <Link href="/account" aria-label="Account" className="flex size-10 items-center justify-center rounded-full">
-            <Avatar name={ctx.user.name ?? ctx.user.email} src={ctx.user.image} />
+          <Link
+            href="/account"
+            prefetch
+            aria-label="Profile settings"
+            title="Profile settings"
+            className="b88-icon-button flex h-10 items-center gap-2 rounded-pill px-1 pr-3 text-sm font-[480] transition-opacity hover:opacity-80"
+          >
+            <Avatar name={ctx.user.name ?? ctx.user.email} src={ctx.user.image} size={32} />
+            <span>Profile</span>
           </Link>
         </div>
       </header>

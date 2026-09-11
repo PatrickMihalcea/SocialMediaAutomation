@@ -14,41 +14,54 @@ import { encryptToken } from '@/lib/crypto/tokens';
 import { rateLimit, LIMITS } from '@/lib/rate-limit';
 import { reconcilePostStatus } from '@/lib/publishing/engine';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
-import { toAppError } from '@/lib/errors';
+import { AppError, invalid, toAppError } from '@/lib/errors';
 
 export type ChannelActionState = ActionState & { billingHref?: string };
 
 export async function connectDemoChannelAction(
-  slug: string,
   _previous: ChannelActionState,
   formData: FormData,
 ): Promise<ChannelActionState> {
+  const slug = String(formData.get('slug') ?? '');
   try {
     const ctx = await requireWorkspace(slug, 'channel:connect');
     const limited = await rateLimit(`oauth:demo:${ctx.user.id}`, LIMITS.oauth.limit, LIMITS.oauth.window);
-    if (!limited.allowed) throw new Error('Too many connection attempts. Try again shortly.');
+    if (!limited.allowed) throw new AppError('RATE_LIMITED', 'Too many connection attempts. Try again shortly.');
     const platform = Platform[String(formData.get('platform')) as keyof typeof Platform];
-    if (!platform || platform === Platform.MOCK) throw new Error('Choose a supported platform.');
+    if (!platform || platform === Platform.MOCK) throw invalid('Choose a supported platform.');
+    const existingDemo = await db.socialAccount.findFirst({
+      where: {
+        workspaceId: ctx.workspace.id,
+        platform,
+        metadata: { path: ['mock'], equals: true },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (existingDemo?.status === 'ACTIVE') {
+      return actionSuccess(`${platformLabel(platform)} demo is already connected.`);
+    }
     const count = await db.socialAccount.count({
       where: { workspaceId: ctx.workspace.id, status: { not: 'DISCONNECTED' } },
     });
-    await assertWithinLimit(ctx.workspace.id, 'socialAccounts', count);
-    const account = await createDemoAccount({
-      workspaceId: ctx.workspace.id,
-      platform,
-      accountName: `${ctx.workspace.name} ${platformLabel(platform)}`,
-      handle: `@${ctx.workspace.slug}`,
-    });
+    if (!existingDemo) await assertWithinLimit(ctx.workspace.id, 'socialAccounts', count);
+    const account = existingDemo
+      ? await renewDemoAccount(existingDemo)
+      : await createDemoAccount({
+          workspaceId: ctx.workspace.id,
+          platform,
+          accountName: `${ctx.workspace.name} ${platformLabel(platform)}`,
+          handle: `@${ctx.workspace.slug}`,
+        });
     await audit({
       workspaceId: ctx.workspace.id,
       userId: ctx.user.id,
-      action: 'channel.connected',
+      action: existingDemo ? 'channel.reconnected' : 'channel.connected',
       entityType: 'social_account',
       entityId: account.id,
       metadata: { platform, mock: true },
     });
     revalidatePath(`/w/${slug}/channels`);
-    return actionSuccess(`${platformLabel(platform)} demo connected.`);
+    return actionSuccess(`${platformLabel(platform)} demo ${existingDemo ? 'reconnected' : 'connected'}.`);
   } catch (error) {
     return channelActionError(error, slug);
   }
@@ -57,7 +70,7 @@ export async function connectDemoChannelAction(
 export async function disconnectChannelAction(slug: string, accountId: string) {
   const ctx = await requireWorkspace(slug, 'channel:disconnect');
   const limited = await rateLimit(`oauth:disconnect:${ctx.user.id}`, LIMITS.oauth.limit, LIMITS.oauth.window);
-  if (!limited.allowed) throw new Error('Too many channel changes. Try again shortly.');
+  if (!limited.allowed) throw new AppError('RATE_LIMITED', 'Too many channel changes. Try again shortly.');
   const account = await db.socialAccount.findFirst({
     where: { id: accountId, workspaceId: ctx.workspace.id },
   });
@@ -124,26 +137,19 @@ export async function disconnectChannelAction(slug: string, accountId: string) {
   });
   revalidatePath(`/w/${slug}/channels`);
   revalidatePath(`/w/${slug}/calendar`);
+  const { redirect } = await import('next/navigation');
+  redirect(`/w/${slug}/channels`);
 }
 
 export async function reconnectDemoChannelAction(slug: string, accountId: string) {
   const ctx = await requireWorkspace(slug, 'channel:connect');
   const limited = await rateLimit(`oauth:reconnect:${ctx.user.id}`, LIMITS.oauth.limit, LIMITS.oauth.window);
-  if (!limited.allowed) throw new Error('Too many connection attempts. Try again shortly.');
+  if (!limited.allowed) throw new AppError('RATE_LIMITED', 'Too many connection attempts. Try again shortly.');
   const account = await db.socialAccount.findFirst({
     where: { id: accountId, workspaceId: ctx.workspace.id },
   });
   if (!account || !(account.metadata as { mock?: boolean })?.mock) return;
-  await db.socialAccount.update({
-    where: { id: account.id },
-    data: {
-      accessTokenEncrypted: encryptToken(`demo-token-${account.externalAccountId}-${Date.now()}`),
-      tokenExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-      status: 'ACTIVE',
-      statusMessage: null,
-      lastSyncedAt: new Date(),
-    },
-  });
+  await renewDemoAccount(account);
   await audit({
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
@@ -153,6 +159,8 @@ export async function reconnectDemoChannelAction(slug: string, accountId: string
     metadata: { platform: account.platform, mock: true },
   });
   revalidatePath(`/w/${slug}/channels`);
+  const { redirect } = await import('next/navigation');
+  redirect(`/w/${slug}/channels?oauth=reconnected`);
 }
 
 export async function completeOAuthSelectionAction(
@@ -165,11 +173,14 @@ export async function completeOAuthSelectionAction(
   try {
     const ctx = await requireWorkspace(slug, 'channel:connect');
     const limited = await rateLimit(`oauth:selection:${ctx.user.id}`, LIMITS.oauth.limit, LIMITS.oauth.window);
-    if (!limited.allowed) throw new Error('Too many connection attempts. Try again shortly.');
+    if (!limited.allowed) throw new AppError('RATE_LIMITED', 'Too many connection attempts. Try again shortly.');
     const pending = await readOAuthSelection(secret, ctx.user.id);
-    if (!pending || pending.workspaceId !== ctx.workspace.id) throw new Error('That selection expired. Connect the channel again.');
+    if (!pending || pending.workspaceId !== ctx.workspace.id) throw invalid('That selection expired. Connect the channel again.');
     const selected = formData.getAll('account').map(String);
-    if (!selected.length) throw new Error('Select at least one account.');
+    if (!selected.length) throw invalid('Select at least one account.');
+    if (pending.reconnectAccountId && selected.length !== 1) {
+      throw invalid('Select one account to reconnect.');
+    }
     const selectedResults = pending.results.filter((result) => selected.includes(result.externalAccountId));
     const [current, existing] = await Promise.all([
       db.socialAccount.count({ where: { workspaceId: ctx.workspace.id, status: { not: 'DISCONNECTED' } } }),
@@ -187,7 +198,7 @@ export async function completeOAuthSelectionAction(
       await assertWithinLimit(ctx.workspace.id, 'socialAccounts', current + offset);
     }
     const consumed = await consumeOAuthSelection(secret, ctx.user.id, selected);
-    if (!consumed || consumed.row.workspaceId !== ctx.workspace.id) throw new Error('That selection is invalid or was already used.');
+    if (!consumed || consumed.row.workspaceId !== ctx.workspace.id) throw invalid('That selection expired or was already completed. Connect the channel again.');
     const saved = await persistConnections({
       workspaceId: ctx.workspace.id,
       platform: consumed.row.platform,
@@ -213,6 +224,20 @@ export async function completeOAuthSelectionAction(
 
 function platformLabel(platform: Platform) {
   return { INSTAGRAM: 'Instagram', FACEBOOK: 'Facebook', LINKEDIN: 'LinkedIn', X: 'X', TIKTOK: 'TikTok', YOUTUBE: 'YouTube', MOCK: 'Demo' }[platform];
+}
+
+function renewDemoAccount(account: { id: string; externalAccountId: string }) {
+  return db.socialAccount.update({
+    where: { id: account.id },
+    data: {
+      accessTokenEncrypted: encryptToken(`demo-token-${account.externalAccountId}-${Date.now()}`),
+      refreshTokenEncrypted: null,
+      tokenExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      status: 'ACTIVE',
+      statusMessage: null,
+      lastSyncedAt: new Date(),
+    },
+  });
 }
 
 function channelActionError(error: unknown, slug: string): ChannelActionState {

@@ -168,10 +168,10 @@ function build(schemaName: string, prompt: string, messages: AiMessage[]): unkno
       if (/\b(attach|add)\b.*\b(media|image|asset|video|file)\b/i.test(prompt)) {
         if (!post || !asset) return { reply: `${simulated}I could not identify both an existing post and ready media file, so I did not prepare a proposal. Name both of them.`, action: null };
         return {
-          reply: `${simulated}I prepared a proposal to attach "${asset.filename}" to "${post.title}" on every channel version. Nothing will change until you confirm.`,
+          reply: `${simulated}I prepared a proposal to attach the selected media asset to "${post.title}" on every channel version. Nothing will change until you confirm.`,
           action: {
             kind: 'attach_media',
-            summary: `Attach "${asset.filename}" to "${post.title}"`,
+            summary: `Attach the selected media asset to "${post.title}"`,
             postId: post.id,
             postTitle: post.title,
             media: [{ mediaAssetId: asset.id, filename: asset.filename, altText: `Media for ${post.title}` }],

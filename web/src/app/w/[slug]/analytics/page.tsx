@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import Form from 'next/form';
 import Link from 'next/link';
 import { Badge, Button, EmptyState, Field, Select, StatCard, StatusMessage } from '@/bridge88/components';
@@ -8,7 +9,10 @@ import { formatMetric, sumReported, type NullableMetric } from '@/lib/analytics/
 import { refreshAnalyticsAction } from '@/app/actions/analytics';
 import { percentageChange, previousRange, resolveAnalyticsRange } from '@/lib/analytics/range';
 import type { Platform, Prisma } from '@prisma/client';
+import { AnalyticsPagePreview } from '@/components/page-previews';
 import { PendingButton } from '@/components/action-ui';
+
+export const metadata = { title: 'Analytics' };
 
 /**
  * StatCard sets its value at 38px, which reads as a headline for the
@@ -24,11 +28,53 @@ function Metric({ label, value, delta }: { label: string; value: NullableMetric 
 }
 
 type SearchParams = { range?: string; from?: string; to?: string; account?: string; platform?: string };
+const PERFORMANCE_SELECT = {
+  id: true,
+  platform: true,
+  impressions: true,
+  reach: true,
+  likes: true,
+  comments: true,
+  shares: true,
+  saves: true,
+  clicks: true,
+  engagementRate: true,
+  postPlatform: {
+    select: {
+      publishedAt: true,
+      text: true,
+      post: {
+        select: {
+          id: true,
+          title: true,
+          campaign: { select: { id: true, name: true } },
+        },
+      },
+    },
+  },
+} satisfies Prisma.PostAnalyticsSelect;
 type PerformanceRow = Prisma.PostAnalyticsGetPayload<{
-  include: { postPlatform: { include: { post: { include: { campaign: true } }; socialAccount: true } } };
+  select: typeof PERFORMANCE_SELECT;
 }>;
 
-export default async function AnalyticsPage({
+export default function AnalyticsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<SearchParams>;
+}) {
+  return (
+    <>
+      <div><p className="b88-eyebrow">Measurement</p><h1 className="b88-page-title mt-3">Analytics</h1></div>
+      <Suspense fallback={<AnalyticsPagePreview />}>
+        <AnalyticsData params={params} searchParams={searchParams} />
+      </Suspense>
+    </>
+  );
+}
+
+async function AnalyticsData({
   params,
   searchParams,
 }: {
@@ -63,7 +109,7 @@ export default async function AnalyticsPage({
         ...platformWhere,
         ...(filters.account ? { postPlatform: { socialAccountId: filters.account } } : {}),
       },
-      include: { postPlatform: { include: { post: { include: { campaign: true } }, socialAccount: true } } },
+      select: PERFORMANCE_SELECT,
       orderBy: { impressions: 'desc' },
     }),
     db.postAnalytics.findMany({
@@ -145,9 +191,9 @@ export default async function AnalyticsPage({
     .slice(0, 3);
 
   return (
-    <>
+    <div className="mt-6 min-h-[760px]">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div><p className="b88-eyebrow">Measurement</p><h1 className="b88-page-title mt-3">Analytics</h1></div>
+        <span />
         <div className="flex flex-wrap gap-2">
           <Button href={`/w/${slug}/analytics/export?${new URLSearchParams(filters as Record<string, string>)}`} variant="secondary">Export CSV</Button>
           <form action={refreshAnalyticsAction.bind(null, slug)}>
@@ -178,7 +224,7 @@ export default async function AnalyticsPage({
         {(filters.range || filters.account || filters.platform) && <Button href={`/w/${slug}/analytics`} variant="tertiary" className="self-end">Clear filters</Button>}
       </Form>
       {range.error && <StatusMessage tone="error" className="mt-4">{range.error}</StatusMessage>}
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Metric label="Followers" value={total('followers')} delta={percentageChange(total('followers'), snapshotTotal(previous, 'followers'))} />
         <Metric label="Follower growth" value={followerGrowth} />
         <Metric label="Impressions" value={total('impressions')} delta={percentageChange(total('impressions'), snapshotTotal(previous, 'impressions'))} />
@@ -190,7 +236,13 @@ export default async function AnalyticsPage({
         <Metric label="Clicks" value={postTotal(postRows, 'clicks')} />
         <Metric label="Engagement rate" value={engagementRate === null ? null : `${engagementRate.toFixed(1)}%`} />
       </div>
-      <section className="b88-card mt-6">
+      <details className="b88-card mt-6">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-4">
+          <span><span className="b88-caption block">Detailed reports</span><span className="mt-1 block text-lg font-[540]">Charts and performance</span></span>
+          <span className="b88-caption whitespace-nowrap">Open report</span>
+        </summary>
+        <div className="mt-5 border-t border-hairline-soft pt-5">
+      <section className="b88-card">
         <p className="b88-caption">Selected period</p><h2 className="b88-heading mt-2">Reported reach</h2>
         {chartValues.length ? <svg className="mt-5 h-44 w-full" viewBox="0 0 600 170" role="img" aria-label="Reported reach trend">
           <polyline points={points.filter(Boolean).join(' ')} fill="none" stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" />
@@ -208,6 +260,8 @@ export default async function AnalyticsPage({
       </section>
       <PerformanceTable title="Top-performing posts" rows={topPosts} slug={slug} />
       <PerformanceTable title="Worst-performing posts" rows={worstPosts} slug={slug} />
+        </div>
+      </details>
       {!postRows.length && !snapshots.length && (
         <section className="mt-6">
           <EmptyState
@@ -219,7 +273,7 @@ export default async function AnalyticsPage({
           </EmptyState>
         </section>
       )}
-    </>
+    </div>
   );
 }
 

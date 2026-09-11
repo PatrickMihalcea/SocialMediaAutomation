@@ -7,6 +7,8 @@ import { acceptInviteAction } from '@/app/actions/team';
 import { switchAccountAction } from '@/app/actions/auth';
 import { PendingButton } from '@/components/action-ui';
 
+export const metadata = { title: 'Workspace invitation' };
+
 export default async function InvitePage({
   searchParams,
 }: {

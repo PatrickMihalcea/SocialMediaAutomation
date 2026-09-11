@@ -1,6 +1,8 @@
 import { CalendarDays, Check, Layers3, Send, Sparkles } from 'lucide-react';
 import { Badge, Button } from '@/bridge88/components';
 
+export const metadata = { title: 'Social publishing' };
+
 export default function MarketingPage() {
   return (
     <main id="main-content" className="marketing-shell" tabIndex={-1}>

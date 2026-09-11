@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useFormStatus } from 'react-dom';
+import type { Plan } from '@prisma/client';
 import { Button, Dialog } from '@/bridge88/components';
 import {
   cancelSubscriptionAction,
@@ -10,8 +11,7 @@ import {
   resumeSubscriptionAction,
   startCheckoutAction,
 } from '@/app/actions/billing';
-
-type Plan = 'FREE' | 'PRO' | 'BUSINESS';
+import { planLabel } from '@/lib/billing/labels';
 
 export function BillingControls({
   slug,
@@ -67,7 +67,7 @@ export function BillingControls({
       <Dialog
         open={Boolean(target)}
         eyebrow={isStarting ? 'Start subscription' : target === 'BUSINESS' && plan === 'PRO' ? 'Upgrade plan' : 'Change plan'}
-        title={`${isStarting ? 'Choose' : 'Change to'} ${planName(target)}`}
+        title={`${isStarting ? 'Choose' : 'Change to'} ${planLabel(target)}`}
         onClose={() => setIntent(null)}
         actions={target && action ? (
           <>
@@ -75,7 +75,7 @@ export function BillingControls({
             <form action={action}>
               <input type="hidden" name="plan" value={target} />
               <SubmitButton
-                label={`${isStarting ? 'Start' : 'Confirm'} ${planName(target)}`}
+                label={`${isStarting ? 'Start' : 'Confirm'} ${planLabel(target)}`}
                 pendingLabel="Updating…"
               />
             </form>
@@ -84,8 +84,8 @@ export function BillingControls({
       >
         <p>
           {isStarting
-            ? `${planName(target)} is ${target === 'PRO' ? '$29' : '$99'} per month.`
-            : `Your limits change to ${planName(target)} immediately. A live payment provider may prorate the change.`}
+            ? `${planLabel(target)} is ${target === 'PRO' ? '$29' : '$99'} per month.`
+            : `Your limits change to ${planLabel(target)} immediately. A live payment provider may prorate the change.`}
           {isMock && ' This development workspace simulates the plan change and does not charge a payment method.'}
         </p>
       </Dialog>
@@ -130,7 +130,6 @@ export function PaymentDocuments({
       <h2 className="b88-heading mt-2">Payment method and invoices</h2>
       {hasCustomer ? (
         <>
-          <p className="mt-3">The secure billing portal manages your payment method and provider-issued invoices.</p>
           <form className="mt-5" action={openBillingPortalAction.bind(null, slug)}>
             <SubmitButton variant="secondary" label="Open billing portal" pendingLabel="Opening…" />
           </form>
@@ -157,8 +156,4 @@ function SubmitButton({
 }) {
   const { pending } = useFormStatus();
   return <Button type="submit" variant={variant} disabled={pending} aria-disabled={pending}>{pending ? pendingLabel : label}</Button>;
-}
-
-function planName(plan: Plan | null): string {
-  return plan === 'BUSINESS' ? 'Business' : plan === 'PRO' ? 'Pro' : 'Free';
 }
