@@ -20,6 +20,7 @@ import {
   Search,
   Settings,
   Share2,
+  Workflow,
   WandSparkles,
 } from 'lucide-react';
 
@@ -31,6 +32,7 @@ const items = [
   ['Create post', '/compose', Plus],
   ['AI assistant', '/assistant', Bot],
   ['AI studio', '/studio', WandSparkles],
+  ['Workflows', '/workflows', Workflow],
   ['Media', '/media', Image],
   ['Analytics', '/analytics', BarChart3],
   ['History', '/history', History],
@@ -55,6 +57,7 @@ const overflowItems = [
   destination('/drafts'),
   destination('/assistant'),
   destination('/studio'),
+  destination('/workflows'),
   destination('/analytics'),
   destination('/history'),
   destination('/campaigns'),

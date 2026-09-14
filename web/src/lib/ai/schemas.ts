@@ -143,3 +143,21 @@ export const assistantReplySchema = z.object({
     .default(null),
 }).strict();
 export type AssistantReply = z.infer<typeof assistantReplySchema>;
+
+/**
+ * Prompts produced by a workflow's idea step. `title` is what a text overlay
+ * can burn onto the clip, so it is kept short and human — "Coastal minimal",
+ * not a restatement of the prompt.
+ */
+export const imagePromptsSchema = z.object({
+  prompts: z
+    .array(
+      z.object({
+        title: z.string().max(80),
+        prompt: z.string().max(2000),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
+export type ImagePrompts = z.infer<typeof imagePromptsSchema>;

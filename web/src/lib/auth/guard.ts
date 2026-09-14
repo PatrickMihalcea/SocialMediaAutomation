@@ -1,5 +1,6 @@
 import 'server-only';
 import { cache } from 'react';
+import { redirect } from 'next/navigation';
 import type { Workspace, WorkspaceRole } from '@prisma/client';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
@@ -22,25 +23,48 @@ export interface WorkspaceContext {
   can: (capability: Capability) => boolean;
 }
 
-/** The signed-in user, or null. Cached per request. */
-export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
+/**
+ * `stale` is a correctly signed cookie naming a user that no longer exists —
+ * a deleted account, or a database restored under a running browser session.
+ * It has to be told apart from `anonymous`: the cookie satisfies middleware,
+ * so the request reaches the page and then has nowhere to go.
+ */
+type SessionState =
+  | { kind: 'anonymous' }
+  | { kind: 'stale' }
+  | { kind: 'active'; user: SessionUser };
+
+const loadSession = cache(async (): Promise<SessionState> => {
   const session = await auth();
-  if (!session?.user?.id) return null;
+  if (!session?.user?.id) return { kind: 'anonymous' };
   const user = await db.user.findUnique({ where: { id: session.user.id } });
-  if (!user) return null;
+  if (!user) return { kind: 'stale' };
   return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    image: user.image,
-    isPlatformAdmin: user.isPlatformAdmin,
+    kind: 'active',
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      image: user.image,
+      isPlatformAdmin: user.isPlatformAdmin,
+    },
   };
 });
 
+/** The signed-in user, or null. Cached per request. */
+export async function getCurrentUser(): Promise<SessionUser | null> {
+  const state = await loadSession();
+  return state.kind === 'active' ? state.user : null;
+}
+
 export async function requireUser(): Promise<SessionUser> {
-  const user = await getCurrentUser();
-  if (!user) throw unauthenticated();
-  return user;
+  const state = await loadSession();
+  if (state.kind === 'active') return state.user;
+  // Sending a stale session to /login would loop: middleware sees the cookie,
+  // counts the visitor as signed in and bounces them back to /w. The cookie
+  // has to be dropped first.
+  if (state.kind === 'stale') redirect('/signed-out');
+  throw unauthenticated();
 }
 
 export async function requirePlatformAdmin(): Promise<SessionUser> {
@@ -140,6 +164,8 @@ const VERBS: Partial<Record<Capability, string>> = {
   'campaign:manage': 'manage campaigns',
   'schedule:manage': 'change the queue',
   'ai:use': 'use the AI tools',
+  'workflow:edit': 'build or change workflows',
+  'workflow:run': 'run workflows',
   'billing:manage': 'manage billing',
 };
 

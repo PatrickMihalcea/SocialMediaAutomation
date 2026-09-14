@@ -26,6 +26,18 @@ const schema = z.object({
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   AI_PROVIDER: z.enum(['mock', 'openai']).default('mock'),
 
+  // --- rendering and audio analysis ---
+  // Both default to off, so a fresh checkout with neither ffmpeg nor Python
+  // installed still boots and behaves — the same stance MOCK_MODE takes.
+  RENDER_DRIVER: z.enum(['ffmpeg', 'none']).default('none'),
+  RENDER_FONT_DIR: z.string().default(''),
+  /** Trades encode throughput for byte-reproducible output. */
+  RENDER_DETERMINISTIC: boolish(false),
+  RENDER_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
+  AUDIO_ANALYZER: z.enum(['librosa', 'constant-bpm']).default('constant-bpm'),
+  PYTHON_BIN: z.string().default('python3'),
+  AUDIO_ANALYZER_SCRIPT: z.string().default(''),
+
   REDIS_URL: z.string().default('redis://localhost:6379'),
 
   S3_ENDPOINT: z.string().default(''),

@@ -35,6 +35,9 @@ export const CAPABILITIES = [
   'campaign:manage',
   'schedule:manage',
   'analytics:view',
+  'workflow:view',
+  'workflow:edit',
+  'workflow:run',
   'ai:use',
   'billing:view',
   'billing:manage',
@@ -50,6 +53,7 @@ const VIEWER: Capability[] = [
   'post:view',
   'campaign:view',
   'analytics:view',
+  'workflow:view',
 ];
 
 const EDITOR: Capability[] = [
@@ -66,6 +70,8 @@ const EDITOR: Capability[] = [
   'campaign:manage',
   'schedule:manage',
   'ai:use',
+  'workflow:edit',
+  'workflow:run',
 ];
 
 const ADMIN: Capability[] = [

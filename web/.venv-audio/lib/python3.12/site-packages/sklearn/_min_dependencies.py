@@ -1,0 +1,74 @@
+"""All minimum dependencies for scikit-learn."""
+
+# Authors: The scikit-learn developers
+# SPDX-License-Identifier: BSD-3-Clause
+
+import argparse
+
+# scipy and cython should by in sync with pyproject.toml
+NUMPY_MIN_VERSION = "1.24.1"
+SCIPY_MIN_VERSION = "1.10.0"
+JOBLIB_MIN_VERSION = "1.4.0"
+NARWHALS_MIN_VERSION = "2.0.1"
+THREADPOOLCTL_MIN_VERSION = "3.5.0"
+PYTEST_MIN_VERSION = "7.1.2"
+CYTHON_MIN_VERSION = "3.1.2"
+
+
+# The values are (version_spec, comma separated tags). The tags are used to
+# generate the minimum dependency table in the docs and to cross-check
+# pyproject.toml's build and install dependencies in
+# sklearn/tests/test_min_dependencies_readme.py.
+dependent_packages = {
+    "numpy": (NUMPY_MIN_VERSION, "build, install"),
+    "scipy": (SCIPY_MIN_VERSION, "build, install"),
+    "joblib": (JOBLIB_MIN_VERSION, "install"),
+    "narwhals": (NARWHALS_MIN_VERSION, "install"),
+    "threadpoolctl": (THREADPOOLCTL_MIN_VERSION, "install"),
+    "cython": (CYTHON_MIN_VERSION, "build"),
+    "meson-python": ("0.17.1", "build"),
+    "matplotlib": ("3.6.1", "benchmark, docs, examples, tests"),
+    "scikit-image": ("0.22.0", "docs, examples"),
+    "pandas": ("1.5.0", "benchmark, docs, examples, tests"),
+    "rich": ("14.1.0", "docs, examples, tests"),
+    "seaborn": ("0.13.0", "docs, examples"),
+    "memory_profiler": ("0.57.0", "benchmark, docs"),
+    "pytest": (PYTEST_MIN_VERSION, "tests"),
+    "pytest-cov": ("2.9.0", "tests"),
+    # NOTE if you update ruff, pyrefly, cython-lint, sphinx-lint or codespell
+    # here, remember to update .pre-commit-config.yaml as well
+    "ruff": ("0.12.2", "tests"),
+    "pyrefly": ("1.2.0", "tests"),
+    "cython-lint": ("0.21", "tests"),
+    "sphinx-lint": ("1.0.2", "tests"),
+    "codespell": ("2.4.1", "tests"),
+    "pyamg": ("5.0.0", "tests"),
+    "polars": ("0.20.30", "docs, tests"),
+    "pyarrow": ("13.0.0", "tests"),
+    "sphinx": ("7.3.7", "docs"),
+    "sphinx-copybutton": ("0.5.2", "docs"),
+    "sphinx-gallery": ("0.17.1", "docs"),
+    "numpydoc": ("1.2.0", "docs, tests"),
+    "Pillow": ("12.1.1", "docs"),
+    "pooch": ("1.8.0", "docs, examples, tests"),
+    "sphinx-prompt": ("1.4.0", "docs"),
+    "sphinxext-opengraph": ("0.9.1", "docs"),
+    "plotly": ("5.22.0", "docs, examples"),
+    "sphinx-remove-toctrees": ("1.0.0.post1", "docs"),
+    "sphinx-design": ("0.6.0", "docs"),
+    "pydata-sphinx-theme": ("0.15.3", "docs"),
+    "towncrier": ("24.8.0", "docs"),
+    # XXX: Pin conda-lock to the latest released version (needs manual update
+    # from time to time)
+    "conda-lock": ("3.0.1", "maintenance"),
+}
+
+
+# Used by CI to get the min dependencies
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Get min dependencies for a package")
+
+    parser.add_argument("package", choices=dependent_packages)
+    args = parser.parse_args()
+    min_version = dependent_packages[args.package][0]
+    print(min_version)

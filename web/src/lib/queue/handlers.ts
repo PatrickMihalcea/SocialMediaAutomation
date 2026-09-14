@@ -53,6 +53,22 @@ const HANDLERS: { [K in JobType]: () => Promise<(payload: JobPayloadMap[K]) => P
     const { runAiMediaJob } = await import('@/lib/ai/media-jobs');
     return (p) => runAiMediaJob(p.aiMediaJobId);
   },
+  'run-workflow-node': async () => {
+    const { runWorkflowNode } = await import('@/lib/workflows/engine');
+    return (p) => runWorkflowNode(p.nodeRunId);
+  },
+  'sweep-workflow-runs': async () => {
+    const { sweepWorkflowRuns } = await import('@/lib/workflows/engine');
+    return () => sweepWorkflowRuns();
+  },
+  'scan-due-workflows': async () => {
+    const { scanDueWorkflows } = await import('@/lib/workflows/schedule');
+    return () => scanDueWorkflows();
+  },
+  'analyse-audio': async () => {
+    const { analyseAudioAsset } = await import('@/lib/audio/analyse');
+    return (p) => analyseAudioAsset(p.mediaAssetId);
+  },
 };
 
 const cache = new Map<JobType, Handler>();

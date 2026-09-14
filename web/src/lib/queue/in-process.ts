@@ -19,7 +19,13 @@ const CONCURRENCY = 4;
 export class InProcessQueue implements QueueDriver {
   readonly name = 'in-process' as const;
   private timer: NodeJS.Timeout | null = null;
-  private draining = false;
+  /**
+   * Jobs executing right now. This is a set rather than a boolean because a
+   * boolean made the whole queue serial: one slow job — a video render, a
+   * chunked upload — held the flag and stalled every other job in the process,
+   * publishing included. Each tick now tops the set back up to CONCURRENCY.
+   */
+  private inFlight = new Set<string>();
 
   async enqueue<T extends JobType>(
     type: T,
@@ -47,21 +53,37 @@ export class InProcessQueue implements QueueDriver {
     this.timer = null;
   }
 
+  /**
+   * Starts as many jobs as there is spare capacity for and returns immediately —
+   * it does not wait for them. A long job occupies one slot until it settles;
+   * the remaining slots keep serving everything else.
+   */
   private async drain(): Promise<void> {
-    if (this.draining) return;
-    this.draining = true;
+    const capacity = CONCURRENCY - this.inFlight.size;
+    if (capacity <= 0) return;
+
     try {
       const due = await db.job.findMany({
         where: { status: JobStatus.QUEUED, runAt: { lte: new Date() } },
         orderBy: { runAt: 'asc' },
-        take: CONCURRENCY,
+        // Over-fetch a little: a row picked here may be claimed by another
+        // process before runJob reaches it, and that attempt costs nothing.
+        take: capacity + 2,
         select: { id: true },
       });
-      await Promise.all(due.map((job) => runJob(job.id)));
+
+      for (const job of due) {
+        if (this.inFlight.size >= CONCURRENCY) break;
+        if (this.inFlight.has(job.id)) continue;
+        this.inFlight.add(job.id);
+        // Deliberately not awaited. runJob claims the row conditionally, so a
+        // job another worker already took resolves immediately as a no-op.
+        void runJob(job.id)
+          .catch((error) => console.error('[queue] job failed outside the runner', job.id, error))
+          .finally(() => this.inFlight.delete(job.id));
+      }
     } catch (error) {
       console.error('[queue] drain failed', error);
-    } finally {
-      this.draining = false;
     }
   }
 }

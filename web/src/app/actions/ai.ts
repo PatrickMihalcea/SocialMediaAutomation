@@ -6,11 +6,9 @@ import { requireWorkspace } from '@/lib/auth/guard';
 import { confirmProposal, sendAssistantMessage } from '@/lib/ai/conversations';
 import { generateImage } from '@/lib/ai';
 import { db } from '@/lib/db';
-import { enqueue } from '@/lib/queue';
 import { mediaKey, storage } from '@/lib/storage';
 import { invalid } from '@/lib/errors';
-import { mediaProviderDescriptor } from '@/lib/ai/media-jobs';
-import { assertWithinLimit, currentMonthUsage } from '@/lib/billing/limits';
+import { createAiMediaJob } from '@/lib/ai/media-jobs';
 
 export async function sendAssistantMessageAction(slug: string, conversationId: string | undefined, content: string) {
   const ctx = await requireWorkspace(slug, 'ai:use');
@@ -94,24 +92,12 @@ export async function createAiMediaJobAction(
     const count = await db.mediaAsset.count({ where: { workspaceId: ctx.workspace.id, id: { in: ids } } });
     if (count !== ids.length) throw invalid('One or more source assets are unavailable.');
   }
-  const used = await currentMonthUsage(ctx.workspace.id, 'ai_generations');
-  await assertWithinLimit(ctx.workspace.id, 'aiGenerations', used);
-  const descriptor = mediaProviderDescriptor(input.kind);
-  const job = await db.aiMediaJob.create({
-    data: {
-      workspaceId: ctx.workspace.id,
-      userId: ctx.user.id,
-      kind: input.kind,
-      status: 'QUEUED',
-      provider: descriptor.provider,
-      model: descriptor.model,
-      prompt,
-      inputAssetIds: ids,
-    },
-  });
-  await enqueue('ai-media-job', { aiMediaJobId: job.id }, {
+  const job = await createAiMediaJob({
     workspaceId: ctx.workspace.id,
-    dedupeKey: `ai-media:${job.id}`,
+    userId: ctx.user.id,
+    kind: input.kind,
+    prompt,
+    inputAssetIds: ids,
   });
   revalidatePath(`/w/${slug}/studio`);
   return { id: job.id, kind: job.kind, status: job.status };

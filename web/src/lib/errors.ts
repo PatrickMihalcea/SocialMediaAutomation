@@ -56,8 +56,24 @@ export const invalid = (m: string, fields?: Record<string, string[]>) =>
 export const conflict = (m: string) => new AppError('CONFLICT', m);
 export const limitReached = (m: string) => new AppError('LIMIT_REACHED', m);
 
+/**
+ * Next signals redirect() and notFound() by throwing. Those are control flow,
+ * not failures, and must reach the framework untouched — swallowing one turns a
+ * redirect into a 500. Matched on the digest so this file stays import-free.
+ */
+function isFrameworkControlFlow(e: unknown): boolean {
+  const digest = (e as { digest?: unknown } | null)?.digest;
+  if (typeof digest !== 'string') return false;
+  return (
+    digest.startsWith('NEXT_REDIRECT') ||
+    digest.startsWith('NEXT_HTTP_ERROR_FALLBACK') ||
+    digest === 'NEXT_NOT_FOUND'
+  );
+}
+
 /** Narrows anything thrown into a shape the API layer can serialise. */
 export function toAppError(e: unknown): AppError {
+  if (isFrameworkControlFlow(e)) throw e;
   if (e instanceof AppError) return e;
   const detail = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ''}` : String(e);
   return new AppError('INTERNAL', 'Something went wrong on our side. Try again.', { detail, cause: e });

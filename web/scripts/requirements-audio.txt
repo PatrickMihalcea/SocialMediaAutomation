@@ -1,0 +1,12 @@
+# Beat analysis only. Deliberately separate from the repo-root requirements.txt,
+# which is the DepthFlow/torch/moderngl stack the v2 pipeline replaces.
+#
+# Install:
+#   python3.12 -m venv web/.venv-audio
+#   web/.venv-audio/bin/pip install -r web/scripts/requirements-audio.txt
+#   # then set PYTHON_BIN=web/.venv-audio/bin/python and AUDIO_ANALYZER=librosa
+librosa==0.10.2.post1
+numpy==1.26.4
+scipy==1.13.1
+soundfile==0.12.1
+numba==0.60.0

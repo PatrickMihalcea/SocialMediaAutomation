@@ -16,6 +16,14 @@ export interface JobPayloadMap {
   'expand-recurrence': { recurringScheduleId: string };
   'scan-due-posts': Record<string, never>;
   'send-notification-email': { notificationId: string };
+  /** One node's execution inside a workflow run. */
+  'run-workflow-node': { nodeRunId: string };
+  /** Repairs runs a dying worker left mid-flight. */
+  'sweep-workflow-runs': Record<string, never>;
+  /** Starts every workflow whose weekly slot has arrived. */
+  'scan-due-workflows': Record<string, never>;
+  /** Beat-grid analysis for an uploaded audio asset. */
+  'analyse-audio': { mediaAssetId: string };
   'ai-media-job': { aiMediaJobId: string };
 }
 
@@ -32,6 +40,12 @@ export const JOB_QUEUE: Record<JobType, QueueName> = {
   'expand-recurrence': 'POST_PUBLISHING',
   'scan-due-posts': 'POST_PUBLISHING',
   'send-notification-email': 'NOTIFICATION',
+  // Workflow steps get their own lane: a render pegs a core for minutes, and
+  // sharing POST_PUBLISHING would let one video starve every scheduled post.
+  'run-workflow-node': 'WORKFLOW',
+  'sweep-workflow-runs': 'WORKFLOW',
+  'scan-due-workflows': 'WORKFLOW',
+  'analyse-audio': 'MEDIA_PROCESSING',
   'ai-media-job': 'AI_GENERATION',
 };
 

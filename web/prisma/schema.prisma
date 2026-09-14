@@ -102,6 +102,7 @@ enum AiMediaJobKind {
 
 enum QueueName {
   POST_PUBLISHING
+  WORKFLOW
   MEDIA_PROCESSING
   THUMBNAIL_GENERATION
   ANALYTICS_SYNC
@@ -209,20 +210,22 @@ model User {
   createdAt                             DateTime        @default(now()) @map("created_at")
   updatedAt                             DateTime        @updatedAt @map("updated_at")
 
-  accounts         Account[]
-  sessions         Session[]
-  memberships      WorkspaceMember[]
-  posts            Post[]
-  mediaAssets      MediaAsset[]
-  notifications    Notification[]
-  approvalComments ApprovalComment[]
-  aiConversations  AiConversation[]
-  aiGenerations    AiGeneration[]
-  auditLogs        AuditLog[]
-  invitesSent      WorkspaceInvite[] @relation("InviteInviter")
-  oauthAttempts    OAuthAttempt[]
-  oauthSelections  OAuthSelection[]
-  savedSearchViews SavedSearchView[]
+  accounts              Account[]
+  sessions              Session[]
+  memberships           WorkspaceMember[]
+  posts                 Post[]
+  mediaAssets           MediaAsset[]
+  notifications         Notification[]
+  approvalComments      ApprovalComment[]
+  aiConversations       AiConversation[]
+  aiGenerations         AiGeneration[]
+  auditLogs             AuditLog[]
+  invitesSent           WorkspaceInvite[] @relation("InviteInviter")
+  workflowsCreated      Workflow[]
+  workflowRunsTriggered WorkflowRun[]
+  oauthAttempts         OAuthAttempt[]
+  oauthSelections       OAuthSelection[]
+  savedSearchViews      SavedSearchView[]
 
   @@index([createdAt])
   @@map("users")
@@ -330,6 +333,11 @@ model Workspace {
   usageRecords       UsageRecord[]
   jobs               Job[]
   auditLogs          AuditLog[]
+  workflows          Workflow[]
+  workflowNodes      WorkflowNode[]
+  workflowEdges      WorkflowEdge[]
+  workflowRuns       WorkflowRun[]
+  workflowNodeRuns   WorkflowNodeRun[]
   oauthAttempts      OAuthAttempt[]
   oauthSelections    OAuthSelection[]
   savedSearchViews   SavedSearchView[]
@@ -685,18 +693,49 @@ model MediaAsset {
   derivationPreset String?     @map("derivation_preset")
   /// Set when the asset came out of AI image generation.
   aiGenerationId   String?     @map("ai_generation_id") @db.Uuid
+  /// Audio only — detected tempo. Null until analysis has run; a track whose
+  /// tempo could not be detected keeps null rather than a guessed number.
+  bpm              Float?
+  /// Beat onsets in seconds from the start of the file, ascending. Audio only.
+  ///
+  /// The grid, not the tempo, is what clips are cut on: real tracks drift, so
+  /// 60/bpm spacing desynchronises within about thirty seconds. It is cached
+  /// rather than recomputed because analysis is not reproducible across
+  /// machines — mp3 decoders disagree about encoder delay by up to ~26ms — so
+  /// this column is the only thing that makes a re-render cut identically.
+  ///
+  /// Capped at 4096 entries (~34 min at 120bpm); beyond that the tail is
+  /// extrapolated from bpm. A social clip only ever uses the head.
+  beatGrid         Float[]     @default([]) @map("beat_grid")
+  /// The subset of beatGrid that starts a bar. Empty when the analyser could
+  /// not place bar one, in which case the renderer treats beat zero as bar one.
+  downbeats        Float[]     @default([]) @map("downbeats")
+  /// Per-beat onset strength, 0..1, parallel to beatGrid. Lets the renderer
+  /// skip a quiet intro and start cutting on the drop.
+  beatStrength     Float[]     @default([]) @map("beat_strength")
+  beatsPerBar      Int?        @map("beats_per_bar")
+  /// `librosa@0.10.2.post1` or `constant-bpm`, so a grid produced by an
+  /// analyser the renderer no longer trusts can be re-derived.
+  beatAnalyzer     String?     @map("beat_analyzer")
+  /// Bumped when the analysis contract changes — sample rate, hop length, the
+  /// regularisation rule — independently of the library version.
+  beatGridVersion  Int?        @map("beat_grid_version")
+  /// Null when never analysed. Distinct from an analysis that ran and found
+  /// nothing, which stores an empty grid and a timestamp.
+  analysedAt       DateTime?   @map("analysed_at")
   createdAt        DateTime    @default(now()) @map("created_at")
   updatedAt        DateTime    @updatedAt @map("updated_at")
 
-  workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  folder       MediaFolder?    @relation(fields: [folderId], references: [id], onDelete: SetNull)
-  uploadedBy   User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
-  derivedFrom  MediaAsset?     @relation("Derivation", fields: [derivedFromId], references: [id], onDelete: SetNull)
-  derivatives  MediaAsset[]    @relation("Derivation")
-  tags         MediaAssetTag[]
-  postMedia    PostMedia[]
-  aiGeneration AiGeneration?   @relation(fields: [aiGenerationId], references: [id], onDelete: SetNull)
-  aiJobOutputs AiMediaJob[]    @relation("AiJobOutput")
+  workspace       Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  folder          MediaFolder?           @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  uploadedBy      User?                  @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  derivedFrom     MediaAsset?            @relation("Derivation", fields: [derivedFromId], references: [id], onDelete: SetNull)
+  derivatives     MediaAsset[]           @relation("Derivation")
+  tags            MediaAssetTag[]
+  postMedia       PostMedia[]
+  aiGeneration    AiGeneration?          @relation(fields: [aiGenerationId], references: [id], onDelete: SetNull)
+  aiJobOutputs    AiMediaJob[]           @relation("AiJobOutput")
+  workflowOutputs WorkflowNodeRunAsset[]
 
   @@index([workspaceId])
   @@index([folderId])
@@ -704,6 +743,8 @@ model MediaAsset {
   @@index([status])
   @@index([aiGenerationId])
   @@index([createdAt])
+  /// Lets a beatGridVersion bump find the audio it needs to re-analyse.
+  @@index([type, analysedAt])
   @@map("media_assets")
 }
 
@@ -1090,4 +1131,244 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------- workflows
+
+enum WorkflowRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+/// PENDING means upstream work is still outstanding; SKIPPED means an ancestor
+/// failed and this node was never attempted. Deliberately not JobStatus — that
+/// enum describes a transport row, this one describes a place on the canvas.
+enum WorkflowNodeRunStatus {
+  PENDING
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+enum WorkflowRunTrigger {
+  MANUAL
+  SCHEDULE
+  API
+}
+
+/// A branching pipeline assembled on a canvas. The graph is the definition; a
+/// WorkflowRun is one execution of a frozen copy of it.
+model Workflow {
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  createdById      String?   @map("created_by_id") @db.Uuid
+  name             String
+  description      String?
+  /// Canvas pan and zoom, so the board reopens where it was left.
+  viewport         Json      @default("{}")
+  enabled          Boolean   @default(true)
+  /// Weekly schedule, in the workspace timezone. Mirrors RecurringSchedule
+  /// rather than introducing a cron expression and a parser to go with it.
+  scheduleEnabled  Boolean   @default(false) @map("schedule_enabled")
+  scheduleWeekdays Int[]     @default([]) @map("schedule_weekdays")
+  scheduleHour     Int       @default(9) @map("schedule_hour")
+  scheduleMinute   Int       @default(0) @map("schedule_minute")
+  timezone         String    @default("UTC")
+  /// Next instant this workflow is due, UTC. Null when it runs manually only.
+  nextRunAt        DateTime? @map("next_run_at")
+  lastRunAt        DateTime? @map("last_run_at")
+  archivedAt       DateTime? @map("archived_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  nodes     WorkflowNode[]
+  edges     WorkflowEdge[]
+  runs      WorkflowRun[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, archivedAt])
+  @@index([nextRunAt])
+  @@index([createdAt])
+  @@map("workflows")
+}
+
+/// One box on the canvas. `type` keys into the node registry
+/// (src/lib/workflows/registry.ts), which owns the port shapes and the config
+/// schema. Deliberately a string rather than a database enum: node types churn,
+/// and Postgres cannot drop an enum value once it exists.
+model WorkflowNode {
+  id          String   @id @default(uuid()) @db.Uuid
+  workflowId  String   @map("workflow_id") @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  type        String
+  /// Author-visible label; defaults to the registry's label for the type.
+  name        String
+  /// Registry-validated settings for this node. Never holds port values —
+  /// those belong to a run, not to the definition.
+  config      Json     @default("{}")
+  positionX   Float    @default(0) @map("position_x")
+  positionY   Float    @default(0) @map("position_y")
+  /// Bumped when config changes, never when the node is merely dragged, so run
+  /// history can show the settings that actually ran.
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workflow      Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workspace     Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  outgoingEdges WorkflowEdge[]    @relation("EdgeSource")
+  incomingEdges WorkflowEdge[]    @relation("EdgeTarget")
+  nodeRuns      WorkflowNodeRun[]
+
+  @@index([workflowId])
+  @@index([workspaceId])
+  @@index([createdAt])
+  @@map("workflow_nodes")
+}
+
+/// A typed connection from one node's output port to another's input port. Port
+/// ids are registry keys rather than rows, so a renamed port surfaces as a
+/// validation error on load instead of a silently dangling foreign key.
+model WorkflowEdge {
+  id           String   @id @default(uuid()) @db.Uuid
+  workflowId   String   @map("workflow_id") @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  sourceNodeId String   @map("source_node_id") @db.Uuid
+  sourcePort   String   @map("source_port")
+  targetNodeId String   @map("target_node_id") @db.Uuid
+  targetPort   String   @map("target_port")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  workflow   Workflow     @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workspace  Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceNode WorkflowNode @relation("EdgeSource", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  targetNode WorkflowNode @relation("EdgeTarget", fields: [targetNodeId], references: [id], onDelete: Cascade)
+
+  /// One writer per input port. Fan-in is expressed with an explicit merge node
+  /// rather than by silently concatenating two upstreams in an undefined order —
+  /// which would make a slideshow's image order nondeterministic.
+  @@unique([targetNodeId, targetPort])
+  @@index([workflowId])
+  @@index([workspaceId])
+  @@index([sourceNodeId])
+  @@index([targetNodeId])
+  @@map("workflow_edges")
+}
+
+/// One execution. The graph is snapshotted the moment the run starts, so editing
+/// the canvas during or after a run never rewrites history and never changes
+/// which nodes a running scheduler believes are downstream.
+model WorkflowRun {
+  id            String             @id @default(uuid()) @db.Uuid
+  workspaceId   String             @map("workspace_id") @db.Uuid
+  workflowId    String             @map("workflow_id") @db.Uuid
+  triggeredById String?            @map("triggered_by_id") @db.Uuid
+  trigger       WorkflowRunTrigger @default(MANUAL)
+  status        WorkflowRunStatus  @default(QUEUED)
+  /// Frozen { nodes, edges } as of the start. Every scheduling decision reads
+  /// this, never the live tables.
+  graph         Json
+  /// Values supplied at trigger time, readable by any node.
+  input         Json               @default("{}")
+  error         String?
+  /// Set the instant a cancel is requested. In-flight nodes check it between
+  /// awaits; it is the durable half of cooperative cancellation.
+  cancelledAt   DateTime?          @map("cancelled_at")
+  startedAt     DateTime?          @map("started_at")
+  finishedAt    DateTime?          @map("finished_at")
+  durationMs    Int?               @map("duration_ms")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  workspace   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workflow    Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  triggeredBy User?             @relation(fields: [triggeredById], references: [id], onDelete: SetNull)
+  nodeRuns    WorkflowNodeRun[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@index([workflowId, createdAt])
+  @@index([status])
+  @@index([createdAt])
+  @@map("workflow_runs")
+}
+
+/// One node's execution inside a run. This row is both the unit of work and the
+/// live status the canvas renders; the `jobs` row is only the transport.
+model WorkflowNodeRun {
+  id          String                @id @default(uuid()) @db.Uuid
+  workspaceId String                @map("workspace_id") @db.Uuid
+  runId       String                @map("run_id") @db.Uuid
+  nodeId      String                @map("node_id") @db.Uuid
+  /// Copied from the snapshot so the run view never has to join back to a node
+  /// that has since been deleted from the canvas.
+  nodeType    String                @map("node_type")
+  nodeName    String                @map("node_name")
+  config      Json                  @default("{}")
+  status      WorkflowNodeRunStatus @default(PENDING)
+  /// Upstream nodes not yet succeeded. Decremented under a row lock; whichever
+  /// worker drives it to zero owns the right to enqueue this node exactly once.
+  pendingDeps Int                   @default(0) @map("pending_deps")
+  /// Port id to resolved input value, kept so a single-node retry can re-run
+  /// without re-running upstream, and so a failure can be diagnosed.
+  input       Json?
+  /// Port id to produced value, in the shape the registry declares. Media ports
+  /// hold MediaAsset ids; the assets themselves live in media_assets.
+  output      Json?
+  attempt     Int                   @default(0)
+  maxAttempts Int                   @default(3) @map("max_attempts")
+  error       String?
+  /// The jobs row for the current attempt, for the admin view and for reaping.
+  jobId       String?               @map("job_id") @db.Uuid
+  queuedAt    DateTime?             @map("queued_at")
+  startedAt   DateTime?             @map("started_at")
+  /// Renewed by long-running handlers. A RUNNING row whose heartbeat has gone
+  /// stale is what the sweeper reclaims after a worker dies mid-node.
+  heartbeatAt DateTime?             @map("heartbeat_at")
+  finishedAt  DateTime?             @map("finished_at")
+  durationMs  Int?                  @map("duration_ms")
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+
+  workspace      Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  run            WorkflowRun            @relation(fields: [runId], references: [id], onDelete: Cascade)
+  node           WorkflowNode           @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  producedAssets WorkflowNodeRunAsset[]
+
+  /// One attempt-chain per node per run. This is the constraint the whole
+  /// scheduler's idempotency rests on.
+  @@unique([runId, nodeId])
+  @@index([workspaceId])
+  @@index([runId, status])
+  @@index([nodeId])
+  @@index([status, heartbeatAt])
+  @@index([createdAt])
+  @@map("workflow_node_runs")
+}
+
+/// Media a node run produced, in emission order. A join row rather than an id
+/// array inside `output` is what makes "everything this run created" and "which
+/// run created this asset" ordinary indexed queries.
+model WorkflowNodeRunAsset {
+  nodeRunId    String   @map("node_run_id") @db.Uuid
+  mediaAssetId String   @map("media_asset_id") @db.Uuid
+  /// Output port the asset was emitted on.
+  port         String
+  position     Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  nodeRun    WorkflowNodeRun @relation(fields: [nodeRunId], references: [id], onDelete: Cascade)
+  mediaAsset MediaAsset      @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@id([nodeRunId, port, mediaAssetId])
+  @@index([mediaAssetId])
+  @@map("workflow_node_run_assets")
 }

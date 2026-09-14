@@ -9,6 +9,7 @@ import { MediaStatus, MediaType } from '@prisma/client';
 import { db } from '@/lib/db';
 import { mediaKey, storage } from '@/lib/storage';
 import { PermanentJobError } from '@/lib/queue/runner';
+import { analyseAudioAsset } from '@/lib/audio/analyse';
 import { notify } from '@/lib/notifications/service';
 
 const run = promisify(execFile);
@@ -50,6 +51,22 @@ export async function processMediaAsset(mediaAssetId: string): Promise<void> {
           status: MediaStatus.READY,
         },
       });
+    } else if (asset.type === MediaType.AUDIO) {
+      // Audio used to fall through the video branch and come out with nothing
+      // measured. It gets its own branch now: a duration from ffprobe when
+      // that exists, and a beat grid from the analyser when that does.
+      const probed = await probeAudio(bytes, asset.filename).catch(() => null);
+      await db.mediaAsset.update({
+        where: { id: asset.id },
+        data: { duration: probed?.duration ?? asset.duration, status: MediaStatus.READY },
+      });
+
+      // Deliberately swallowed. A machine with no Python must not turn a
+      // perfectly good mp3 into a FAILED asset — the same stance probeVideo
+      // takes when ffmpeg is missing.
+      await analyseAudioAsset(asset.id).catch((error) =>
+        console.warn('[media] beat analysis skipped', asset.filename, error?.message ?? error),
+      );
     } else {
       const edit = parseVideoEdit(asset.derivationPreset);
       const probed = asset.type === MediaType.VIDEO
@@ -84,6 +101,26 @@ export async function processMediaAsset(mediaAssetId: string): Promise<void> {
   } catch (error) {
     await db.mediaAsset.update({ where: { id: asset.id }, data: { status: MediaStatus.FAILED } });
     throw error;
+  }
+}
+
+/** Duration only. Returns null when ffprobe is absent, which is a valid state. */
+async function probeAudio(bytes: Buffer, filename: string): Promise<{ duration?: number } | null> {
+  if (!(await hasFfmpeg())) return null;
+  const dir = await mkdtemp(path.join(tmpdir(), 'b88-audio-'));
+  const input = path.join(dir, filename.replace(/[^\w.-]/g, '_'));
+  try {
+    await writeFile(input, bytes);
+    const { stdout } = await run('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'json',
+      input,
+    ]);
+    const parsed = JSON.parse(stdout) as { format?: { duration?: string } };
+    return { duration: parsed.format?.duration ? Number(parsed.format.duration) : undefined };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 }
 
@@ -131,6 +168,81 @@ async function probeVideo(bytes: Buffer, filename: string, thumbnailOffset = 1):
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+export interface FfmpegCapabilities {
+  ffmpeg: boolean;
+  /** Absent from any build without --enable-libfreetype, including Homebrew's. */
+  drawtext: boolean;
+  zoompan: boolean;
+  libx264: boolean;
+  /** Major version, 0 when it could not be parsed. */
+  majorVersion: number;
+  /**
+   * How this build wants a filter graph read from a file. `-filter_complex_script`
+   * was removed in ffmpeg 8 in favour of the generic `-/filter_complex` syntax,
+   * so the flag has to be chosen rather than assumed.
+   */
+  filterScriptFlag: '-/filter_complex' | '-filter_complex_script';
+}
+
+let capabilities: FfmpegCapabilities | null = null;
+
+/**
+ * What this ffmpeg can actually do, probed once.
+ *
+ * hasFfmpeg() only answers whether the binary exists, which is not the same
+ * question: a static build without libfreetype has no drawtext at all, and the
+ * render would fail at graph-parse time with a message about an unknown filter.
+ */
+export async function ffmpegCapabilities(): Promise<FfmpegCapabilities> {
+  if (capabilities) return capabilities;
+  if (!(await hasFfmpeg())) {
+    capabilities = {
+      ffmpeg: false,
+      drawtext: false,
+      zoompan: false,
+      libx264: false,
+      majorVersion: 0,
+      filterScriptFlag: '-/filter_complex',
+    };
+    return capabilities;
+  }
+  try {
+    const [filters, encoders, version] = await Promise.all([
+      run('ffmpeg', ['-hide_banner', '-filters']),
+      run('ffmpeg', ['-hide_banner', '-encoders']),
+      run('ffmpeg', ['-hide_banner', '-version']),
+    ]);
+    const major = Number(version.stdout.match(/ffmpeg version n?(\d+)/)?.[1] ?? 0);
+    const hasFilter = (name: string) => new RegExp(`\\b${name}\\b`).test(filters.stdout);
+    capabilities = {
+      ffmpeg: true,
+      drawtext: hasFilter('drawtext'),
+      zoompan: hasFilter('zoompan'),
+      libx264: /\blibx264\b/.test(encoders.stdout),
+      majorVersion: major,
+      // The file-valued option syntax arrived in 6.1; the old flag was removed
+      // in 8. Anything from 7 up is safe on the new one.
+      filterScriptFlag: major >= 7 ? '-/filter_complex' : '-filter_complex_script',
+    };
+    if (!capabilities.drawtext) {
+      console.warn(
+        '[media] this ffmpeg has no drawtext filter (built without libfreetype) — ' +
+          'labels will be burned into the stills instead, using a system font',
+      );
+    }
+  } catch {
+    capabilities = {
+      ffmpeg: true,
+      drawtext: false,
+      zoompan: false,
+      libx264: false,
+      majorVersion: 0,
+      filterScriptFlag: '-/filter_complex',
+    };
+  }
+  return capabilities;
 }
 
 let ffmpegAvailable: boolean | null = null;

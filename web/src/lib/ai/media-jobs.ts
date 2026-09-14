@@ -16,14 +16,52 @@ import {
 } from '@/lib/ai/providers/external-media';
 import { env } from '@/lib/env';
 import type { AiMediaResult } from '@/lib/ai/types';
-import { incrementUsage } from '@/lib/billing/limits';
+import { assertWithinLimit, currentMonthUsage, incrementUsage } from '@/lib/billing/limits';
 import { notify } from '@/lib/notifications/service';
+import { enqueue } from '@/lib/queue';
 
 export function mediaProviderDescriptor(kind: AiMediaJobKind) {
   const external = env.AI_PROVIDER === 'openai';
   if (kind.startsWith('VIDEO')) return { provider: external ? 'openai' : 'mock', model: external ? 'external-video' : 'mock-video-1' };
   if (kind.startsWith('AUDIO')) return { provider: external ? 'openai' : 'mock', model: external ? 'external-audio' : 'mock-audio-1' };
   return { provider: external ? 'openai' : 'mock', model: external ? env.OPENAI_IMAGE_MODEL : 'mock-image-edit-1' };
+}
+
+/**
+ * Creates an AI media job row and queues it.
+ *
+ * Shared by the studio action and by workflow steps, so both go through the
+ * same quota check and the same dedupe key rather than one of them drifting.
+ */
+export async function createAiMediaJob(input: {
+  workspaceId: string;
+  userId: string;
+  kind: AiMediaJobKind;
+  prompt: string;
+  inputAssetIds?: string[];
+}): Promise<{ id: string; kind: AiMediaJobKind; status: JobStatus }> {
+  const used = await currentMonthUsage(input.workspaceId, 'ai_generations');
+  await assertWithinLimit(input.workspaceId, 'aiGenerations', used);
+
+  const descriptor = mediaProviderDescriptor(input.kind);
+  const job = await db.aiMediaJob.create({
+    data: {
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      kind: input.kind,
+      status: 'QUEUED',
+      provider: descriptor.provider,
+      model: descriptor.model,
+      prompt: input.prompt,
+      inputAssetIds: input.inputAssetIds ?? [],
+    },
+    select: { id: true, kind: true, status: true },
+  });
+  await enqueue('ai-media-job', { aiMediaJobId: job.id }, {
+    workspaceId: input.workspaceId,
+    dedupeKey: `ai-media:${job.id}`,
+  });
+  return job;
 }
 
 export async function runAiMediaJob(aiMediaJobId: string): Promise<void> {

@@ -87,6 +87,22 @@ function build(schemaName: string, prompt: string, messages: AiMessage[]): unkno
         })),
       };
 
+    case 'image_prompts': {
+      // Varies the descriptor per item so a demo slideshow reads as eight
+      // distinct rooms rather than eight copies of one sentence.
+      const count = requestedCount(prompt, 'image') ?? 8;
+      return {
+        prompts: Array.from({ length: count }, (_, i) => ({
+          title: `${IMAGE_STYLES[i % IMAGE_STYLES.length].title}`,
+          prompt:
+            `${IMAGE_STYLES[i % IMAGE_STYLES.length].detail} ${topic}. ` +
+            'Foreground: the main subject, centred with headroom. Midground: furniture and objects that ' +
+            'explain the space. Background: a window with daylight falling across the far wall. ' +
+            'Shot on a 35mm lens at eye level, natural light, photoreal, vertical composition.',
+        })),
+      };
+    }
+
     case 'platform_adaptations':
       return {
         versions: [
@@ -335,14 +351,22 @@ function selectRequestedPosts(
   return [fallback, ...posts.filter((post) => post.id !== fallback.id)].slice(0, count);
 }
 
-function requestedCount(prompt: string, _noun: 'post'): number | null {
-  const numeric = prompt.match(/\b(\d{1,2})[ -]?(?:distinct\s+)?(?:drafts?|posts?)\b/i);
+const COUNT_NOUNS: Record<'post' | 'image', string> = {
+  post: 'drafts?|posts?',
+  image: 'images?|prompts?|photos?|shots?|rooms?|options?',
+};
+
+function requestedCount(prompt: string, noun: 'post' | 'image'): number | null {
+  const nouns = COUNT_NOUNS[noun];
+  const numeric = prompt.match(new RegExp(`\\b(\\d{1,2})[ -]?(?:distinct\\s+)?(?:${nouns})\\b`, 'i'));
   if (numeric) return Number(numeric[1]);
   const words: Record<string, number> = {
     one: 1, two: 2, three: 3, four: 4, five: 5,
     six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
   };
-  const written = prompt.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten)[ -]?(?:distinct\s+)?(?:drafts?|posts?)\b/i);
+  const written = prompt.match(
+    new RegExp(`\\b(one|two|three|four|five|six|seven|eight|nine|ten)[ -]?(?:distinct\\s+)?(?:${nouns})\\b`, 'i'),
+  );
   return written ? words[written[1].toLowerCase()] : null;
 }
 
@@ -369,6 +393,17 @@ function requestedTime(prompt: string): { hour: number; minute: number } {
   if (match[3]?.toLowerCase() === 'am' && hour === 12) hour = 0;
   return hour <= 23 && minute <= 59 ? { hour, minute } : { hour: 9, minute: 0 };
 }
+
+const IMAGE_STYLES = [
+  { title: 'Warm minimal', detail: 'A warm minimalist take on' },
+  { title: 'Coastal', detail: 'A bright coastal interpretation of' },
+  { title: 'Dark academia', detail: 'A moody, book-lined version of' },
+  { title: 'Mid-century', detail: 'A mid-century modern rendering of' },
+  { title: 'Japandi', detail: 'A quiet Japandi treatment of' },
+  { title: 'Industrial', detail: 'A raw industrial composition of' },
+  { title: 'Maximal colour', detail: 'A saturated, pattern-heavy vision of' },
+  { title: 'Scandi', detail: 'A pale Scandinavian arrangement of' },
+];
 
 const IDEA_ANGLES = [
   'Contrarian take',
@@ -401,7 +436,7 @@ function hashtagsFor(topic: string): string[] {
 }
 
 function extractTopic(prompt: string): string {
-  const match = prompt.match(/about\s+(.{3,60}?)(?:[.?!\n]|$)/i);
+  const match = prompt.match(/about:?\s+(.{3,60}?)(?:[.?!\n]|$)/i);
   if (match) return match[1].trim();
   const words = prompt.replace(/\s+/g, ' ').trim().split(' ').slice(0, 6).join(' ');
   return words || 'the work';
