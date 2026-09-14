@@ -1,6 +1,10 @@
 images/
 venv/
 .venv/
+# Named virtualenvs such as web/.venv-audio
+.venv*/
+__pycache__/
+*.pyc
 .env
 *.jpg
 credentials.json
