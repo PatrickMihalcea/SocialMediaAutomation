@@ -1,6 +1,13 @@
 import { MediaType } from '@prisma/client';
 import { z } from 'zod';
 import { json, media, post, text, type PortDefinition } from '@/lib/workflows/ports';
+// Leaf module with no server imports, so the canvas can still be rendered.
+import { DEFAULT_IMAGE_SIZE, IMAGE_SIZE_VALUES } from '@/lib/ai/image-sizes';
+import {
+  VIDEO_OUTPUT_SIZE_VALUES,
+  resolveVideoOutputDimensions,
+  type VideoOutputSize,
+} from '@/lib/workflows/video-output-presets';
 
 /**
  * The node catalogue.
@@ -13,6 +20,8 @@ import { json, media, post, text, type PortDefinition } from '@/lib/workflows/po
  *
  * Port shapes are static per node type, never derived from config. If they
  * varied, an edge's validity would change whenever someone edited a setting.
+ * A generic output (`followsInput`) takes its type from the graph instead, so
+ * only rewiring can change it — see ./port-resolution.ts.
  */
 
 export type NodeCategory = 'generate' | 'media' | 'assemble' | 'publish' | 'utility';
@@ -30,11 +39,96 @@ export interface NodeDefinition {
   configSchema: z.ZodTypeAny;
   /** Long-running nodes get a wider retry budget and a heartbeat. */
   longRunning?: boolean;
+  /** Kept executable for saved graphs, but hidden from new-workflow surfaces. */
+  legacy?: boolean;
 }
 
 const IMAGES = [MediaType.IMAGE] as const;
 const VIDEOS = [MediaType.VIDEO] as const;
 const AUDIO = [MediaType.AUDIO] as const;
+
+const trimmerConfigSchema = z.preprocess(
+  (value) => {
+    const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+    if ('mode' in raw) return raw;
+    // Every old Audio trimmer config persisted `bars`; an empty config is a
+    // newly-added general Trimmer and therefore opens in range mode.
+    return { ...raw, mode: 'bars' in raw ? 'bars' : 'range' };
+  },
+  z.object({
+    mode: z.enum(['range', 'bars']).default('range'),
+    startSeconds: z.number().min(0).nullable().default(null),
+    endSeconds: z.number().min(0).nullable().default(null),
+    bars: z.number().int().min(1).max(64).default(8),
+    snapToDownbeat: z.boolean().default(true),
+  }).superRefine((config, ctx) => {
+    if (
+      config.mode === 'range'
+      && config.endSeconds != null
+      && config.endSeconds <= (config.startSeconds ?? 0)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'The end time must be after the start time.',
+        path: ['endSeconds'],
+      });
+    }
+  }),
+);
+
+const beatSlideshowConfigSchema = z
+  .object({
+    /** 4 = one bar, punchy. 8 = two bars, the usual for this genre. */
+    beatsPerClip: z.number().int().min(1).max(32).default(8),
+    size: z.enum(VIDEO_OUTPUT_SIZE_VALUES).optional(),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+    fps: z.number().int().min(24).max(60).default(30),
+    /**
+     * cover crops to fill, which loses the sides of a 2:3 image on a 9:16
+     * canvas. blur-pad keeps the whole composition over a blurred backdrop.
+     */
+    fit: z.enum(['cover', 'blur-pad']).default('cover'),
+    kenBurns: z.boolean().default(true),
+    /** Visual lead in ms: a cut exactly on the transient can read a hair late. */
+    visualLeadMs: z.number().int().min(0).max(200).default(0),
+    fadeOutSeconds: z.number().min(0).max(5).default(1.2),
+  })
+  .superRefine((config, ctx) => {
+    if ((config.width == null) !== (config.height == null)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Video width and height must both be set.',
+        path: [config.width == null ? 'width' : 'height'],
+      });
+    }
+  })
+  .transform(normalizeBeatSlideshowConfig);
+
+/** Normalises preset size and legacy width/height into one stored shape. */
+function normalizeBeatSlideshowConfig(
+  config: Record<string, unknown> & {
+    beatsPerClip: number;
+    size?: VideoOutputSize;
+    fps: number;
+    fit: 'cover' | 'blur-pad';
+    kenBurns: boolean;
+    visualLeadMs: number;
+    fadeOutSeconds: number;
+    width?: number;
+    height?: number;
+  },
+) {
+  const { width, height, size, ...rest } = config;
+  const resolved = resolveVideoOutputDimensions({ size, width, height });
+
+  if (resolved.size) {
+    return { ...rest, size: resolved.size };
+  }
+
+  // Non-preset legacy dimensions stay explicit until the user picks a preset.
+  return { ...rest, width: resolved.width, height: resolved.height };
+}
 
 export const NODE_DEFINITIONS = {
   IDEA_GENERATOR: {
@@ -46,7 +140,15 @@ export const NODE_DEFINITIONS = {
     inputs: [
       { id: 'theme', label: 'Theme', type: text(), description: 'Overrides the theme set below.' },
     ],
-    outputs: [{ id: 'prompts', label: 'Prompts', type: text(true) }],
+    outputs: [
+      { id: 'prompts', label: 'Prompts', type: text(true) },
+      {
+        id: 'titles',
+        label: 'Titles',
+        type: text(true),
+        description: 'Short titles that can be shown by a text overlay.',
+      },
+    ],
     configSchema: z.object({
       /** What the prompts are written to produce — the wording differs a lot. */
       mode: z.enum(['image', 'text', 'video']).default('image'),
@@ -63,10 +165,16 @@ export const NODE_DEFINITIONS = {
     description: 'Generates one image per prompt and saves them to the media library.',
     category: 'generate',
     icon: 'image',
-    inputs: [{ id: 'prompts', label: 'Prompts', type: text(true), required: true }],
-    outputs: [{ id: 'images', label: 'Images', type: media([...IMAGES], true) }],
+    inputs: [
+      { id: 'prompts', label: 'Prompts', type: text(true), required: true },
+      { id: 'titles', label: 'Titles', type: text(true) },
+    ],
+    outputs: [
+      { id: 'images', label: 'Images', type: media([...IMAGES], true) },
+      { id: 'titles', label: 'Titles', type: text(true) },
+    ],
     configSchema: z.object({
-      size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1536'),
+      size: z.enum(IMAGE_SIZE_VALUES).default(DEFAULT_IMAGE_SIZE),
       /** Stops a runaway prompt list from spending the whole month's quota. */
       maxImages: z.number().int().min(1).max(20).default(8),
     }),
@@ -88,12 +196,42 @@ export const NODE_DEFINITIONS = {
     longRunning: true,
   },
 
+  MEDIA_LIBRARY: {
+    type: 'MEDIA_LIBRARY',
+    label: 'Media library',
+    description: 'Loads one item, one folder, or the whole library and shows only its available media types.',
+    category: 'media',
+    icon: 'folder-open',
+    inputs: [],
+    outputs: [
+      { id: 'images', label: 'Images', type: media([...IMAGES], true) },
+      { id: 'videos', label: 'Videos', type: media([...VIDEOS], true) },
+      { id: 'audio', label: 'Audio', type: media([...AUDIO], true) },
+      {
+        id: 'imageTitles',
+        label: 'Titles',
+        type: text(true),
+        description:
+          'The images\u2019 filenames, tidied up, in the same order. Feed a slideshow\u2019s titles to label each cut.',
+      },
+    ],
+    configSchema: z.object({
+      /** Empty means the whole workspace library. */
+      folderId: z.string().uuid().nullable().default(null),
+            /** When set, this one asset takes precedence over folderId. */
+            assetId: z.string().uuid().nullable().default(null),
+      /** Folder trees are user-facing; selecting a parent normally means its contents. */
+      includeSubfolders: z.boolean().default(true),
+    }),
+  },
+
   MUSIC_SELECTOR: {
     type: 'MUSIC_SELECTOR',
     label: 'Music',
     description: 'Picks a track from the library. Its beat grid comes with it.',
     category: 'media',
     icon: 'music',
+    legacy: true,
     inputs: [],
     outputs: [{ id: 'audio', label: 'Audio', type: media([...AUDIO]) }],
     configSchema: z
@@ -113,29 +251,35 @@ export const NODE_DEFINITIONS = {
 
   AUDIO_TRIMMER: {
     type: 'AUDIO_TRIMMER',
-    label: 'Audio trimmer',
-    description: 'Cuts the track to a bar count, snapped to a downbeat.',
-    category: 'media',
+    label: 'Trimmer',
+    description: 'Trims one audio track or video clip with a visual range editor.',
+    category: 'utility',
     icon: 'scissors',
-    inputs: [{ id: 'audio', label: 'Audio', type: media([...AUDIO]), required: true }],
-    outputs: [{ id: 'audio', label: 'Audio', type: media([...AUDIO]) }],
-    configSchema: z.object({
-      /** Null means "find the drop" from per-beat onset strength. */
-      startSeconds: z.number().min(0).nullable().default(null),
-      bars: z.number().int().min(1).max(64).default(8),
-      snapToDownbeat: z.boolean().default(true),
-    }),
+    inputs: [{ id: 'audio', label: 'Media', type: media([...AUDIO, ...VIDEOS]), required: true }],
+    outputs: [{
+      id: 'audio',
+      label: 'Media',
+      type: media([...AUDIO, ...VIDEOS]),
+      followsInput: 'audio',
+    }],
+    configSchema: trimmerConfigSchema,
   },
 
   BEAT_SLIDESHOW: {
     type: 'BEAT_SLIDESHOW',
     label: 'Beat slideshow',
-    description: 'Cuts the images to the beat of the track and renders one video.',
+    description: 'Plays incoming images and video clips in order, cuts them to the beat, and renders one video.',
     category: 'assemble',
     icon: 'clapperboard',
     inputs: [
-      { id: 'images', label: 'Images', type: media([...IMAGES], true), required: true },
+      { id: 'images', label: 'Media', type: media([...IMAGES, ...VIDEOS], true), required: true },
       { id: 'audio', label: 'Audio', type: media([...AUDIO]), required: true },
+      {
+        id: 'titles',
+        label: 'Titles',
+        type: text(true),
+        description: 'Optional labels carried into each cut for a text overlay.',
+      },
     ],
     outputs: [
       { id: 'video', label: 'Video', type: media([...VIDEOS]) },
@@ -146,29 +290,43 @@ export const NODE_DEFINITIONS = {
         description: 'Cut boundaries, so an overlay can change text on the beat.',
       },
     ],
-    configSchema: z.object({
-      /** 4 = one bar, punchy. 8 = two bars, the usual for this genre. */
-      beatsPerClip: z.number().int().min(1).max(32).default(8),
-      width: z.number().int().default(1080),
-      height: z.number().int().default(1920),
-      fps: z.number().int().min(24).max(60).default(30),
-      /**
-       * cover crops to fill, which loses the sides of a 2:3 image on a 9:16
-       * canvas. blur-pad keeps the whole composition over a blurred backdrop.
-       */
-      fit: z.enum(['cover', 'blur-pad']).default('cover'),
-      kenBurns: z.boolean().default(true),
-      /** Visual lead in ms: a cut exactly on the transient can read a hair late. */
-      visualLeadMs: z.number().int().min(0).max(200).default(0),
-      fadeOutSeconds: z.number().min(0).max(5).default(1.2),
-    }),
+    configSchema: beatSlideshowConfigSchema,
     longRunning: true,
+  },
+
+  COMBINE_MEDIA: {
+    type: 'COMBINE_MEDIA',
+    label: 'Combine media',
+    description: 'Combines up to four ordered image or video lists into one sequence.',
+    category: 'utility',
+    icon: 'list-plus',
+    inputs: [
+      { id: 'media1', label: 'Media 1', type: media([...IMAGES, ...VIDEOS], true), required: true },
+      { id: 'titles1', label: 'Titles 1', type: text(true) },
+      { id: 'media2', label: 'Media 2', type: media([...IMAGES, ...VIDEOS], true) },
+      { id: 'titles2', label: 'Titles 2', type: text(true) },
+      { id: 'media3', label: 'Media 3', type: media([...IMAGES, ...VIDEOS], true) },
+      { id: 'titles3', label: 'Titles 3', type: text(true) },
+      { id: 'media4', label: 'Media 4', type: media([...IMAGES, ...VIDEOS], true) },
+      { id: 'titles4', label: 'Titles 4', type: text(true) },
+    ],
+    outputs: [
+      { id: 'media', label: 'Media', type: media([...IMAGES, ...VIDEOS], true) },
+      { id: 'titles', label: 'Titles', type: text(true) },
+    ],
+    configSchema: z.object({
+      sourceOrder: z
+        .array(z.enum(['media1', 'media2', 'media3', 'media4']))
+        .length(4)
+        .default(['media1', 'media2', 'media3', 'media4'])
+        .refine((order) => new Set(order).size === 4, 'Each media source must appear once.'),
+    }),
   },
 
   TEXT_OVERLAY: {
     type: 'TEXT_OVERLAY',
     label: 'Text overlay',
-    description: 'Burns a label onto each cut — a number, a name, or both.',
+    description: 'Burns a label onto each cut — a number, a title, or both.',
     category: 'assemble',
     icon: 'type',
     inputs: [
@@ -177,8 +335,10 @@ export const NODE_DEFINITIONS = {
     ],
     outputs: [{ id: 'video', label: 'Video', type: media([...VIDEOS]) }],
     configSchema: z.object({
-      /** {index} is the 1-based cut number; {title} is the prompt's own title. */
+      /** {index} is the 1-based cut number; {choice} starts at 1 after an opening cut. */
       template: z.string().max(200).default('{index}'),
+      /** Optional text used only on the first cut, before template takes over. */
+      firstTemplate: z.string().max(200).nullable().default(null),
       font: z.enum(['Archivo-Bold', 'Archivo-SemiBold', 'BebasNeue-Regular']).default('Archivo-Bold'),
       position: z.enum(['top', 'centre', 'bottom']).default('top'),
       /** 0 lets the renderer fit the longest label to the safe width. */
@@ -189,14 +349,55 @@ export const NODE_DEFINITIONS = {
 
   PICK: {
     type: 'PICK',
-    label: 'Pick one',
-    description: 'Takes a single item out of a list.',
+    label: 'Select items',
+    description: 'Selects one or more items from a media list, including a repeatable random selection.',
     category: 'utility',
     icon: 'crosshair',
-    inputs: [{ id: 'items', label: 'Items', type: media([...IMAGES, ...VIDEOS, ...AUDIO], true), required: true }],
-    outputs: [{ id: 'item', label: 'Item', type: media([...IMAGES, ...VIDEOS, ...AUDIO]) }],
+    inputs: [
+      {
+        id: 'items',
+        label: 'Items',
+        type: media([...IMAGES, ...VIDEOS, ...AUDIO], true),
+        required: true,
+      },
+      {
+        id: 'labels',
+        label: 'Titles',
+        type: text(true),
+        description:
+          'Optional titles belonging to the items, one per item. They are reordered with the selection so each title stays on its own item.',
+      },
+    ],
+    outputs: [
+      {
+        id: 'item',
+        label: 'First selected',
+        type: media([...IMAGES, ...VIDEOS, ...AUDIO]),
+        // Generic: a list of clips picks down to a clip, which a publish step
+        // accepts. Without this the wide declared type would be rejected by
+        // every single-kind input, which is what a second video-only Pick node
+        // was papering over.
+        followsInput: 'items',
+        description: 'The first selected item, for steps that take one item.',
+      },
+      {
+        id: 'selection',
+        label: 'Selection',
+        type: media([...IMAGES, ...VIDEOS, ...AUDIO], true),
+        followsInput: 'items',
+        description: 'Every selected item, for steps that take a list.',
+      },
+      {
+        id: 'labels',
+        label: 'Titles',
+        type: text(true),
+        description: 'The incoming titles, cut down and reordered to match the selection.',
+      },
+    ],
     configSchema: z.object({
-      /** Negative counts from the end, so -1 is the last item. */
+      mode: z.enum(['random', 'first', 'last', 'index']).default('index'),
+      count: z.number().int().min(1).max(20).default(1),
+      /** Negative positions count from the end, so -1 is the last item. */
       index: z.number().int().min(-20).max(20).default(0),
     }),
   },
@@ -226,7 +427,8 @@ export const NODE_DEFINITIONS = {
     inputs: [{ id: 'video', label: 'Video', type: media([...VIDEOS]), required: true }],
     outputs: [{ id: 'post', label: 'Post', type: post() }],
     configSchema: z.object({
-      socialAccountIds: z.array(z.string().uuid()).min(1),
+      /** Validated on save and at run time — empty is allowed on a newly added step. */
+      socialAccountIds: z.array(z.string().uuid()).default([]),
       caption: z.string().max(5000).default(''),
       /** queue takes the next open slot from the workspace's posting times. */
       mode: z.enum(['now', 'queue']).default('queue'),
@@ -248,6 +450,10 @@ export function isNodeType(type: string): type is NodeType {
   return type in NODE_DEFINITIONS;
 }
 
+export function isCreatableNodeType(type: string): type is NodeType {
+  return isNodeType(type) && !getDefinition(type)?.legacy;
+}
+
 export function findPort(
   type: string,
   portId: string,
@@ -261,6 +467,98 @@ export function parseConfig(type: string, raw: unknown) {
   const definition = getDefinition(type);
   if (!definition) throw new Error(`Unknown node type "${type}"`);
   return definition.configSchema.parse(raw ?? {});
+}
+
+/** Minimal channel row passed from the workflow page into the config panel. */
+export type WorkflowChannelOption = {
+  id: string;
+  accountName: string;
+  accountHandle: string | null;
+  platform: string;
+};
+
+export type WorkflowAudioOption = {
+  id: string;
+  filename: string;
+  folderId: string | null;
+  bpm: number | null;
+  hasBeatGrid: boolean;
+};
+
+export type WorkflowMediaFolderOption = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  counts: WorkflowMediaCounts;
+};
+
+export type WorkflowMediaAssetOption = {
+  id: string;
+  filename: string;
+  folderId: string | null;
+  type: MediaType;
+};
+
+export type WorkflowMediaCounts = {
+  images: number;
+  videos: number;
+  audio: number;
+};
+
+export const PUBLISH_CHANNEL_REQUIRED = 'Choose at least one channel.';
+
+export function nodeUsesChannelPicker(type: string): boolean {
+  return type === 'PUBLISH' || type === 'CREATE_DRAFT';
+}
+
+export function publishRequiresChannels(type: string, config: { socialAccountIds?: string[] }): boolean {
+  return type === 'PUBLISH' && (config.socialAccountIds?.length ?? 0) === 0;
+}
+
+/** User-safe validation message for a Zod parse failure. */
+export function zodValidationMessage(error: z.ZodError, fallback = 'Those settings are not valid for this step.'): {
+  message: string;
+  fields: Record<string, string[]>;
+} {
+  const fields = Object.fromEntries(
+    Object.entries(error.flatten().fieldErrors).filter(
+      (entry): entry is [string, string[]] => Array.isArray(entry[1]),
+    ),
+  );
+  return { message: error.issues[0]?.message ?? fallback, fields };
+}
+
+/** Checks whether a node's saved config is complete enough to run. */
+export function nodeRunConfigIssue(type: string, nodeName: string, raw: unknown): string | null {
+  try {
+    const config = parseConfig(type, raw) as { socialAccountIds?: string[] };
+    if (publishRequiresChannels(type, config)) {
+      return `"${nodeName}" needs at least one channel selected.`;
+    }
+    return null;
+  } catch {
+    return `"${nodeName}" has settings that are incomplete.`;
+  }
+}
+
+/** Checks whether a node's config may be persisted from the editor. */
+export function nodeSaveConfigIssue(
+  type: string,
+  raw: unknown,
+): { message: string; fields: Record<string, string[]> } | null {
+  try {
+    const config = parseConfig(type, raw) as { socialAccountIds?: string[] };
+    if (publishRequiresChannels(type, config)) {
+      return {
+        message: PUBLISH_CHANNEL_REQUIRED,
+        fields: { socialAccountIds: [PUBLISH_CHANNEL_REQUIRED] },
+      };
+    }
+    return null;
+  } catch (error) {
+    if (error instanceof z.ZodError) return zodValidationMessage(error);
+    return { message: 'Those settings are not valid for this step.', fields: {} };
+  }
 }
 
 export const CATEGORY_LABEL: Record<NodeCategory, string> = {

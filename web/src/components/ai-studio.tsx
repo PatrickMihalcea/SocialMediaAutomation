@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, ImageIcon, Mic2, RefreshCw, Trash2, Video, X } from 'lucide-react';
-import { Badge, Button, Dialog, EmptyState, Select, StatusMessage, TextArea, humanizeMachineValue } from '@/bridge88/components';
+import { Badge, Button, Dialog, Dropdown, EmptyState, StatusMessage, TextArea, humanizeMachineValue } from '@/bridge88/components';
 import {
   cancelAiMediaJobAction,
   createAiMediaJobAction,
@@ -13,6 +13,7 @@ import {
 } from '@/app/actions/ai';
 import type { AiMediaJobKind, JobStatus } from '@prisma/client';
 import { AI_MEDIA_JOB_LABELS, JOB_STATUS_LABELS } from '@/lib/ai/labels';
+import { IMAGE_SIZE_PRESETS, type ImageSize } from '@/lib/ai/image-sizes';
 
 type Asset = { id: string; filename: string; type: string; url: string; generated: boolean };
 type Job = {
@@ -67,7 +68,9 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
 }) {
   const router = useRouter();
   const [prompt, setPrompt] = useState('A clean editorial workspace for planning social content');
-  const [size, setSize] = useState<'1024x1024' | '1024x1536' | '1536x1024'>('1024x1024');
+  // Square, not the workflow default: a studio image is composed on its own,
+  // not cropped into a vertical video.
+  const [size, setSize] = useState<ImageSize>('1024x1024');
   const [assets, setAssets] = useState(initialAssets);
   const [jobs, setJobs] = useState(initialJobs);
   const [selected, setSelected] = useState<string | undefined>(initialSourceAssetId);
@@ -226,16 +229,16 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
             onChange={(event) => setPrompt(event.target.value)}
             className="min-h-28"
           />
-          <Select
-            label="Image format"
+          <Dropdown
+            label="Image shape"
             containerClassName="mt-5"
             value={size}
-            onChange={(event) => setSize(event.target.value as typeof size)}
-          >
-            <option value="1024x1024">Square · 1:1</option>
-            <option value="1024x1536">Portrait · 2:3</option>
-            <option value="1536x1024">Landscape · 3:2</option>
-          </Select>
+            options={IMAGE_SIZE_PRESETS.map((preset) => ({
+              value: preset.id,
+              label: preset.label,
+            }))}
+            onChange={(value) => setSize(value as ImageSize)}
+          />
         </div>
         <div className="flex flex-wrap items-end gap-3 lg:min-w-56 lg:flex-col lg:items-stretch lg:justify-end">
           <Button type="button" onClick={() => generate('IMAGE')} disabled={isPending('IMAGE')} aria-busy={isPending('IMAGE')}>

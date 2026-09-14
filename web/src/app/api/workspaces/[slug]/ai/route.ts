@@ -10,6 +10,7 @@ import {
   generateVariations,
 } from '@/lib/ai/service';
 import { generateStudioImageAction } from '@/app/actions/ai';
+import { IMAGE_SIZE_VALUES } from '@/lib/ai/image-sizes';
 import { toAppError } from '@/lib/errors';
 import { rateLimit, LIMITS } from '@/lib/rate-limit';
 
@@ -27,7 +28,7 @@ const schema = z.discriminatedUnion('operation', [
   z.object({
     operation: z.literal('image'),
     prompt: z.string().min(3).max(5_000),
-    size: z.enum(['1024x1024', '1024x1536', '1536x1024']).optional(),
+    size: z.enum(IMAGE_SIZE_VALUES).optional(),
   }),
   z.object({
     operation: z.literal('adapt'),

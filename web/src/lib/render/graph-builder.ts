@@ -19,10 +19,15 @@ export function buildFilterGraph(plan: ResolvedRenderPlan): string {
 
   plan.segments.forEach((segment, index) => {
     const frames = segment.endFrame - segment.startFrame;
-    lines.push(
-      `[${index}:v]${zoompan(segment.motion, frames, superW, superH, fps)},` +
-        `scale=${width}:${height}:flags=lanczos,setsar=1,format=rgb24[c${index}]`,
-    );
+    const clip = plan.clips[segment.clipIndex];
+    if (clip?.kind === 'video') {
+      lines.push(...videoClipGraph(segment.clipIndex, index, frames, width, height, fps, clip.fit));
+    } else {
+      lines.push(
+        `[${segment.clipIndex}:v]${zoompan(segment.motion, frames, superW, superH, fps)},` +
+          `scale=${width}:${height}:flags=lanczos,setsar=1,format=rgb24[c${index}]`,
+      );
+    }
   });
 
   const inputs = plan.segments.map((_, i) => `[c${i}]`).join('');
@@ -38,10 +43,38 @@ export function buildFilterGraph(plan: ResolvedRenderPlan): string {
   lines.push(`[seq]${videoChain}[v]`);
 
   if (plan.audio) {
-    lines.push(audioChain(plan, plan.segments.length));
+    lines.push(audioChain(plan, plan.clips.length));
   }
 
   return lines.join(';\n');
+}
+
+function videoClipGraph(
+  inputIndex: number,
+  outputIndex: number,
+  frames: number,
+  width: number,
+  height: number,
+  fps: number,
+  fit: 'cover' | 'blur-pad',
+): string[] {
+  const duration = frames / fps;
+  const start =
+    `[${inputIndex}:v]trim=duration=${duration.toFixed(6)},setpts=PTS-STARTPTS,` +
+    `fps=${fps}`;
+  if (fit === 'cover') {
+    return [
+      `${start},scale=${width}:${height}:force_original_aspect_ratio=increase:flags=lanczos,` +
+        `crop=${width}:${height},setsar=1,format=rgb24[c${outputIndex}]`,
+    ];
+  }
+  return [
+    `${start},split=2[vbg${outputIndex}][vfg${outputIndex}]`,
+    `[vbg${outputIndex}]scale=${width}:${height}:force_original_aspect_ratio=increase:flags=lanczos,` +
+      `crop=${width}:${height},boxblur=20:2[bg${outputIndex}]`,
+    `[vfg${outputIndex}]scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos[fg${outputIndex}]`,
+    `[bg${outputIndex}][fg${outputIndex}]overlay=(W-w)/2:(H-h)/2,setsar=1,format=rgb24[c${outputIndex}]`,
+  ];
 }
 
 /**

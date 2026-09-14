@@ -16,11 +16,13 @@ import { buildOverlayGraph } from '@/lib/render/graph-builder';
 import { fitFontSize, wrapLabel } from '@/lib/render/fonts';
 import type { BeatSegment } from '@/lib/render/types';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
+import { renderTextOverlayLabels } from '@/lib/workflows/text-overlay-template';
 
 const run_ = promisify(execFile);
 
 interface Config {
   template: string;
+  firstTemplate: string | null;
   font: string;
   position: 'top' | 'centre' | 'bottom';
   fontSize: number;
@@ -58,7 +60,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
 
   const width = video.width ?? 1080;
   const height = video.height ?? 1920;
-  const labels = segments.map((segment) => renderTemplate(config.template, segment));
+  const labels = renderTextOverlayLabels(config.template, config.firstTemplate, segments);
 
   // One size for every label, chosen so the longest fits. Sizes that changed per
   // clip would read as a mistake rather than a design.
@@ -114,7 +116,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     );
 
     const data = await readFile(output);
-    const filename = `labelled-${Date.now()}.mp4`;
+    const filename = outputName(ctx.workflowName, 'labelled', ctx.runId, 'mp4');
     const key = mediaKey(ctx.workspaceId, filename, 'derived');
     await storage().put(key, data, 'video/mp4');
 
@@ -135,7 +137,12 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
         // composer. process-media still runs for the poster frame.
         status: MediaStatus.READY,
         derivedFromId: video.id,
-        derivationPreset: JSON.stringify({ kind: 'text-overlay', template: config.template, labels }),
+        derivationPreset: JSON.stringify({
+          kind: 'text-overlay',
+          template: config.template,
+          firstTemplate: config.firstTemplate,
+          labels,
+        }),
       },
       select: { id: true },
     });
@@ -153,13 +160,6 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   }
 }
 
-/** `{index}` is the 1-based cut number; `{title}` is the idea step's own label. */
-function renderTemplate(template: string, segment: BeatSegment): string {
-  return template
-    .replace(/\{index\}/g, String(segment.index + 1))
-    .replace(/\{title\}/g, segment.title ?? '')
-    .trim();
-}
 
 async function renderLabelPng(
   text: string,
@@ -199,4 +199,22 @@ function escapeXml(value: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/**
+ * A filename someone will recognise in the media library.
+ *
+ * Output used to be named with an epoch timestamp, which the library's
+ * humaniser strips back to a single adjective — a draft would show "Labelled"
+ * rather than anything resembling the video. The workflow name plus a short run
+ * id keeps it readable and still unique.
+ */
+function outputName(workflowName: string, suffix: string, runId: string, extension: string): string {
+  const stem =
+    workflowName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 48) || 'workflow';
+  return `${stem}-${suffix}-${runId.slice(0, 6)}.${extension}`;
 }

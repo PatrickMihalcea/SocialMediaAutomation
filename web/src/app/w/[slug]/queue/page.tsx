@@ -6,7 +6,7 @@ import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { listSlots } from '@/lib/scheduling/queue';
 import type { RecurrenceTemplate } from '@/lib/scheduling/recurrence';
-import { formatInZone, timezoneLabel } from '@/lib/scheduling/time';
+import { formatInZone } from '@/lib/scheduling/time';
 import { PLATFORM_LABELS } from '@/lib/social/registry';
 
 export const metadata = { title: 'Queue' };
@@ -49,8 +49,7 @@ async function QueueData({ params }: { params: Promise<{ slug: string }> }) {
 
   return (
     <div className="mt-6 min-h-[680px]">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <p className="b88-caption">Queue · {timezoneLabel(ctx.workspace.timezone)}</p>
+      <div className="flex justify-end">
         <Button href={`/w/${slug}/compose`}>Create post</Button>
       </div>
       <QueueManager

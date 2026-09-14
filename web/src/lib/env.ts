@@ -23,6 +23,12 @@ const schema = z.object({
 
   MOCK_MODE: boolish(true),
   QUEUE_DRIVER: z.enum(['in-process', 'bullmq']).default('in-process'),
+  /**
+   * Lets the web server process jobs itself, for deployments with nowhere to
+   * run a worker. Off by default: two queue consumers race for the same job,
+   * and the web server is the one more likely to be serving stale code.
+   */
+  QUEUE_IN_WEB_SERVER: boolish(false),
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   AI_PROVIDER: z.enum(['mock', 'openai']).default('mock'),
 

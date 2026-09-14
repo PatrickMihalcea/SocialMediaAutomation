@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { confirmProposal, sendAssistantMessage } from '@/lib/ai/conversations';
 import { generateImage } from '@/lib/ai';
+import type { ImageSize } from '@/lib/ai/image-sizes';
 import { db } from '@/lib/db';
 import { mediaKey, storage } from '@/lib/storage';
 import { invalid } from '@/lib/errors';
@@ -32,12 +33,17 @@ export async function confirmAiProposalAction(slug: string, messageId: string) {
   });
   revalidatePath(`/w/${slug}/assistant`);
   revalidatePath(`/w/${slug}/calendar`);
+  revalidatePath(`/w/${slug}/workflows`);
+  if (result.workflowId) revalidatePath(`/w/${slug}/workflows/${result.workflowId}`);
+  if (result.workflowId && result.runId) {
+    revalidatePath(`/w/${slug}/workflows/${result.workflowId}/runs/${result.runId}`);
+  }
   return result;
 }
 
 export async function generateStudioImageAction(
   slug: string,
-  input: { prompt: string; size?: '1024x1024' | '1024x1536' | '1536x1024'; sourceAssetId?: string },
+  input: { prompt: string; size?: ImageSize; sourceAssetId?: string },
 ) {
   const ctx = await requireWorkspace(slug, 'ai:use');
   const prompt = input.prompt.trim();

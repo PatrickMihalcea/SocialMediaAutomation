@@ -1,109 +1,19 @@
 'use server';
 
-import { createHash } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { mediaKey, storage } from '@/lib/storage';
 import { db } from '@/lib/db';
 import { enqueue } from '@/lib/queue';
-import { audit } from '@/lib/audit';
 import { createImageDerivative, createVideoDerivative } from '@/lib/media/process';
-import { validateMediaUploads } from '@/lib/media/validation';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
-import { invalid } from '@/lib/errors';
-import { workspacePlan } from '@/lib/billing/limits';
-import {
-  assertStorageUploadWithinPlan,
-  newUploadBytes,
-  uploadAssetId,
-} from '@/lib/media/upload-idempotency';
+import { storeMediaUpload } from '@/lib/media/upload';
 
 // Callers must read the returned state; upload failures are never thrown.
 export async function uploadMediaAction(slug: string, formData: FormData): Promise<ActionState> {
   try {
-    const ctx = await requireWorkspace(slug, 'media:upload');
-    const files = formData.getAll('files').filter((value): value is File => value instanceof File);
-    if (!files.length) throw invalid('Choose at least one file.');
-    const folderId = nullableString(formData.get('folderId'));
-    if (folderId) await requireFolder(ctx.workspace.id, folderId);
-    const suppliedRequestId = nullableString(formData.get('uploadRequestId'));
-    if (suppliedRequestId && suppliedRequestId.length > 200) throw invalid('The upload request identifier is invalid.');
-    // Validate the whole batch before storing anything. A bad second file must
-    // not leave the first file uploaded while the UI reports a failed batch.
-    const fileTypes = validateMediaUploads(files);
-    const prepared = await Promise.all(files.map(async (file, index) => {
-      const type = fileTypes[index];
-      const bytes = Buffer.from(await file.arrayBuffer());
-      // Older clients do not yet send an identifier. A content-derived fallback
-      // still makes an uncertain retry converge; intentional duplicates remain
-      // available through the library's explicit Copy action.
-      const uploadRequestId = suppliedRequestId
-        ?? `content:${createHash('sha256').update(bytes).digest('hex')}`;
-      const id = uploadAssetId(ctx.workspace.id, uploadRequestId, index, file);
-      return { id, size: file.size, file, type, bytes };
-    }));
-    const plan = await workspacePlan(ctx.workspace.id);
-    // Reserve every new row in one serializable transaction. The aggregate and
-    // complete batch are checked together before the first object-store write.
-    const assets = await db.$transaction(async (tx) => {
-      const [usage, existing] = await Promise.all([
-        tx.mediaAsset.aggregate({
-          where: { workspaceId: ctx.workspace.id },
-          _sum: { size: true },
-        }),
-        tx.mediaAsset.findMany({
-          where: { id: { in: prepared.map(({ id }) => id) }, workspaceId: ctx.workspace.id },
-          select: { id: true },
-        }),
-      ]);
-      const existingIds = new Set(existing.map(({ id }) => id));
-      assertStorageUploadWithinPlan(
-        plan,
-        usage._sum.size ?? 0,
-        newUploadBytes(prepared, existingIds),
-      );
-      return Promise.all(prepared.map(({ id, file, type }) => tx.mediaAsset.upsert({
-          where: { id },
-          update: {},
-          create: {
-            id,
-            workspaceId: ctx.workspace.id,
-            folderId,
-            uploadedById: ctx.user.id,
-            filename: file.name,
-            mimeType: file.type,
-            type,
-            size: file.size,
-            storageKey: mediaKey(ctx.workspace.id, file.name),
-            status: 'UPLOADING',
-          },
-        })));
-    }, { isolationLevel: 'Serializable' });
-    for (const [index, asset] of assets.entries()) {
-      const { bytes, file } = prepared[index];
-      // PROCESSING/READY means an earlier attempt crossed the durable storage
-      // boundary. UPLOADING retries safely overwrite the same object key.
-      if (asset.status !== 'UPLOADING') continue;
-      await storage().put(asset.storageKey, bytes, file.type);
-      await db.mediaAsset.updateMany({
-        where: { id: asset.id, status: 'UPLOADING' },
-        data: { status: 'PROCESSING' },
-      });
-      await enqueue('process-media', { mediaAssetId: asset.id }, {
-        workspaceId: ctx.workspace.id,
-        dedupeKey: `process-media:${asset.id}`,
-      });
-      await audit({
-        workspaceId: ctx.workspace.id,
-        userId: ctx.user.id,
-        action: 'media.uploaded',
-        entityType: 'media_asset',
-        entityId: asset.id,
-        metadata: { filename: file.name, size: file.size },
-      });
-    }
-    revalidatePath(`/w/${slug}/media`);
-    return actionSuccess(files.length === 1 ? 'Media uploaded.' : `${files.length} files uploaded.`);
+    const { count } = await storeMediaUpload(slug, formData);
+    return actionSuccess(count === 1 ? 'Media uploaded.' : `${count} files uploaded.`);
   } catch (error) {
     return actionError(error, 'The media could not be uploaded.');
   }
@@ -216,27 +126,92 @@ export async function deleteFolderAction(slug: string, folderId: string) {
   revalidatePath(`/w/${slug}/media`);
 }
 
+/**
+ * Creates a tag, or returns the one that already carries that name.
+ *
+ * The tag is returned so the picker can create and apply in a single gesture.
+ * A repeated name is not an error here: typing a name that exists into the
+ * "new tag" field means "use that one", and failing on the unique constraint
+ * would only ask the user to go and find it in the list instead.
+ */
 export async function createTagAction(slug: string, formData: FormData) {
   const ctx = await requireWorkspace(slug, 'media:update');
-  await db.mediaTag.create({
-    data: { workspaceId: ctx.workspace.id, name: requiredName(formData.get('name'), 'tag name') },
+  const name = requiredName(formData.get('name'), 'tag name');
+  const tag = await db.mediaTag.upsert({
+    where: { workspaceId_name: { workspaceId: ctx.workspace.id, name } },
+    update: {},
+    create: { workspaceId: ctx.workspace.id, name },
   });
   revalidatePath(`/w/${slug}/media`);
+  return { id: tag.id, name: tag.name };
+}
+
+/**
+ * Adds or removes one tag across a set of assets.
+ *
+ * Split out of mutateAssetsAction so a single asset can be tagged from its own
+ * preview. Tagging used to run only through the selection bar, which meant
+ * tagging one file started by selecting it.
+ */
+export async function applyTagAction(
+  slug: string,
+  input: { assetIds: string[]; tagId: string; apply: boolean },
+) {
+  const ctx = await requireWorkspace(slug, 'media:update');
+  const ids = [...new Set(input.assetIds)].filter(Boolean);
+  if (!ids.length) throw new Error('Select at least one asset.');
+  const tag = await db.mediaTag.findFirst({
+    where: { id: input.tagId, workspaceId: ctx.workspace.id },
+  });
+  if (!tag) throw new Error('Tag not found.');
+  // Scoped by workspace, so a foreign id cannot be tagged through this action.
+  const owned = await db.mediaAsset.findMany({
+    where: { id: { in: ids }, workspaceId: ctx.workspace.id },
+    select: { id: true },
+  });
+  if (owned.length !== ids.length) throw new Error('One or more assets are unavailable.');
+
+  if (input.apply) {
+    await db.mediaAssetTag.createMany({
+      data: ids.map((mediaAssetId) => ({ mediaAssetId, mediaTagId: tag.id })),
+      skipDuplicates: true,
+    });
+  } else {
+    await db.mediaAssetTag.deleteMany({ where: { mediaAssetId: { in: ids }, mediaTagId: tag.id } });
+  }
+  revalidatePath(`/w/${slug}/media`);
+  const noun = ids.length === 1 ? 'asset' : 'assets';
+  return {
+    tag: { id: tag.id, name: tag.name },
+    message: input.apply
+      ? `${tag.name} added to ${ids.length} ${noun}.`
+      : `${tag.name} removed from ${ids.length} ${noun}.`,
+  };
 }
 
 export async function renameTagAction(slug: string, tagId: string, formData: FormData) {
   const ctx = await requireWorkspace(slug, 'media:update');
-  await db.mediaTag.updateMany({
-    where: { id: tagId, workspaceId: ctx.workspace.id },
-    data: { name: requiredName(formData.get('name'), 'tag name') },
+  const name = requiredName(formData.get('name'), 'tag name');
+  const clash = await db.mediaTag.findFirst({
+    where: { workspaceId: ctx.workspace.id, name, NOT: { id: tagId } },
+    select: { id: true },
   });
+  if (clash) throw new Error(`A tag named ${name} already exists.`);
+  const result = await db.mediaTag.updateMany({
+    where: { id: tagId, workspaceId: ctx.workspace.id },
+    data: { name },
+  });
+  if (!result.count) throw new Error('Tag not found.');
   revalidatePath(`/w/${slug}/media`);
+  return { id: tagId, name, message: `Tag renamed to ${name}.` };
 }
 
 export async function deleteTagAction(slug: string, tagId: string) {
   const ctx = await requireWorkspace(slug, 'media:update');
-  await db.mediaTag.deleteMany({ where: { id: tagId, workspaceId: ctx.workspace.id } });
+  const result = await db.mediaTag.deleteMany({ where: { id: tagId, workspaceId: ctx.workspace.id } });
+  if (!result.count) throw new Error('Tag not found.');
   revalidatePath(`/w/${slug}/media`);
+  return { message: 'Tag deleted.' };
 }
 
 export async function mutateAssetsAction(slug: string, formData: FormData) {

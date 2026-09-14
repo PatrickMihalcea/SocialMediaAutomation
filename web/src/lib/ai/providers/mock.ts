@@ -2,6 +2,7 @@ import 'server-only';
 import sharp from 'sharp';
 import type { z } from 'zod';
 import { AiError, type AiImageResult, type AiObjectResult, type AiMessage, type AiProvider, type AiTextResult } from '@/lib/ai/types';
+import { weeklyReelTemplate } from '@/lib/workflows/assistant-graph';
 
 /**
  * Deterministic stand-in for a real model.
@@ -151,6 +152,60 @@ function build(schemaName: string, prompt: string, messages: AiMessage[]): unkno
       const asset = referenced(prompt, context.media, (item) => item.filename);
       const prior = priorProposal(messages);
       const simulated = 'This is simulated output. ';
+      if (/\bworkflow\b/i.test(prompt)) {
+        const workflow = referenced(prompt, context.workflows, (item) => item.name);
+        if (/\b(run|start|trigger)\b/i.test(prompt)) {
+          if (!workflow) {
+            return {
+              reply: `${simulated}I could not identify a workflow to run. Name the workflow first.`,
+              action: null,
+            };
+          }
+          return {
+            reply: `${simulated}I prepared a run for "${workflow.name}". Review it before starting because its steps may use AI quota or publish content.`,
+            action: {
+              kind: 'run_workflow',
+              summary: `Run "${workflow.name}"`,
+              workflowId: workflow.id,
+              workflowName: workflow.name,
+            },
+          };
+        }
+        if (/\b(update|rename|reschedule|change)\b/i.test(prompt) && workflow) {
+          const { hour, minute } = requestedTime(prompt);
+          return {
+            reply: `${simulated}I prepared an update for "${workflow.name}". Nothing will change until you confirm.`,
+            action: {
+              kind: 'update_workflow',
+              summary: `Update "${workflow.name}"`,
+              workflowId: workflow.id,
+              workflowName: workflow.name,
+              scheduleEnabled: true,
+              scheduleWeekdays: requestedWeekdays(prompt),
+              scheduleHour: hour,
+              scheduleMinute: minute,
+              nodeUpdates: [],
+            },
+          };
+        }
+        const graph = weeklyReelTemplate(topic);
+        const { hour, minute } = requestedTime(prompt);
+        return {
+          reply: `${simulated}I prepared a weekly reel workflow for ${topic}. Nothing will be created until you confirm.`,
+          action: {
+            kind: 'create_workflow',
+            summary: `Create "${graph.name}"`,
+            name: graph.name,
+            description: graph.description,
+            scheduleEnabled: /\b(weekly|schedule|every)\b/i.test(prompt),
+            scheduleWeekdays: requestedWeekdays(prompt),
+            scheduleHour: hour,
+            scheduleMinute: minute,
+            nodes: graph.nodes,
+            edges: graph.edges,
+          },
+        };
+      }
       if (/\b(schedule|queue|move|reschedule|re-date|change the date)\b/i.test(prompt)) {
         if (!post) return { reply: `${simulated}I could not identify an existing post to schedule, so I did not prepare a proposal. Name the post you want to schedule.`, action: null };
         const posts = selectRequestedPosts(prompt, context.posts, post);
@@ -284,16 +339,18 @@ type WorkspaceContext = {
   }>;
   campaigns: Array<{ id: string; name: string }>;
   media: Array<{ id: string; filename: string; type: string }>;
+  workflows: Array<{ id: string; name: string }>;
 };
 
 function workspaceContext(messages: AiMessage[]): WorkspaceContext {
+  const empty = { posts: [], campaigns: [], media: [], workflows: [] };
   const combined = messages.map((message) => message.content).join('\n');
   const match = combined.match(/WORKSPACE_CONTEXT_BEGIN([\s\S]*?)WORKSPACE_CONTEXT_END/);
-  if (!match) return { posts: [], campaigns: [], media: [] };
+  if (!match) return empty;
   try {
-    return JSON.parse(match[1]) as WorkspaceContext;
+    return { ...empty, ...JSON.parse(match[1]) } as WorkspaceContext;
   } catch {
-    return { posts: [], campaigns: [], media: [] };
+    return empty;
   }
 }
 

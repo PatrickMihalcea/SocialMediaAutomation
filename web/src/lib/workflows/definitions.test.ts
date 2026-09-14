@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { NODE_DEFINITIONS, NODE_TYPES, getDefinition, parseConfig } from '@/lib/workflows/definitions';
+import {
+  NODE_DEFINITIONS,
+  NODE_TYPES,
+  PUBLISH_CHANNEL_REQUIRED,
+  getDefinition,
+  isCreatableNodeType,
+  nodeRunConfigIssue,
+  nodeSaveConfigIssue,
+  nodeUsesChannelPicker,
+  parseConfig,
+} from '@/lib/workflows/definitions';
 import { checkCompatible } from '@/lib/workflows/ports';
+import { IMAGE_SIZE_VALUES } from '@/lib/ai/image-sizes';
 
 /**
  * A contract test over the whole node catalogue, in the spirit of
@@ -23,8 +34,40 @@ describe('node catalogue', () => {
   it.each(NODE_TYPES)('%s parses an empty config into valid defaults', (type) => {
     // A newly dropped node must be immediately valid, not half-configured.
     const definition = getDefinition(type)!;
-    if (type === 'PUBLISH') return; // requires at least one channel, by design
     expect(() => parseConfig(definition.type, {})).not.toThrow();
+  });
+
+  it('defaults publish channels to an empty list until the editor chooses some', () => {
+    expect(parseConfig('PUBLISH', {})).toMatchObject({
+      socialAccountIds: [],
+      mode: 'queue',
+      requireApproval: true,
+    });
+  });
+
+  it('requires publish channels before save or run', () => {
+    expect(nodeSaveConfigIssue('PUBLISH', {})).toEqual({
+      message: PUBLISH_CHANNEL_REQUIRED,
+      fields: { socialAccountIds: [PUBLISH_CHANNEL_REQUIRED] },
+    });
+    expect(nodeRunConfigIssue('PUBLISH', 'Publish clip', {})).toBe(
+      '"Publish clip" needs at least one channel selected.',
+    );
+  });
+
+  it('accepts publish config once a channel is chosen', () => {
+    const config = {
+      socialAccountIds: ['11111111-1111-4111-8111-111111111111'],
+      caption: 'Hello',
+    };
+    expect(nodeSaveConfigIssue('PUBLISH', config)).toBeNull();
+    expect(nodeRunConfigIssue('PUBLISH', 'Publish clip', config)).toBeNull();
+  });
+
+  it('exposes channel pickers only on publish steps', () => {
+    expect(nodeUsesChannelPicker('PUBLISH')).toBe(true);
+    expect(nodeUsesChannelPicker('CREATE_DRAFT')).toBe(true);
+    expect(nodeUsesChannelPicker('BEAT_SLIDESHOW')).toBe(false);
   });
 
   it.each(NODE_TYPES)('%s declares a label and a description', (type) => {
@@ -39,12 +82,22 @@ describe('node catalogue', () => {
     }
   });
 
-  it('lets the bedroom pipeline connect end to end', () => {
-    // The path the seeded workflow takes. If a port shape changes and breaks it,
-    // this is the test that says so.
+  it('keeps Music executable only for legacy saved workflows', () => {
+    expect(getDefinition('MUSIC_SELECTOR')).toMatchObject({ legacy: true });
+    expect(getDefinition('MEDIA_LIBRARY')?.legacy).not.toBe(true);
+    expect(isCreatableNodeType('MUSIC_SELECTOR')).toBe(false);
+    expect(isCreatableNodeType('MEDIA_LIBRARY')).toBe(true);
+  });
+
+  it('keeps legacy and mixed-media pipeline contracts compatible', () => {
     const path: [string, string, string, string][] = [
       ['IDEA_GENERATOR', 'prompts', 'IMAGE_GENERATOR', 'prompts'],
-      ['IMAGE_GENERATOR', 'images', 'BEAT_SLIDESHOW', 'images'],
+      ['IDEA_GENERATOR', 'titles', 'IMAGE_GENERATOR', 'titles'],
+      ['IMAGE_GENERATOR', 'images', 'COMBINE_MEDIA', 'media1'],
+      ['IMAGE_GENERATOR', 'titles', 'COMBINE_MEDIA', 'titles1'],
+      ['MEDIA_LIBRARY', 'videos', 'COMBINE_MEDIA', 'media2'],
+      ['COMBINE_MEDIA', 'media', 'BEAT_SLIDESHOW', 'images'],
+      ['COMBINE_MEDIA', 'titles', 'BEAT_SLIDESHOW', 'titles'],
       ['MUSIC_SELECTOR', 'audio', 'BEAT_SLIDESHOW', 'audio'],
       ['BEAT_SLIDESHOW', 'video', 'TEXT_OVERLAY', 'video'],
       ['BEAT_SLIDESHOW', 'segments', 'TEXT_OVERLAY', 'segments'],
@@ -64,13 +117,159 @@ describe('node catalogue', () => {
     }
   });
 
-  it('has a Pick node for every list-to-single conversion the catalogue needs', () => {
+  it('defaults beat slideshow output to vertical presets', () => {
+    const config = parseConfig('BEAT_SLIDESHOW', {});
+    expect(config).toEqual(expect.objectContaining({ size: '1080x1920' }));
+    expect(config).not.toHaveProperty('width');
+    expect(config).not.toHaveProperty('height');
+  });
+
+  it('normalises legacy beat slideshow width and height into presets', () => {
+    const landscape = parseConfig('BEAT_SLIDESHOW', { width: 1920, height: 1080 });
+    expect(landscape).toEqual(expect.objectContaining({ size: '1920x1080' }));
+    expect(landscape).not.toHaveProperty('width');
+    expect(landscape).not.toHaveProperty('height');
+
+    const vertical = parseConfig('BEAT_SLIDESHOW', { width: 1080, height: 1920, fps: 24 });
+    expect(vertical).toEqual(expect.objectContaining({ size: '1080x1920', fps: 24 }));
+    expect(vertical).not.toHaveProperty('width');
+    expect(vertical).not.toHaveProperty('height');
+  });
+
+  it('keeps non-preset legacy beat slideshow dimensions explicit', () => {
+    const config = parseConfig('BEAT_SLIDESHOW', { width: 1280, height: 720 });
+    expect(config).toEqual(expect.objectContaining({ width: 1280, height: 720 }));
+    expect(config).not.toHaveProperty('size');
+  });
+
+  it('rejects incomplete or non-numeric leftover beat slideshow dimensions', () => {
+    expect(() => parseConfig('BEAT_SLIDESHOW', { width: '1920', height: 1080 })).toThrow();
+    expect(() => parseConfig('BEAT_SLIDESHOW', { width: 1920 })).toThrow();
+  });
+
+  it('does not apply video export presets to image generation size', () => {
+    expect(parseConfig('IMAGE_GENERATOR', {})).toEqual(
+      expect.objectContaining({ size: '1024x1536' }),
+    );
+    expect(() => parseConfig('IMAGE_GENERATOR', { size: '1080x1920' })).toThrow();
+  });
+
+  it('accepts every image size the provider supports', () => {
+    for (const size of IMAGE_SIZE_VALUES) {
+      expect(parseConfig('IMAGE_GENERATOR', { size })).toEqual(expect.objectContaining({ size }));
+    }
+  });
+
+  it('has one selector for list-to-list and list-to-single workflows', () => {
     // Strict typing makes media[] -> media a dead end without one.
     const pick = getDefinition('PICK')!;
     expect(pick.inputs[0].type.list).toBe(true);
     expect(pick.outputs[0].type.list).toBe(false);
+    expect(pick.outputs.find((port) => port.id === 'selection')?.type.list).toBe(true);
     expect(
       checkCompatible(getDefinition('IMAGE_GENERATOR')!.outputs[0].type, pick.inputs[0].type),
     ).toBeNull();
+  });
+
+  it('offers exactly one selection step, typed from the list it is given', () => {
+    // Two near-identical Pick nodes is the smell this asserts against: the one
+    // node adapts instead, so a video list picks down to something a publish
+    // step accepts without a video-only duplicate in the palette.
+    const picks = NODE_TYPES.filter((type) => type.startsWith('PICK'));
+    expect(picks).toEqual(['PICK']);
+    expect(getDefinition('PICK')!.outputs[0].followsInput).toBe('items');
+  });
+
+  /**
+   * The route a filename takes to become a label on a cut. Each hop is checked
+   * with the same function the canvas calls before it will let go of a
+   * connection, so a port rename that quietly breaks the chain fails here
+   * rather than in a run someone has to watch to catch.
+   */
+  it('lets an image name travel from the library to a cut label', () => {
+    const port = (type: string, side: 'inputs' | 'outputs', id: string) =>
+      getDefinition(type)![side].find((candidate) => candidate.id === id)!;
+
+    const hops: [string, string][] = [
+      ['MEDIA_LIBRARY.imageTitles', 'PICK.labels'],
+      ['PICK.labels', 'BEAT_SLIDESHOW.titles'],
+      ['MEDIA_LIBRARY.imageTitles', 'BEAT_SLIDESHOW.titles'],
+    ];
+    for (const [from, to] of hops) {
+      const [sourceType, sourcePort] = from.split('.');
+      const [targetType, targetPort] = to.split('.');
+      expect(
+        checkCompatible(
+          port(sourceType, 'outputs', sourcePort).type,
+          port(targetType, 'inputs', targetPort).type,
+        ),
+      ).toBeNull();
+    }
+  });
+
+  // The labels port is a plain text list on both sides: it must not follow the
+  // items input, or connecting a media list would retype it as media.
+  it('carries labels alongside a selection without adopting the item type', () => {
+    const pick = getDefinition('PICK')!;
+    const input = pick.inputs.find((port) => port.id === 'labels')!;
+    const output = pick.outputs.find((port) => port.id === 'labels')!;
+
+    expect(input.required).toBeUndefined();
+    expect(input.type).toEqual({ scalar: 'text', list: true });
+    expect(output.type).toEqual({ scalar: 'text', list: true });
+    expect(output.followsInput).toBeUndefined();
+  });
+
+  it('loads library media and defaults selection compatibly with old Pick nodes', () => {
+    const source = getDefinition('MEDIA_LIBRARY')!;
+    expect(source.outputs.map((port) => port.id)).toEqual([
+      'images', 'videos', 'audio', 'imageTitles',
+    ]);
+    // Every one is a list, so a Select items step is still required before any
+    // single-item input — including for the titles.
+    expect(source.outputs.every((port) => port.type.list)).toBe(true);
+    expect(source.outputs.find((port) => port.id === 'imageTitles')!.type.scalar).toBe('text');
+    expect(parseConfig('MEDIA_LIBRARY', {})).toEqual({
+      folderId: null,
+      assetId: null,
+      includeSubfolders: true,
+    });
+    expect(parseConfig('PICK', { index: 0 })).toEqual({
+      mode: 'index',
+      count: 1,
+      index: 0,
+    });
+  });
+
+  it('opens new Trimmers in range mode and migrates old Audio trimmer settings', () => {
+    expect(parseConfig('AUDIO_TRIMMER', {})).toEqual({
+      mode: 'range',
+      startSeconds: null,
+      endSeconds: null,
+      bars: 8,
+      snapToDownbeat: true,
+    });
+    expect(parseConfig('AUDIO_TRIMMER', {
+      startSeconds: null,
+      bars: 16,
+      snapToDownbeat: false,
+    })).toEqual({
+      mode: 'bars',
+      startSeconds: null,
+      endSeconds: null,
+      bars: 16,
+      snapToDownbeat: false,
+    });
+    expect(() => parseConfig('AUDIO_TRIMMER', {
+      mode: 'range',
+      startSeconds: 5,
+      endSeconds: 4,
+    })).toThrow(/end time/i);
+    const trimmer = getDefinition('AUDIO_TRIMMER')!;
+    expect(trimmer.inputs[0].type).toMatchObject({
+      scalar: 'media',
+      mediaKinds: ['AUDIO', 'VIDEO'],
+    });
+    expect(trimmer.outputs[0].followsInput).toBe('audio');
   });
 });

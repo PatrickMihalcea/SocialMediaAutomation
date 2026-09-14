@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { Checkbox, Field, MediaUploader, Select, TextArea } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
-import { COMMON_TIMEZONES, timezoneLabel } from '@/lib/scheduling/time';
+import { timezoneLabel, timezoneOptions } from '@/lib/scheduling/time';
 import {
   deleteWorkspaceAction,
   transferWorkspaceOwnershipAction,
@@ -65,7 +65,7 @@ async function SettingsData({ params }: { params: Promise<{ slug: string }> }) {
                 defaultValue={ctx.workspace.timezone}
                 hint="Existing publication instants stay fixed. Calendar clock times may display differently after a change."
               >
-                {COMMON_TIMEZONES.map((zone) => <option key={zone} value={zone}>{timezoneLabel(zone)}</option>)}
+                {timezoneOptions(ctx.workspace.timezone).map((zone) => <option key={zone} value={zone}>{timezoneLabel(zone)}</option>)}
               </Select>
               <Select name="defaultLanguage" label="Default language" defaultValue={ctx.workspace.defaultLanguage}><option value="en">English</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="ro">Romanian</option></Select>
             </div>

@@ -389,6 +389,7 @@ export async function loadMoreComposerAssetsAction(
       id: asset.id,
       filename: asset.filename,
       type: asset.type,
+      url: await mediaStorage.signedUrl(asset.storageKey),
       thumbnailUrl: await mediaStorage.signedUrl(asset.thumbnailKey ?? asset.storageKey),
     }))),
   };

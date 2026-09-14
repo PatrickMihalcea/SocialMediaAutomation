@@ -6,7 +6,15 @@ const compat = new FlatCompat({ baseDirectory: dirname(fileURLToPath(import.meta
 
 const config = [
   ...compat.extends('next/core-web-vitals', 'next/typescript'),
-  { ignores: ['.next/**', 'node_modules/**', 'src/generated/**', 'next-env.d.ts'] },
+  // .next-dev is the dev server's build directory (see distDir in next.config),
+  // and .venv-audio holds the Python beat analyser — between them they carry
+  // thousands of bundled .js files that buried the project's own findings.
+  {
+    ignores: [
+      '.next/**', '.next-dev/**', '.venv*/**', 'node_modules/**',
+      'src/generated/**', 'next-env.d.ts',
+    ],
+  },
   {
     rules: {
       '@typescript-eslint/no-explicit-any': 'warn',

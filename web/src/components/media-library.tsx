@@ -1,22 +1,23 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { uploadMedia } from '@/lib/media/upload-client';
 import {
-  Copy, Download, Eye, Folder, MoreHorizontal, Move, Pencil, Plus,
+  Check, Copy, Download, Eye, Folder, MoreHorizontal, Move, Pencil, Plus,
   Tags, Trash2, X,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, Field, humanizeMachineValue, IconButton, MediaFrame, MediaUploader, Select, StatusMessage, VideoPlayer } from '@/bridge88/components';
 import { listAttachableDraftsAction } from '@/app/actions/posts';
 import { MEDIA_PRESETS } from '@/lib/social/capabilities';
 import {
-  createDerivativeAction, createFolderAction, createTagAction, deleteFolderAction,
+  applyTagAction, createDerivativeAction, createFolderAction, createTagAction, deleteFolderAction,
   deleteMediaAction, deleteTagAction, mutateAssetsAction,
   renameTagAction, retryMediaAction, updateFolderAction, updateMediaDetailsAction,
-  uploadMediaAction,
 } from '@/app/actions/media';
+import { MediaTagPicker } from '@/components/media-tag-picker';
 import { MEDIA_KIND_LABELS, MEDIA_STATUS_LABELS, MEDIA_TYPE_LABELS } from '@/lib/media/labels';
 
 export interface MediaLibraryAsset {
@@ -42,8 +43,11 @@ export interface MediaLibraryAsset {
   usages: { id: string; title: string; status: string; platform: string }[];
 }
 
+/** Roughly nine minutes of watching before the library stops asking. */
+const MAX_STATUS_POLLS = 100;
+
 interface FolderItem { id: string; parentId: string | null; name: string; label: string }
-interface TagItem { id: string; name: string }
+interface TagItem { id: string; name: string; assetCount: number }
 
 export function MediaLibrary({
   slug, assets, folders, tags, canEdit, canDelete, currentFolder,
@@ -63,17 +67,45 @@ export function MediaLibrary({
   const [preview, setPreview] = useState<MediaLibraryAsset | null>(null);
   const [visibleAssetCount, setVisibleAssetCount] = useState(12);
   const [notice, setNotice] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
+  const [managingTags, setManagingTags] = useState(false);
   const [pending, startTransition] = useTransition();
   // Folder changes run as a transition so only the asset grid dims; a plain
   // <a href> reloaded the document and flashed the full-page loading screen.
   const [navigating, startNavigation] = useTransition();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const navigate = (href: string) => startNavigation(() => router.push(href));
   const inputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
+  const currentTag = searchParams.get('tag');
+  // Filters compose rather than replace each other. Picking a folder used to
+  // link straight to ?folder=id, which threw away the search term, the type and
+  // the sort order the user had just set.
+  const hrefWith = useCallback((patch: Record<string, string | null>) => {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(patch)) {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    }
+    const search = params.toString();
+    return search ? `/w/${slug}/media?${search}` : `/w/${slug}/media`;
+  }, [searchParams, slug]);
+
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const visibleAssets = assets.slice(0, visibleAssetCount);
+  // Only what is on screen is watched; loading three more pages of an old
+  // library should not start 36 more polls.
+  const pendingIds = useMemo(
+    () => visibleAssets
+      .filter((asset) => asset.status === 'PROCESSING' || asset.status === 'UPLOADING')
+      .map((asset) => asset.id),
+    [visibleAssets],
+  );
+  const stalled = useProcessingWatch(slug, pendingIds, () => router.refresh());
+  // The drawer reads through to the live list, so a tag added in the preview
+  // and a status that finished processing both land without reopening it.
+  const previewAsset = preview ? assets.find((asset) => asset.id === preview.id) ?? preview : null;
   const toggle = (id: string) => setSelected((value) =>
     value.includes(id) ? value.filter((item) => item !== id) : [...value, id]);
   const stageFiles = (files: FileList | File[]) => {
@@ -100,19 +132,14 @@ export function MediaLibrary({
       }
     });
   };
-  // uploadMediaAction reports failures in its returned state rather than throwing.
   const runUpload = (data: FormData) => {
     setUploading(true);
     startTransition(async () => {
       try {
-        const result = await uploadMediaAction(slug, data);
-        setNotice(result.error
-          ? { tone: 'error', message: result.error }
-          : { tone: 'success', message: result.success ?? 'Media uploaded.' });
-        if (!result.error) {
-          clearStagedFiles();
-          router.refresh();
-        }
+        const result = await uploadMedia(slug, data);
+        setNotice({ tone: 'success', message: result.message });
+        clearStagedFiles();
+        router.refresh();
       } catch (error) {
         setNotice({ tone: 'error', message: error instanceof Error ? error.message : 'The media could not be uploaded.' });
       } finally {
@@ -181,22 +208,94 @@ export function MediaLibrary({
     });
   };
 
+  const runApplyTag = (assetIds: string[], tagId: string, apply: boolean) => {
+    startTransition(async () => {
+      try {
+        const result = await applyTagAction(slug, { assetIds, tagId, apply });
+        // Patched as well as refreshed: removing the tag being filtered on drops
+        // the asset out of the list, and the drawer would otherwise fall back to
+        // a snapshot still showing the tag it just lost.
+        setPreview((value) => value && assetIds.includes(value.id)
+          ? {
+              ...value,
+              tags: apply
+                ? [...value.tags.filter((tag) => tag.id !== tagId), result.tag]
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                : value.tags.filter((tag) => tag.id !== tagId),
+            }
+          : value);
+        setNotice({ tone: 'success', message: result.message });
+        router.refresh();
+      } catch (error) {
+        setNotice({ tone: 'error', message: errorMessage(error, 'The tag could not be applied.') });
+      }
+    });
+  };
+  const runCreateTag = (name: string, applyTo?: string[]) => {
+    startTransition(async () => {
+      try {
+        const data = new FormData();
+        data.set('name', name);
+        const tag = await createTagAction(slug, data);
+        if (applyTo?.length) {
+          runApplyTag(applyTo, tag.id, true);
+          return;
+        }
+        setNotice({ tone: 'success', message: `Tag ${tag.name} created.` });
+        router.refresh();
+      } catch (error) {
+        setNotice({ tone: 'error', message: errorMessage(error, 'The tag could not be created.') });
+      }
+    });
+  };
+  const runRenameTag = (tagId: string, data: FormData) => {
+    startTransition(async () => {
+      try {
+        const result = await renameTagAction(slug, tagId, data);
+        setNotice({ tone: 'success', message: result.message });
+        router.refresh();
+      } catch (error) {
+        setNotice({ tone: 'error', message: errorMessage(error, 'The tag could not be renamed.') });
+      }
+    });
+  };
+  const runDeleteTag = (tag: TagItem) => {
+    const held = tag.assetCount === 1 ? '1 asset' : `${tag.assetCount} assets`;
+    if (!window.confirm(`Delete the tag ${tag.name}? It is on ${held}, which are kept.`)) return;
+    startTransition(async () => {
+      try {
+        const result = await deleteTagAction(slug, tag.id);
+        setNotice({ tone: 'success', message: result.message });
+        if (currentTag === tag.id) navigate(hrefWith({ tag: null }));
+        router.refresh();
+      } catch (error) {
+        setNotice({ tone: 'error', message: errorMessage(error, 'The tag could not be deleted.') });
+      }
+    });
+  };
+
   return (
     <>
       {notice && <StatusMessage className="mt-6" tone={notice.tone}>{notice.message}</StatusMessage>}
+      {stalled && pendingIds.length > 0 && (
+        <StatusMessage className="mt-6" tone="error">
+          {pendingIds.length === 1 ? 'An asset is' : `${pendingIds.length} assets are`} still processing after
+          several minutes. Check that the background worker is running, then reload the page.
+        </StatusMessage>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[240px_minmax(0,1fr)]">
         <aside className="space-y-6">
           <section className="b88-card p-4">
             <p className="b88-caption">Folders</p>
             <nav className="mt-3 space-y-1">
-              <FolderLink href={`/w/${slug}/media`} active={!currentFolder} onNavigate={navigate}>
+              <FolderLink href={hrefWith({ folder: null })} active={!currentFolder} onNavigate={navigate}>
                 <Folder size={16} className="shrink-0" /> All media
               </FolderLink>
               {folders.map((folder) => (
                 <FolderLink
                   key={folder.id}
-                  href={`/w/${slug}/media?folder=${folder.id}`}
+                  href={hrefWith({ folder: currentFolder === folder.id ? null : folder.id })}
                   active={currentFolder === folder.id}
                   onNavigate={navigate}
                 >
@@ -235,35 +334,78 @@ export function MediaLibrary({
             )}
           </section>
 
+          {/* Tags are a filter first. They used to render as inert badges with the
+              real control — a second dropdown — down in the filter row, and the
+              only way to edit one was through a disclosure holding a permanently
+              open rename field per tag. */}
           <section className="b88-card p-4">
-            <p className="b88-caption">Tags</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {tags.map((tag) => <Badge key={tag.id} tone="outline">{humanizeMachineValue(tag.name)}</Badge>)}
+            <div className="flex items-center justify-between gap-2">
+              <p className="b88-caption">Tags</p>
+              {canEdit && tags.length > 0 && (
+                <button
+                  type="button"
+                  className="b88-caption underline transition-opacity hover:opacity-80"
+                  onClick={() => setManagingTags((value) => !value)}
+                >
+                  {managingTags ? 'Done' : 'Manage'}
+                </button>
+              )}
             </div>
-            {canEdit && (
-              <details className="mt-4">
-                <summary className="cursor-pointer text-sm font-[480]">Manage tags</summary>
-                <form action={createTagAction.bind(null, slug)} className="mt-3 flex gap-2">
-                  <input name="name" className="b88-filter-control min-w-0 flex-1" placeholder="Tag name" required />
-                  <Button type="submit" variant="secondary">Add</Button>
-                </form>
+            {tags.length === 0 ? (
+              <p className="b88-caption mt-3">{canEdit ? 'None yet — name one below' : 'None yet'}</p>
+            ) : managingTags ? (
+              <div className="mt-3 space-y-2">
                 {tags.map((tag) => (
-                  <div key={tag.id} className="mt-2 flex gap-2">
-                    <form action={renameTagAction.bind(null, slug, tag.id)} className="flex min-w-0 flex-1 gap-2">
-                      <input name="name" className="b88-filter-control min-w-0 flex-1" defaultValue={tag.name} required />
-                      <Button type="submit" variant="tertiary">Save</Button>
-                    </form>
-                    <form
-                      action={deleteTagAction.bind(null, slug, tag.id)}
-                      onSubmit={(event) => {
-                        if (!window.confirm(`Delete tag ${humanizeMachineValue(tag.name)}? Assets will be retained.`)) event.preventDefault();
-                      }}
-                    >
-                      <IconButton type="submit" icon={Trash2} label={`Delete tag ${humanizeMachineValue(tag.name)}`} />
-                    </form>
-                  </div>
+                  <TagEditRow
+                    key={tag.id}
+                    tag={tag}
+                    pending={pending}
+                    onRename={(data) => runRenameTag(tag.id, data)}
+                    onDelete={() => runDeleteTag(tag)}
+                  />
                 ))}
-              </details>
+              </div>
+            ) : (
+              <nav className="mt-3 space-y-1">
+                <FolderLink href={hrefWith({ tag: null })} active={!currentTag} onNavigate={navigate}>
+                  <Tags size={16} className="shrink-0" /> All tags
+                </FolderLink>
+                {tags.map((tag) => (
+                  <FolderLink
+                    key={tag.id}
+                    href={hrefWith({ tag: currentTag === tag.id ? null : tag.id })}
+                    active={currentTag === tag.id}
+                    onNavigate={navigate}
+                  >
+                    <span className="truncate">{tag.name}</span>
+                    <span className="b88-caption ml-auto shrink-0">{tag.assetCount}</span>
+                  </FolderLink>
+                ))}
+              </nav>
+            )}
+            {canEdit && (
+              <form
+                className="mt-3 flex gap-2 border-t border-hairline pt-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const form = event.currentTarget;
+                  const name = String(new FormData(form).get('name') ?? '').trim();
+                  if (!name) return;
+                  runCreateTag(name);
+                  form.reset();
+                }}
+              >
+                <input
+                  name="name"
+                  className="b88-filter-control min-w-0 flex-1"
+                  style={{ backgroundImage: 'none', paddingRight: 'var(--space-md)' }}
+                  placeholder="New tag"
+                  aria-label="New tag name"
+                  maxLength={120}
+                  required
+                />
+                <Button type="submit" variant="secondary" disabled={pending}>Add</Button>
+              </form>
             )}
           </section>
         </aside>
@@ -313,7 +455,19 @@ export function MediaLibrary({
           )}
 
           {selected.length > 0 && (
-            <BulkBar ids={selected} folders={folders} tags={tags} canDelete={canDelete} pending={pending} onSubmit={runBulkAction} onClear={() => setSelected([])} />
+            <BulkBar
+              ids={selected}
+              assets={assets}
+              folders={folders}
+              tags={tags}
+              canEdit={canEdit}
+              canDelete={canDelete}
+              pending={pending}
+              onSubmit={runBulkAction}
+              onApplyTag={(tagId, apply) => runApplyTag(selected, tagId, apply)}
+              onCreateTag={(name) => runCreateTag(name, selected)}
+              onClear={() => setSelected([])}
+            />
           )}
 
           {assets.length ? (
@@ -378,6 +532,13 @@ export function MediaLibrary({
                       <Badge tone="outline">{MEDIA_KIND_LABELS[asset.assetKind]}</Badge>
                       {asset.id === createdDerivativeId && <Badge tone="ink">New derivative</Badge>}
                       {asset.usageCount > 0 && <Badge tone="ink">Post attachment</Badge>}
+                      {/* Tags were stored and filterable but never shown on the
+                          asset, so there was no way to tell what a file carried
+                          without opening it. */}
+                      {asset.tags.slice(0, 3).map((tag) => (
+                        <Badge key={tag.id} tone="lilac">{tag.name}</Badge>
+                      ))}
+                      {asset.tags.length > 3 && <Badge tone="lilac">+{asset.tags.length - 3}</Badge>}
                     </div>
                     <p className="b88-caption mt-2">{asset.width && asset.height ? `${asset.width}×${asset.height} · ` : ''}{asset.sizeLabel} · {asset.usageCount} posts</p>
                   </button>
@@ -417,19 +578,22 @@ export function MediaLibrary({
         </main>
       </div>
 
-      {preview && (
+      {previewAsset && (
         <PreviewDrawer
-          asset={preview}
-          displayName={assetDisplayName(assets, preview.id)}
+          asset={previewAsset}
+          displayName={assetDisplayName(assets, previewAsset.id)}
           slug={slug}
+          tags={tags}
           canEdit={canEdit}
           canDelete={canDelete}
           pending={pending}
           onClose={() => setPreview(null)}
           onDerivative={runDerivative}
           onDetails={runDetails}
-          onRetry={() => runRetry(preview.id, true)}
-          onDelete={() => runDelete(preview, true)}
+          onApplyTag={(tagId, apply) => runApplyTag([previewAsset.id], tagId, apply)}
+          onCreateTag={(name) => runCreateTag(name, [previewAsset.id])}
+          onRetry={() => runRetry(previewAsset.id, true)}
+          onDelete={() => runDelete(previewAsset, true)}
         />
       )}
     </>
@@ -463,10 +627,27 @@ function AssetPreview({ asset }: { asset: MediaLibraryAsset }) {
   );
 }
 
-function BulkBar({ ids, folders, tags, canDelete, pending, onSubmit, onClear }: {
-  ids: string[]; folders: FolderItem[]; tags: TagItem[]; canDelete: boolean; pending: boolean;
-  onSubmit: (data: FormData) => void; onClear: () => void;
+function BulkBar({ ids, assets, folders, tags, canEdit, canDelete, pending, onSubmit, onApplyTag, onCreateTag, onClear }: {
+  ids: string[]; assets: MediaLibraryAsset[]; folders: FolderItem[]; tags: TagItem[];
+  canEdit: boolean; canDelete: boolean; pending: boolean;
+  onSubmit: (data: FormData) => void;
+  onApplyTag: (tagId: string, apply: boolean) => void;
+  onCreateTag: (name: string) => void;
+  onClear: () => void;
 }) {
+  const [tagsOpen, setTagsOpen] = useState(false);
+  // How many of the chosen assets already carry each tag, which is what lets a
+  // chip show "3/8" rather than pretending the tag is simply on or off.
+  const tagCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    const chosen = new Set(ids);
+    for (const asset of assets) {
+      if (!chosen.has(asset.id)) continue;
+      for (const tag of asset.tags) counts.set(tag.id, (counts.get(tag.id) ?? 0) + 1);
+    }
+    return counts;
+  }, [ids, assets]);
+
   return (
     <form
       action={(data) => {
@@ -483,9 +664,37 @@ function BulkBar({ ids, folders, tags, canDelete, pending, onSubmit, onClear }: 
       <select className="b88-pill-select" name="folderId" aria-label="Destination folder"><option value="">Root folder</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.label}</option>)}</select>
       <Button name="operation" value="move" type="submit" variant="secondary" disabled={pending}><Move size={15} /> Move</Button>
       <Button name="operation" value="copy" type="submit" variant="secondary" disabled={pending}><Copy size={15} /> Copy</Button>
-      <select className="b88-pill-select" name="tagId" aria-label="Tag to apply"><option value="">Choose tag</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select>
-      <Button name="operation" value="tag" type="submit" variant="secondary" disabled={pending}><Tags size={15} /> Tag</Button>
-      <Button name="operation" value="untag" type="submit" variant="secondary" disabled={pending}>Remove tag</Button>
+      {canEdit && (
+        <div className="relative">
+          <Button
+            type="button"
+            variant="secondary"
+            aria-expanded={tagsOpen}
+            onClick={() => setTagsOpen((value) => !value)}
+          >
+            <Tags size={15} /> Tags
+          </Button>
+          {tagsOpen && (
+            // Above the bar, not below it: the bar is fixed to the bottom of the
+            // viewport, so a menu opening downwards would fall off screen.
+            <div className="absolute bottom-full right-0 mb-3 w-80 max-w-[calc(100vw-2rem)] rounded-md border border-hairline bg-canvas p-4 text-ink shadow-lg">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="b88-caption">Tags · {ids.length} selected</p>
+                <IconButton type="button" icon={X} label="Close tags" onClick={() => setTagsOpen(false)} />
+              </div>
+              <MediaTagPicker
+                tags={tags}
+                assetIds={ids}
+                tagCounts={tagCounts}
+                canCreate
+                pending={pending}
+                onToggle={onApplyTag}
+                onCreate={onCreateTag}
+              />
+            </div>
+          )}
+        </div>
+      )}
       {canDelete && <Button name="operation" value="delete" type="submit" variant="secondary" disabled={pending}><Trash2 size={15} /> Delete</Button>}
       {/* text-ink is required: the bar sets an inverted text colour the icon would inherit. */}
       <IconButton type="button" icon={X} label="Clear selection" onClick={onClear} className="bg-canvas text-ink" />
@@ -493,15 +702,22 @@ function BulkBar({ ids, folders, tags, canDelete, pending, onSubmit, onClear }: 
   );
 }
 
-function PreviewDrawer({ asset, displayName, slug, canEdit, canDelete, pending, onClose, onDerivative, onDetails, onRetry, onDelete }: {
-  asset: MediaLibraryAsset; displayName: string; slug: string; canEdit: boolean; canDelete: boolean; pending: boolean;
+function PreviewDrawer({ asset, displayName, slug, tags, canEdit, canDelete, pending, onClose, onDerivative, onDetails, onApplyTag, onCreateTag, onRetry, onDelete }: {
+  asset: MediaLibraryAsset; displayName: string; slug: string; tags: TagItem[];
+  canEdit: boolean; canDelete: boolean; pending: boolean;
   onClose: () => void; onDerivative: (id: string, data: FormData) => void;
-  onDetails: (id: string, data: FormData) => void; onRetry: () => void; onDelete: () => void;
+  onDetails: (id: string, data: FormData) => void;
+  onApplyTag: (tagId: string, apply: boolean) => void;
+  onCreateTag: (name: string) => void;
+  onRetry: () => void; onDelete: () => void;
 }) {
   const [preset, setPreset] = useState('');
   const [drafts, setDrafts] = useState<Array<{ id: string; label: string }>>([]);
   const [draftId, setDraftId] = useState('');
   const [draftsLoading, setDraftsLoading] = useState(asset.status === 'READY');
+  // One asset, so every count is 1 or absent — the picker's "some" state cannot
+  // arise here and each chip reads as a plain on or off.
+  const assetTagCounts = useMemo(() => new Map(asset.tags.map((tag) => [tag.id, 1])), [asset.tags]);
   const [draftsError, setDraftsError] = useState('');
   const router = useRouter();
   const dimensions = MEDIA_PRESETS.find((item) => item.id === preset);
@@ -578,6 +794,29 @@ function PreviewDrawer({ asset, displayName, slug, canEdit, canDelete, pending, 
             )}
           </section>
         )}
+
+        <section className="mt-8 border-t border-hairline pt-6">
+          <p className="b88-caption">Tags</p>
+          {canEdit ? (
+            <div className="mt-3">
+              <MediaTagPicker
+                tags={tags}
+                assetIds={[asset.id]}
+                tagCounts={assetTagCounts}
+                canCreate
+                pending={pending}
+                onToggle={onApplyTag}
+                onCreate={onCreateTag}
+              />
+            </div>
+          ) : asset.tags.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {asset.tags.map((tag) => <Badge key={tag.id} tone="lilac">{tag.name}</Badge>)}
+            </div>
+          ) : (
+            <p className="mt-2 text-sm">This asset has no tags.</p>
+          )}
+        </section>
 
         <section className="mt-8 border-t border-hairline pt-6">
           <p className="b88-caption">Used in posts</p>
@@ -664,6 +903,58 @@ function PreviewDrawer({ asset, displayName, slug, canEdit, canDelete, pending, 
   );
 }
 
+/**
+ * One row of the tag manager: rename in place, or delete.
+ *
+ * The rename field is only mounted in manage mode. Rendering an input for every
+ * tag all the time turned a five-tag sidebar into a column of form controls
+ * with no obvious way to simply filter by one.
+ */
+function TagEditRow({ tag, pending, onRename, onDelete }: {
+  tag: TagItem;
+  pending: boolean;
+  onRename: (data: FormData) => void;
+  onDelete: () => void;
+}) {
+  // Stacked rather than one row: the sidebar is 240px, and a field sharing that
+  // width with two 40px circular buttons truncated every name past nine or ten
+  // characters — so the manager hid exactly the thing being renamed.
+  return (
+    <form
+      className="rounded-md bg-surface-soft p-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onRename(new FormData(event.currentTarget));
+      }}
+    >
+      <input
+        name="name"
+        className="b88-filter-control w-full"
+        style={{ backgroundImage: 'none', paddingRight: 'var(--space-md)' }}
+        defaultValue={tag.name}
+        aria-label={`Rename ${tag.name}`}
+        maxLength={120}
+        required
+      />
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span className="b88-caption truncate">
+          {tag.assetCount} {tag.assetCount === 1 ? 'asset' : 'assets'}
+        </span>
+        <span className="flex shrink-0 gap-2">
+          <IconButton type="submit" icon={Check} label={`Save ${tag.name}`} disabled={pending} />
+          <IconButton
+            type="button"
+            icon={Trash2}
+            label={`Delete ${tag.name}`}
+            disabled={pending}
+            onClick={onDelete}
+          />
+        </span>
+      </div>
+    </form>
+  );
+}
+
 // A real Link so hover prefetches, but the click is intercepted to run the
 // navigation inside a transition and keep the surrounding page mounted.
 function FolderLink({
@@ -738,4 +1029,75 @@ function usageStatusLabel(status: string) {
     FAILED: 'Failed',
     CANCELLED: 'Cancelled',
   }[status] ?? 'Post';
+}
+
+/**
+ * Flips processing cards to their finished state without a manual refresh.
+ *
+ * An upload lands as PROCESSING and is completed by a background job that
+ * writes the poster frame, dimensions, duration and — for audio — the beat
+ * grid. All of that happens after the page rendered, so the library showed
+ * "Processing" until somebody reloaded it by hand.
+ *
+ * The poll asks only for statuses. `router.refresh()` is what actually brings
+ * the new data, and it is called on an observed change rather than on a timer:
+ * a refresh re-signs every asset URL, so running one every few seconds would
+ * make the whole grid re-fetch its images and flicker.
+ */
+function useProcessingWatch(slug: string, pendingIds: string[], onSettled: () => void) {
+  const ids = pendingIds.join(',');
+  const settled = useRef(new Map<string, string>());
+  const notify = useRef(onSettled);
+  notify.current = onSettled;
+  const [gaveUp, setGaveUp] = useState(false);
+
+  useEffect(() => {
+    // Reset on every change of the watched set, not only when it empties: a new
+    // upload after a stall is a fresh watch and must not inherit the warning.
+    setGaveUp(false);
+    if (!ids) return;
+    let cancelled = false;
+    let timer = 0;
+    let attempts = 0;
+
+    async function poll() {
+      attempts += 1;
+      try {
+        const response = await fetch(`/api/workspaces/${slug}/media/status?ids=${ids}`);
+        if (!response.ok || cancelled) return;
+        const body = (await response.json()) as { assets: { id: string; status: string }[] };
+        // Recorded before refreshing so a refresh that returns stale props —
+        // the row was read between the status write and the revalidation —
+        // cannot start a refresh loop.
+        const finished = body.assets.filter((asset) =>
+          asset.status !== 'PROCESSING'
+          && asset.status !== 'UPLOADING'
+          && settled.current.get(asset.id) !== asset.status);
+        if (!finished.length) return;
+        for (const asset of finished) settled.current.set(asset.id, asset.status);
+        notify.current();
+      } catch {
+        // A dropped poll is not worth surfacing; the next tick retries.
+      }
+    }
+
+    // Tight at first, because an image is usually done within a second or two,
+    // then relaxed rather than hammering a long video encode at 2s for minutes.
+    const tick = async () => {
+      await poll();
+      if (cancelled) return;
+      if (attempts >= MAX_STATUS_POLLS) {
+        setGaveUp(true);
+        return;
+      }
+      timer = window.setTimeout(tick, attempts < 10 ? 2000 : 6000);
+    };
+    timer = window.setTimeout(tick, 1200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [ids, slug]);
+
+  return gaveUp;
 }

@@ -52,6 +52,42 @@ const validActions = [
     text: 'Recap copy',
     hashtags: ['#recap'],
   },
+  {
+    kind: 'create_workflow',
+    summary: 'Create coastal reel',
+    name: 'coastal reel',
+    description: 'Weekly reel',
+    scheduleEnabled: true,
+    scheduleWeekdays: [1],
+    scheduleHour: 9,
+    scheduleMinute: 0,
+    nodes: [{ key: 'idea', type: 'IDEA_GENERATOR', config: { theme: 'coastal' } }],
+    edges: [],
+  },
+  {
+    kind: 'update_workflow',
+    summary: 'Update coastal reel',
+    workflowId: POST_ID,
+    workflowName: 'coastal reel',
+    scheduleEnabled: true,
+    scheduleWeekdays: [1],
+    scheduleHour: 10,
+    scheduleMinute: 0,
+    nodeUpdates: [],
+    graphEdits: [{
+      operation: 'add_node',
+      key: 'trim_audio',
+      type: 'AUDIO_TRIMMER',
+      name: 'Trim intro',
+      config: { bars: 8 },
+    }],
+  },
+  {
+    kind: 'run_workflow',
+    summary: 'Run coastal reel',
+    workflowId: POST_ID,
+    workflowName: 'coastal reel',
+  },
 ] as const;
 
 describe('assistant action contract', () => {
@@ -73,6 +109,10 @@ describe('assistant action contract', () => {
     { ...validActions[3], media: [] },
     { ...validActions[4], text: '' },
     { ...validActions[5], newTitle: '' },
+    { ...validActions[6], name: 'x' },
+    { ...validActions[7], workflowId: 'not-a-uuid' },
+    { ...validActions[7], graphEdits: [{ operation: 'add_node', key: 'Bad key', type: 'NOPE' }] },
+    { ...validActions[8], workflowName: '' },
   ])('rejects malformed $kind payloads', (action) => {
     expect(assistantReplySchema.safeParse({ reply: 'Malformed proposal', action }).success).toBe(false);
   });

@@ -7,3 +7,8 @@ out/
 next-env.d.ts
 /storage/
 coverage/
+.next-dev/
+.server.pid
+logs/
+.dev.pid
+.worker.pid

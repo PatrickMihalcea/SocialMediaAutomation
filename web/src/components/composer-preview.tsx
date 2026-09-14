@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 import type { ReactNode } from 'react';
 import type { Platform } from '@prisma/client';
 import { Avatar, MediaFrame } from '@/bridge88/components';
@@ -9,7 +11,8 @@ import type { ComposerAccount, ComposerAsset, PlatformVersionState } from '@/lib
 
 type PreviewProps = {
   account: ComposerAccount;
-  version: PlatformVersionState;
+  /** Undefined for the instant between selecting a channel and its version existing. */
+  version: PlatformVersionState | undefined;
   assets: ComposerAsset[];
 };
 
@@ -33,6 +36,7 @@ function assetFrameType(asset: ComposerAsset) {
 }
 
 export function ComposerPreview({ account, version, assets }: PreviewProps) {
+  if (!version) return null;
   const media = mediaForVersion(version, assets);
   const caption = captionText(version);
   const label = account.accountHandle ?? account.accountName;
@@ -90,7 +94,9 @@ function InstagramPreview({
         <MediaFrame
           ratio="1:1"
           type={primary ? assetFrameType(primary) : 'image'}
-          src={primary?.thumbnailUrl}
+          src={primary ? assetSource(primary) : undefined}
+            poster={primary?.thumbnailUrl}
+            overlay={primary && isVideo(primary) ? <PlayGlyph /> : undefined}
           tone="lilac"
           label="Add a photo or video"
         />
@@ -102,7 +108,9 @@ function InstagramPreview({
               key={item.id}
               ratio="1:1"
               type={assetFrameType(item)}
-              src={item.thumbnailUrl}
+              src={assetSource(item)}
+            poster={item.thumbnailUrl}
+            overlay={isVideo(item) ? <PlayGlyph /> : undefined}
               tone="lilac"
             />
           ))}
@@ -145,7 +153,9 @@ function XPreview({
                   key={item.id}
                   ratio="1:1"
                   type={assetFrameType(item)}
-                  src={item.thumbnailUrl}
+                  src={assetSource(item)}
+            poster={item.thumbnailUrl}
+            overlay={isVideo(item) ? <PlayGlyph /> : undefined}
                   tone="soft"
                 />
               ))}
@@ -186,7 +196,9 @@ function LinkedInPreview({
           <MediaFrame
             ratio="4:5"
             type={assetFrameType(media[0])}
-            src={media[0].thumbnailUrl}
+            src={assetSource(media[0])}
+            poster={media[0].thumbnailUrl}
+            overlay={isVideo(media[0]) ? <PlayGlyph /> : undefined}
             tone="soft"
           />
         </div>
@@ -222,7 +234,9 @@ function FacebookPreview({
           <MediaFrame
             ratio="4:5"
             type={assetFrameType(media[0])}
-            src={media[0].thumbnailUrl}
+            src={assetSource(media[0])}
+            poster={media[0].thumbnailUrl}
+            overlay={isVideo(media[0]) ? <PlayGlyph /> : undefined}
             tone="soft"
           />
         </div>
@@ -248,7 +262,9 @@ function TikTokPreview({
         <MediaFrame
           ratio="9:16"
           type={primary ? assetFrameType(primary) : 'video'}
-          src={primary?.thumbnailUrl}
+          src={primary ? assetSource(primary) : undefined}
+            poster={primary?.thumbnailUrl}
+            overlay={primary && isVideo(primary) ? <PlayGlyph /> : undefined}
           tone="coral"
           label="Vertical video preview"
         />
@@ -274,7 +290,9 @@ function YouTubePreview({
       <MediaFrame
         ratio="16:9"
         type={primary ? assetFrameType(primary) : 'video'}
-        src={primary?.thumbnailUrl}
+        src={primary ? assetSource(primary) : undefined}
+            poster={primary?.thumbnailUrl}
+            overlay={primary && isVideo(primary) ? <PlayGlyph /> : undefined}
         tone="mint"
         label="Video thumbnail"
       />
@@ -305,11 +323,81 @@ function GenericPreview({
           <MediaFrame
             ratio="4:5"
             type={assetFrameType(media[0])}
-            src={media[0].thumbnailUrl}
+            src={assetSource(media[0])}
+            poster={media[0].thumbnailUrl}
+            overlay={isVideo(media[0]) ? <PlayGlyph /> : undefined}
             tone="soft"
           />
         </div>
       )}
     </PreviewShell>
+  );
+}
+
+const isVideo = (asset: ComposerAsset) => asset.type === 'VIDEO';
+
+/**
+ * What a MediaFrame should actually load.
+ *
+ * Video needs the file itself — MediaFrame feeds `src` straight into a <video>,
+ * and a poster image there renders an empty frame with no controls, which is
+ * what made a finished render look like an empty draft. Stills stay on the
+ * thumbnail: it is smaller and the frame never shows them larger than this.
+ */
+const assetSource = (asset: ComposerAsset) => (isVideo(asset) ? asset.url : asset.thumbnailUrl);
+
+/**
+ * The circular play control, and it actually plays.
+ *
+ * It was decorative — aria-hidden, no handler, on a <video> with no controls —
+ * so clicking it did nothing at all. It now starts the video in place and gets
+ * out of the way, which is what a poster with a play button promises.
+ */
+function PlayGlyph() {
+  const [playing, setPlaying] = useState(false);
+
+  if (playing) return null;
+  return (
+    <button
+      type="button"
+      aria-label="Play this video"
+      onClick={(event) => {
+        // The control sits inside the frame, so the video is its sibling.
+        const frame = event.currentTarget.parentElement;
+        const video = frame?.querySelector('video');
+        if (!video) return;
+        video.controls = true;
+        void video.play();
+        setPlaying(true);
+      }}
+      style={{
+        position: 'absolute',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: 48,
+        height: 48,
+        padding: 0,
+        border: 'none',
+        cursor: 'pointer',
+        borderRadius: 'var(--radius-full)',
+        background: 'rgba(0,0,0,0.58)',
+        display: 'grid',
+        placeItems: 'center',
+        transition: 'opacity var(--duration-fast) var(--ease-standard)',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 0,
+          height: 0,
+          marginLeft: 3,
+          borderTop: '9px solid transparent',
+          borderBottom: '9px solid transparent',
+          borderLeft: '14px solid #fff',
+        }}
+      />
+    </button>
   );
 }

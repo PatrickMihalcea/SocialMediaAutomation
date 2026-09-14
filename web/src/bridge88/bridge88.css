@@ -78,12 +78,15 @@ select.b88-input,.b88-pill-select,.b88-filter-control{appearance:none;background
    renders the glyph sheared, which reads as a clipped icon. */
 .b88-dropdown-trigger[aria-expanded="true"]{border-color:var(--ink)}
 .b88-dropdown-trigger svg{flex:0 0 auto}
-.b88-dropdown-value,.b88-dropdown-option-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.b88-dropdown-value{flex:1;font-weight:var(--weight-medium)}
+/* The trigger is a fixed 48px row, so its value has to stay on one line. Menu
+   rows are free to grow, and a truncated option is unreadable in a narrow
+   column — so they wrap rather than ellipsis. */
+.b88-dropdown-value{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;font-weight:var(--weight-medium)}
+.b88-dropdown-option-label{min-width:0;overflow-wrap:break-word}
 /* 4px of padding keeps the row box close to the panel box, so the menu reads as
    the trigger's own surface rather than a narrower panel floating inside it. */
 .b88-dropdown-listbox{z-index:120;overflow-y:auto;overscroll-behavior:contain;padding:var(--space-xxs);background:var(--canvas);color:var(--ink);border:1px solid var(--hairline);border-radius:var(--radius-md);box-shadow:var(--elevation-2)}
-.b88-dropdown-option{display:flex;min-height:40px;align-items:center;gap:var(--space-sm);padding:0 var(--space-xs);border-radius:var(--radius-sm);cursor:pointer;font-size:15px}
+.b88-dropdown-option{display:flex;min-height:40px;align-items:center;gap:var(--space-sm);padding:var(--space-xxs) var(--space-xs);border-radius:var(--radius-sm);cursor:pointer;font-size:15px}
 .b88-dropdown-option-label{flex:1}
 /* The primary surface stays reserved for the sidebar's active row, which sits in
    this same column: a second black pill in the menu makes "current page" and
@@ -132,6 +135,24 @@ select.b88-input,.b88-pill-select,.b88-filter-control{appearance:none;background
 /* Inherits colour so it stays visible on both cream and inverted nav rows. */
 .b88-spinner-inline{width:12px;height:12px;border:2px solid transparent;border-top-color:currentColor;border-right-color:currentColor;border-radius:9999px;animation:b88-spin .8s linear infinite}
 .b88-toast{position:fixed;left:50%;bottom:24px;z-index:60;display:flex;max-width:min(560px,calc(100vw - 32px));transform:translateX(-50%);align-items:center;gap:8px;border-radius:var(--radius-pill);background:var(--ink);color:var(--canvas);padding:12px 18px}
+
+/* Workflow canvas ports.
+   A port is centred with translate(-50%,-50%), so it must grow by changing size
+   rather than scale — a transform here would knock it off its anchor. The dot
+   stays 12px while an invisible ring gives the pointer a 44px target. */
+.b88-canvas .react-flow__handle{width:12px;height:12px;background:var(--ink);border:2px solid var(--canvas);transition:width .12s ease,height .12s ease,background-color .12s ease,box-shadow .12s ease,opacity .12s ease}
+/* Generous sideways, tight vertically: port rows sit ~22px apart, so a square
+   44px ring would overlap its neighbours and the topmost row would silently win
+   the pointer. Half the row pitch keeps each port unambiguous. */
+.b88-canvas .react-flow__handle::after{content:"";position:absolute;top:-5px;bottom:-5px;left:-16px;right:-16px;border-radius:9999px}
+.b88-canvas .react-flow__handle:hover,.b88-canvas .react-flow__handle.connectingfrom{width:18px;height:18px;background:var(--accent-magenta);box-shadow:0 0 0 5px color-mix(in srgb,var(--accent-magenta) 22%,transparent)}
+/* Every port that would accept the connection in flight, not just the hovered
+   one — otherwise finding a valid target is guesswork. */
+.b88-canvas .react-flow__handle[data-compatible="true"]{width:18px;height:18px;background:var(--success);animation:b88-port-pulse 1.2s ease-in-out infinite}
+.b88-canvas .react-flow__handle[data-compatible="false"]{opacity:.18}
+.b88-canvas .react-flow__handle.connectingto[data-compatible="true"]{width:22px;height:22px;animation:none;box-shadow:0 0 0 6px color-mix(in srgb,var(--success) 30%,transparent)}
+.b88-canvas .react-flow__connection-path{stroke:var(--accent-magenta);stroke-width:2.5}
+@keyframes b88-port-pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--success) 55%,transparent)}60%{box-shadow:0 0 0 9px transparent}}
 @keyframes b88-spin{to{transform:rotate(360deg)}}
 @media(max-width:900px){
   .b88-app{padding-left:0;padding-bottom:var(--mobile-nav-height)}

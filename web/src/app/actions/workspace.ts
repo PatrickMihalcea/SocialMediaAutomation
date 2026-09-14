@@ -17,6 +17,7 @@ import {
   slugifyWorkspace,
   timezoneChangeNotice,
 } from '@/lib/workspaces/lifecycle';
+import { retimeWorkflows } from '@/lib/workflows/schedule';
 import { conflict, invalid } from '@/lib/errors';
 import type { BrandVoiceDraft } from '@/lib/ai/schemas';
 
@@ -168,7 +169,8 @@ export async function updateWorkspaceAction(
     const ctx = await requireWorkspace(slug, 'workspace:update');
     const input = workspaceSchema.parse(Object.fromEntries(formData));
     validateTimezone(input.timezone);
-    if (input.timezone !== ctx.workspace.timezone) {
+    const timezoneChanged = input.timezone !== ctx.workspace.timezone;
+    if (timezoneChanged) {
       const scheduledPosts = await db.post.count({
         where: {
           workspaceId: ctx.workspace.id,
@@ -198,6 +200,15 @@ export async function updateWorkspaceAction(
         defaultLanguage: input.defaultLanguage,
       },
     });
+    if (timezoneChanged) {
+      // Schedules store a wall-clock slot, not an instant, so anything holding
+      // the old zone would keep firing at the old local time.
+      await retimeWorkflows(ctx.workspace.id, input.timezone);
+      await db.recurringSchedule.updateMany({
+        where: { workspaceId: ctx.workspace.id },
+        data: { timezone: input.timezone },
+      });
+    }
     await audit({
       workspaceId: ctx.workspace.id,
       userId: ctx.user.id,

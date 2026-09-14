@@ -2,12 +2,13 @@ import 'server-only';
 import { MediaType } from '@prisma/client';
 import { db } from '@/lib/db';
 import { generateImage } from '@/lib/ai';
+import type { ImageSize } from '@/lib/ai/image-sizes';
 import { mediaKey, storage } from '@/lib/storage';
 import { PermanentJobError } from '@/lib/queue/runner';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
 
 interface Config {
-  size: '1024x1024' | '1024x1536' | '1536x1024';
+  size: ImageSize;
   maxImages: number;
 }
 

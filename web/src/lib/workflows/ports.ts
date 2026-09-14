@@ -28,6 +28,16 @@ export interface PortDefinition {
   /** Input ports only. An unconnected required port blocks the run from starting. */
   required?: boolean;
   description?: string;
+  /**
+   * Output ports only. Marks the port generic: its concrete type is whatever
+   * reaches the named input, re-arity'd to this port's own `list`. `type` stays
+   * the widest set the port could ever carry, and is what the palette shows.
+   *
+   * This is why Pick one is a single node rather than one per media kind. The
+   * type still comes from the graph, never from config, so editing a setting
+   * cannot invalidate an edge — only rewiring can.
+   */
+  followsInput?: string;
 }
 
 export const text = (list = false): PortType => ({ scalar: 'text', list });
@@ -53,8 +63,8 @@ export function checkCompatible(source: PortType, target: PortType): Incompatibi
   }
   if (source.list !== target.list) {
     return source.list
-      ? { reason: `That output is a list and this input takes a single ${source.scalar}. Add a Pick node between them.` }
-      : { reason: `That output is a single ${source.scalar} and this input takes a list. Add a Collect node between them.` };
+      ? { reason: `That output is a list and this input takes a single ${source.scalar}. Add a Pick one step between them.` }
+      : { reason: `That output is a single ${source.scalar} and this input takes a list of them.` };
   }
   if (source.scalar === 'media') {
     const accepted = target.mediaKinds ?? [];
@@ -75,10 +85,13 @@ export function checkCompatible(source: PortType, target: PortType): Incompatibi
 export const isCompatible = (source: PortType, target: PortType): boolean =>
   checkCompatible(source, target) === null;
 
-function describe(type: PortType): string {
+/** e.g. "video list", "image, video or audio", "text". */
+export function describePortType(type: PortType): string {
   const base = type.scalar === 'media' ? listKinds(type.mediaKinds ?? []) : type.scalar;
   return type.list ? `${base} list` : base;
 }
+
+const describe = describePortType;
 
 const KIND_LABEL: Record<MediaType, string> = {
   IMAGE: 'image',

@@ -1,6 +1,17 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState, useTransition } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type CSSProperties,
+} from 'react';
+import { createPortal } from 'react-dom';
 import {
   Background,
   Controls,
@@ -22,9 +33,20 @@ import {
   CATEGORY_LABEL,
   NODE_DEFINITIONS,
   type NodeCategory,
+  type WorkflowAudioOption,
+  type WorkflowChannelOption,
+  type WorkflowMediaAssetOption,
+  type WorkflowMediaCounts,
+  type WorkflowMediaFolderOption,
   getDefinition,
 } from '@/lib/workflows/definitions';
-import { checkCompatible } from '@/lib/workflows/ports';
+import {
+  mediaLibraryOutputCounts,
+  type MediaLibraryOutputCounts,
+} from '@/lib/workflows/media-library-outputs';
+import { describeConnection } from '@/lib/workflows/connection-label';
+import { reaches } from '@/lib/workflows/graph';
+import { checkAddedEdge } from '@/lib/workflows/port-resolution';
 import {
   addNodeAction,
   connectNodesAction,
@@ -33,6 +55,7 @@ import {
   saveNodePositionsAction,
 } from '@/app/actions/workflows';
 import { NodeConfigPanel } from '@/components/workflow-config-panel';
+import { ConnectionConfigPanel } from '@/components/workflow-connection-panel';
 
 export interface CanvasNode {
   id: string;
@@ -51,7 +74,34 @@ export interface CanvasEdge {
   targetPort: string;
 }
 
-type StepData = { label: string; type: string };
+type StepData = {
+  label: string;
+  type: string;
+  outputCounts?: MediaLibraryOutputCounts;
+};
+
+type ContextMenuTarget =
+  | { kind: 'edge'; id: string; x: number; y: number }
+  | { kind: 'node'; id: string; x: number; y: number };
+
+type PortKind = 'source' | 'target';
+
+/**
+ * Which ports would accept the connection currently being dragged.
+ *
+ * Passed by context rather than through node data so that starting a drag does
+ * not rewrite every node object and restart React Flow's own drag bookkeeping.
+ */
+const ConnectingContext = createContext<{
+  active: boolean;
+  accepts: (nodeId: string, portId: string, kind: PortKind) => boolean;
+  isOutputConnected: (nodeId: string, portId: string) => boolean;
+}>({ active: false, accepts: () => false, isOutputConnected: () => false });
+
+const EDGE_HIT_WIDTH = 24;
+
+const EDGE_A11Y_HINT =
+  'Press Enter or Space to select this connection. Then press Backspace or Delete to remove it, or use the connection settings panel.';
 
 /**
  * The pipeline editor.
@@ -66,6 +116,11 @@ export function WorkflowCanvas(props: {
   workflowId: string;
   initialNodes: CanvasNode[];
   initialEdges: CanvasEdge[];
+  accounts: WorkflowChannelOption[];
+  audioAssets: WorkflowAudioOption[];
+  mediaAssets: WorkflowMediaAssetOption[];
+  mediaFolders: WorkflowMediaFolderOption[];
+  mediaCounts: WorkflowMediaCounts;
   canEdit: boolean;
 }) {
   return (
@@ -80,40 +135,256 @@ function CanvasInner({
   workflowId,
   initialNodes,
   initialEdges,
+  accounts,
+  audioAssets,
+  mediaAssets,
+  mediaFolders,
+  mediaCounts,
   canEdit,
 }: {
   slug: string;
   workflowId: string;
   initialNodes: CanvasNode[];
   initialEdges: CanvasEdge[];
+  accounts: WorkflowChannelOption[];
+  audioAssets: WorkflowAudioOption[];
+  mediaAssets: WorkflowMediaAssetOption[];
+  mediaFolders: WorkflowMediaFolderOption[];
+  mediaCounts: WorkflowMediaCounts;
   canEdit: boolean;
 }) {
   const [error, setError] = useState('');
-  const [selected, setSelected] = useState<string | null>(null);
+  // One menu at a time: opening either kind closes the other by construction.
+  const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null);
+  const [connectStart, setConnectStart] = useState<{
+    nodeId: string;
+    handleId: string;
+    handleType: PortKind;
+  } | null>(null);
   const [pending, startTransition] = useTransition();
   const configs = useRef(new Map(initialNodes.map((n) => [n.id, n])));
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<StepData>>(
-    initialNodes.map(toFlowNode),
+    initialNodes.map((node) => toFlowNode(node, mediaFolders, mediaCounts, mediaAssets)),
   );
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges.map(toFlowEdge));
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(
+    initialEdges.map((edge) => toFlowEdge(edge, configs.current, canEdit)),
+  );
+
+  /**
+   * Selection is read back off React Flow rather than mirrored in local state.
+   * A second copy drifts: the pane click that clears React Flow's selection did
+   * not always clear ours, so the rail needed a second click to close.
+   * The rail is for one element, so a multi-select shows nothing.
+   */
+  const selectedNodeId = useMemo(() => {
+    const chosen = nodes.filter((node) => node.selected);
+    return chosen.length === 1 && !edges.some((edge) => edge.selected) ? chosen[0].id : null;
+  }, [nodes, edges]);
+
+  const selectedEdgeId = useMemo(() => {
+    const chosen = edges.filter((edge) => edge.selected);
+    return chosen.length === 1 && !nodes.some((node) => node.selected) ? chosen[0].id : null;
+  }, [nodes, edges]);
+
+  /** Right-click does not select on its own, so the rail is pointed by hand. */
+  const selectOnly = useCallback(
+    (kind: 'node' | 'edge', id: string) => {
+      setNodes((current) =>
+        current.map((node) => ({ ...node, selected: kind === 'node' && node.id === id })),
+      );
+      setEdges((current) =>
+        current.map((edge) => ({ ...edge, selected: kind === 'edge' && edge.id === id })),
+      );
+    },
+    [setNodes, setEdges],
+  );
+
+  const nodeLookup = useMemo(() => {
+    const lookup = new Map<string, { name: string; type: string }>();
+    for (const node of nodes) {
+      const config = configs.current.get(node.id);
+      lookup.set(node.id, { name: config?.name ?? node.data.label, type: node.data.type });
+    }
+    return lookup;
+  }, [nodes]);
+
+  const flowEdges = useMemo(
+    () =>
+      edges.map((edge) => {
+        const canvas = flowEdgeToCanvas(edge);
+        const { ariaLabel } = describeConnection(canvas, nodeLookup);
+        return {
+          ...edge,
+          ariaLabel,
+          deletable: canEdit,
+          interactionWidth: EDGE_HIT_WIDTH,
+        };
+      }),
+    [edges, nodeLookup, canEdit],
+  );
+
+  const selectedCanvasEdge = useMemo(() => {
+    if (!selectedEdgeId) return null;
+    const edge = edges.find((item) => item.id === selectedEdgeId);
+    return edge ? flowEdgeToCanvas(edge) : null;
+  }, [selectedEdgeId, edges]);
+
+  const selectedConnectionDescription = selectedCanvasEdge
+    ? describeConnection(selectedCanvasEdge, nodeLookup)
+    : null;
+
+  const connectionAllowed = useCallback(
+    (sourceId: string, sourcePort: string, targetId: string, targetPort: string) => {
+      if (sourceId === targetId) return false;
+      const source = configs.current.get(sourceId);
+      const target = configs.current.get(targetId);
+      if (!source || !target) return false;
+      const output = getDefinition(source.type)?.outputs.find((port) => port.id === sourcePort);
+      const input = getDefinition(target.type)?.inputs.find((port) => port.id === targetPort);
+      if (!output || !input) return false;
+      if (edges.some((edge) => edge.target === targetId && edge.targetHandle === targetPort)) return false;
+      const graphEdges = edges.map(flowEdgeToCanvas);
+      if (reaches(graphEdges, targetId, sourceId)) return false;
+      const graphNodes = [...configs.current.entries()].map(([id, config]) => ({
+        id,
+        type: config.type,
+        name: config.name,
+      }));
+      return !checkAddedEdge(
+        { nodes: graphNodes, edges: graphEdges },
+        { sourceNodeId: sourceId, sourcePort, targetNodeId: targetId, targetPort },
+      );
+    },
+    [edges],
+  );
+
+  /** Label and action for whichever element was right-clicked. */
+  const contextMenuAction = useMemo(() => {
+    if (!contextMenu) return null;
+    if (contextMenu.kind === 'edge') {
+      const edge = edges.find((item) => item.id === contextMenu.id);
+      if (!edge) return null;
+      return {
+        menuLabel: 'Connection actions',
+        itemLabel: 'Remove connection',
+        target: describeConnection(flowEdgeToCanvas(edge), nodeLookup).title,
+      };
+    }
+    const node = nodeLookup.get(contextMenu.id);
+    if (!node) return null;
+    return { menuLabel: 'Step actions', itemLabel: 'Remove step', target: node.name };
+  }, [contextMenu, edges, nodeLookup]);
 
   /**
    * Refuses an incompatible drop before the pointer is released, using the same
    * function the server action re-checks with. The client copy is a courtesy;
    * the server one is the control.
    */
-  const isValidConnection = useCallback((connection: Connection | Edge) => {
-    if (!connection.source || !connection.target || connection.source === connection.target) return false;
-    const source = configs.current.get(connection.source);
-    const target = configs.current.get(connection.target);
-    if (!source || !target) return false;
+  const connecting = useMemo(() => {
+    if (!connectStart) return { active: false, accepts: () => false };
 
-    const out = getDefinition(source.type)?.outputs.find((p) => p.id === connection.sourceHandle);
-    const input = getDefinition(target.type)?.inputs.find((p) => p.id === connection.targetHandle);
-    if (!out || !input) return false;
-    return checkCompatible(out.type, input.type) === null;
-  }, []);
+    const originNode = configs.current.get(connectStart.nodeId);
+    const originDefinition = originNode ? getDefinition(originNode.type) : null;
+    const fromSource = connectStart.handleType === 'source';
+    const originPort = fromSource
+      ? originDefinition?.outputs.find((port) => port.id === connectStart.handleId)
+      : originDefinition?.inputs.find((port) => port.id === connectStart.handleId);
+
+    return {
+      active: true,
+      accepts: (nodeId: string, portId: string, kind: PortKind) => {
+        if (!originPort || nodeId === connectStart.nodeId) return false;
+        // A drag that started on an output can only land on an input.
+        if (kind === connectStart.handleType) return false;
+
+        const definition = getDefinition(configs.current.get(nodeId)?.type ?? '');
+        const port = (kind === 'target' ? definition?.inputs : definition?.outputs)?.find(
+          (candidate) => candidate.id === portId,
+        );
+        if (!port) return false;
+
+        return fromSource
+          ? connectionAllowed(connectStart.nodeId, connectStart.handleId, nodeId, portId)
+          : connectionAllowed(nodeId, portId, connectStart.nodeId, connectStart.handleId);
+      },
+    };
+  }, [connectStart, connectionAllowed]);
+
+  const connectionUi = useMemo(
+    () => ({
+      ...connecting,
+      isOutputConnected: (nodeId: string, portId: string) =>
+        edges.some((edge) => edge.source === nodeId && edge.sourceHandle === portId),
+    }),
+    [connecting, edges],
+  );
+
+  const isValidConnection = useCallback((connection: Connection | Edge) => {
+    if (!connection.source || !connection.sourceHandle || !connection.target || !connection.targetHandle) {
+      return false;
+    }
+    return connectionAllowed(
+      connection.source,
+      connection.sourceHandle,
+      connection.target,
+      connection.targetHandle,
+    );
+  }, [connectionAllowed]);
+
+  const removeConnection = useCallback(
+    async (edgeId: string): Promise<boolean> => {
+      if (!canEdit) return false;
+      try {
+        await disconnectAction(slug, edgeId);
+        // Dropping it from the list also clears the derived selection.
+        setEdges((current) => current.filter((edge) => edge.id !== edgeId));
+        setContextMenu((current) => (current?.id === edgeId ? null : current));
+        return true;
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'That connection could not be removed.');
+        return false;
+      }
+    },
+    [canEdit, slug, setEdges],
+  );
+
+  const requestRemoveConnection = useCallback(
+    (edgeId: string) => {
+      setError('');
+      startTransition(async () => {
+        await removeConnection(edgeId);
+      });
+    },
+    [removeConnection],
+  );
+
+  const onBeforeDelete = useCallback(
+    async ({ nodes: nodesToDelete, edges: edgesToDelete }: { nodes: Node[]; edges: Edge[] }) => {
+      if (!canEdit) return false;
+      setError('');
+      const nodeIds = new Set(nodesToDelete.map((node) => node.id));
+      try {
+        for (const node of nodesToDelete) {
+          await deleteNodeAction(slug, node.id);
+          configs.current.delete(node.id);
+        }
+        setNodes((current) => current.filter((node) => !nodeIds.has(node.id)));
+        setEdges((current) =>
+          current.filter((edge) => !nodeIds.has(edge.source) && !nodeIds.has(edge.target)),
+        );
+        for (const edge of edgesToDelete) {
+          if (!nodeIds.has(edge.source) && !nodeIds.has(edge.target)) {
+            await removeConnection(edge.id);
+          }
+        }
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'The selected items could not be removed.');
+      }
+      return false;
+    },
+    [canEdit, removeConnection, setEdges, setNodes, slug],
+  );
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -127,7 +398,22 @@ function CanvasInner({
             targetNodeId: connection.target!,
             targetPort: connection.targetHandle!,
           });
-          setEdges((current) => addEdge({ ...connection, id: edge.id }, current));
+          setEdges((current) =>
+            addEdge(
+              toFlowEdge(
+                {
+                  id: edge.id,
+                  sourceNodeId: connection.source!,
+                  sourcePort: connection.sourceHandle!,
+                  targetNodeId: connection.target!,
+                  targetPort: connection.targetHandle!,
+                },
+                configs.current,
+                canEdit,
+              ),
+              current,
+            ),
+          );
         } catch (cause) {
           setError(cause instanceof Error ? cause.message : 'Those steps could not be connected.');
         }
@@ -150,15 +436,16 @@ function CanvasInner({
     setError('');
     startTransition(async () => {
       try {
-        // Dropped into open space near the middle rather than on top of an
-        // existing node, so a new step is always visible.
         const created = await addNodeAction(slug, workflowId, {
           type,
           positionX: 120 + (nodes.length % 4) * 300,
           positionY: 120 + Math.floor(nodes.length / 4) * 220,
         });
         configs.current.set(created.id, created as unknown as CanvasNode);
-        setNodes((current) => [...current, toFlowNode(created as unknown as CanvasNode)]);
+        setNodes((current) => [
+          ...current,
+          toFlowNode(created as unknown as CanvasNode, mediaFolders, mediaCounts, mediaAssets),
+        ]);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'That step could not be added.');
       }
@@ -166,13 +453,14 @@ function CanvasInner({
   }
 
   function removeStep(id: string) {
+    setError('');
     startTransition(async () => {
       try {
         await deleteNodeAction(slug, id);
         configs.current.delete(id);
         setNodes((current) => current.filter((node) => node.id !== id));
         setEdges((current) => current.filter((edge) => edge.source !== id && edge.target !== id));
-        setSelected(null);
+        setContextMenu((current) => (current?.id === id ? null : current));
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'That step could not be removed.');
       }
@@ -182,6 +470,7 @@ function CanvasInner({
   const palette = useMemo(() => {
     const groups = new Map<NodeCategory, { type: string; label: string; description: string }[]>();
     for (const definition of Object.values(NODE_DEFINITIONS)) {
+      if ('legacy' in definition && definition.legacy) continue;
       const list = groups.get(definition.category) ?? [];
       list.push({
         type: definition.type,
@@ -193,10 +482,25 @@ function CanvasInner({
     return [...groups.entries()];
   }, []);
 
-  const selectedNode = selected ? configs.current.get(selected) : null;
+  const selectedNode = selectedNodeId ? configs.current.get(selectedNodeId) : null;
+  // The settings rail only exists once there is something to configure, so the
+  // canvas keeps that width the rest of the time.
+  const inspector = selectedCanvasEdge && selectedConnectionDescription
+    ? 'connection'
+    : selectedNode
+      ? 'step'
+      : null;
+  // Written out in full because Tailwind resolves class names statically.
+  const columns = inspector
+    ? canEdit
+      ? 'lg:grid-cols-[190px_minmax(0,1fr)_280px]'
+      : 'lg:grid-cols-[minmax(0,1fr)_280px]'
+    : canEdit
+      ? 'lg:grid-cols-[190px_minmax(0,1fr)]'
+      : 'lg:grid-cols-[minmax(0,1fr)]';
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[190px_minmax(0,1fr)_280px]">
+    <div className={`grid gap-6 ${columns}`}>
       {canEdit && (
         <aside>
           <p className="b88-eyebrow">Add a step</p>
@@ -211,7 +515,7 @@ function CanvasInner({
                         type="button"
                         onClick={() => addStep(item.type)}
                         disabled={pending}
-                        title={item.description}
+                        aria-label={`Add ${item.label}: ${item.description}`}
                         className="w-full rounded-md border border-hairline px-3 py-2 text-left text-sm transition-opacity hover:opacity-80 disabled:opacity-35"
                       >
                         {item.label}
@@ -226,13 +530,10 @@ function CanvasInner({
       )}
 
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <p className="b88-caption">
-            {nodes.length} {nodes.length === 1 ? 'STEP' : 'STEPS'} · {edges.length}{' '}
-            {edges.length === 1 ? 'CONNECTION' : 'CONNECTIONS'}
-          </p>
-          <p className="b88-caption">DRAG A PORT TO CONNECT</p>
-        </div>
+        <p className="b88-caption">
+          {nodes.length} {nodes.length === 1 ? 'STEP' : 'STEPS'} · {edges.length}{' '}
+          {edges.length === 1 ? 'CONNECTION' : 'CONNECTIONS'}
+        </p>
 
         {error && <StatusMessage tone="error">{error}</StatusMessage>}
 
@@ -240,8 +541,6 @@ function CanvasInner({
           className="b88-canvas h-[600px] rounded-lg border border-hairline"
           style={
             {
-              // Re-point React Flow's own variables at the design tokens, so the
-              // canvas inherits light and dark mode without a second palette.
               '--xy-background-color': 'var(--canvas)',
               '--xy-node-border': '1px solid var(--hairline)',
               '--xy-edge-stroke': 'var(--ink)',
@@ -251,23 +550,56 @@ function CanvasInner({
             } as React.CSSProperties
           }
         >
+          <ConnectingContext.Provider value={connectionUi}>
           <ReactFlow
             nodes={nodes}
-            edges={edges}
+            edges={flowEdges}
             nodeTypes={NODE_TYPES}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onConnectStart={(_event, params) => {
+              if (!params.nodeId || !params.handleId || !params.handleType) return;
+              setContextMenu(null);
+              setConnectStart({
+                nodeId: params.nodeId,
+                handleId: params.handleId,
+                handleType: params.handleType,
+              });
+            }}
+            onConnectEnd={() => setConnectStart(null)}
+            // Wider than the 20px default so a drop near a port still lands.
+            connectionRadius={44}
             isValidConnection={isValidConnection}
             onNodeDragStop={persistPositions}
-            onNodeClick={(_event, node) => setSelected(node.id)}
-            onPaneClick={() => setSelected(null)}
-            onEdgesDelete={(deleted) => {
-              for (const edge of deleted) void disconnectAction(slug, edge.id);
+            onNodeClick={() => setContextMenu(null)}
+            onEdgeClick={() => setContextMenu(null)}
+            onNodeContextMenu={(event, node) => {
+              if (!canEdit) return;
+              event.preventDefault();
+              selectOnly('node', node.id);
+              setContextMenu({ kind: 'node', id: node.id, x: event.clientX, y: event.clientY });
             }}
+            onEdgeContextMenu={(event, edge) => {
+              if (!canEdit) return;
+              event.preventDefault();
+              selectOnly('edge', edge.id);
+              setContextMenu({ kind: 'edge', id: edge.id, x: event.clientX, y: event.clientY });
+            }}
+            onPaneClick={() => setContextMenu(null)}
+            onPaneContextMenu={() => setContextMenu(null)}
+            onMoveStart={() => setContextMenu(null)}
+            onBeforeDelete={onBeforeDelete}
+            deleteKeyCode={canEdit ? ['Backspace', 'Delete'] : null}
+            elementsSelectable
+            elevateEdgesOnSelect
             nodesDraggable={canEdit}
             nodesConnectable={canEdit}
+            nodesFocusable
             edgesFocusable={canEdit}
+            ariaLabelConfig={{
+              'edge.a11yDescription.default': EDGE_A11Y_HINT,
+            }}
             fitView
             fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
             proOptions={{ hideAttribution: true }}
@@ -275,42 +607,184 @@ function CanvasInner({
             <Background gap={24} size={1} color="var(--hairline)" />
             <Controls showInteractive={false} />
           </ReactFlow>
+          </ConnectingContext.Provider>
         </div>
       </div>
 
+      {inspector && (
       <aside>
-        {selectedNode ? (
+        {selectedCanvasEdge && selectedConnectionDescription ? (
+          <ConnectionConfigPanel
+            key={selectedCanvasEdge.id}
+            edge={selectedCanvasEdge}
+            description={selectedConnectionDescription}
+            canEdit={canEdit}
+            pending={pending}
+            onDelete={() => requestRemoveConnection(selectedCanvasEdge.id)}
+          />
+        ) : selectedNode ? (
           <NodeConfigPanel
             key={selectedNode.id}
             slug={slug}
             node={selectedNode}
+            accounts={accounts}
+            audioAssets={audioAssets}
+            mediaAssets={mediaAssets}
+            mediaFolders={mediaFolders}
             canEdit={canEdit}
             onSaved={(updated) => {
               configs.current.set(updated.id, updated);
               setNodes((current) =>
                 current.map((node) =>
                   node.id === updated.id
-                    ? { ...node, data: { ...node.data, label: updated.name } }
+                    ? {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          label: updated.name,
+                          outputCounts:
+                            updated.type === 'MEDIA_LIBRARY'
+                              ? mediaLibraryOutputCounts(
+                                  updated.config,
+                                  mediaFolders,
+                                  mediaCounts,
+                                  mediaAssets,
+                                )
+                              : undefined,
+                        },
+                      }
                     : node,
                 ),
               );
             }}
             onDelete={() => removeStep(selectedNode.id)}
           />
-        ) : (
-          <div className="rounded-lg border border-hairline p-6">
-            <p className="b88-eyebrow">Step settings</p>
-            <p className="b88-body-sm mt-3">Select a step on the canvas to configure it.</p>
-          </div>
-        )}
+        ) : null}
       </aside>
+      )}
+
+      {contextMenu && contextMenuAction && canEdit && (
+        <CanvasContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          menuLabel={contextMenuAction.menuLabel}
+          itemLabel={contextMenuAction.itemLabel}
+          target={contextMenuAction.target}
+          pending={pending}
+          onRemove={() =>
+            contextMenu.kind === 'edge'
+              ? requestRemoveConnection(contextMenu.id)
+              : removeStep(contextMenu.id)
+          }
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }
 
+/** Right-click actions for a step or a connection. */
+function CanvasContextMenu({
+  x,
+  y,
+  menuLabel,
+  itemLabel,
+  target,
+  pending,
+  onRemove,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  menuLabel: string;
+  itemLabel: string;
+  target: string;
+  pending: boolean;
+  onRemove: () => void;
+  onClose: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  const [hovered, setHovered] = useState(false);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  const style = useMemo((): CSSProperties => {
+    const viewportPadding = 8;
+    // Sized to its one label rather than a fixed panel width; clamped against
+    // the widest label the menu can hold so it never opens off-screen.
+    const maxWidth = 200;
+    const left = Math.min(x, window.innerWidth - maxWidth - viewportPadding);
+    const top = Math.min(y, window.innerHeight - 56 - viewportPadding);
+    return { position: 'fixed', left, top, minWidth: 152, maxWidth, zIndex: 120 };
+  }, [x, y]);
+
+  useEffect(() => {
+    const menu = menuRef.current;
+    menu?.focus();
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!menu?.contains(event.target as globalThis.Node)) onCloseRef.current();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+      }
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      role="menu"
+      aria-label={menuLabel}
+      tabIndex={-1}
+      className="b88-dropdown-listbox"
+      style={style}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        disabled={pending}
+        aria-label={`${itemLabel}: ${target}`}
+        className="b88-dropdown-option w-full border-0 bg-transparent text-left"
+        // The kit marks the hovered row with data-active rather than :hover, so
+        // pointer and keyboard land on the same one highlighted row.
+        data-active={hovered || undefined}
+        onPointerMove={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
+        onClick={() => {
+          onRemove();
+          onClose();
+        }}
+      >
+        <span className="b88-dropdown-option-label">{itemLabel}</span>
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
 /** A step on the canvas: a stroked card with a labelled port down each side. */
-function StepNode({ data, selected }: NodeProps<Node<StepData>>) {
+function StepNode({ id, data, selected }: NodeProps<Node<StepData>>) {
   const definition = getDefinition(data.type);
+  const connecting = useContext(ConnectingContext);
+
+  /** During a drag, mark each port as a candidate or not so CSS can show it. */
+  const compatibility = (portId: string, kind: PortKind) =>
+    connecting.active ? String(connecting.accepts(id, portId, kind)) : undefined;
+
   if (!definition) {
     return (
       <div className="rounded-lg border border-hairline bg-canvas p-4">
@@ -318,6 +792,13 @@ function StepNode({ data, selected }: NodeProps<Node<StepData>>) {
       </div>
     );
   }
+
+  const outputs = data.type === 'MEDIA_LIBRARY' && data.outputCounts
+    ? definition.outputs.filter((port) => {
+        const count = data.outputCounts?.[port.id as keyof MediaLibraryOutputCounts] ?? 0;
+        return count > 0 || connecting.isOutputConnected(id, port.id);
+      })
+    : definition.outputs;
 
   return (
     <div
@@ -327,42 +808,46 @@ function StepNode({ data, selected }: NodeProps<Node<StepData>>) {
       <p className="b88-caption">{CATEGORY_LABEL[definition.category]}</p>
       <p className="mt-1 text-base font-medium">{data.label}</p>
 
-      {definition.inputs.map((port, index) => (
-        <Handle
-          key={port.id}
-          id={port.id}
-          type="target"
-          position={Position.Left}
-          style={{ top: 48 + index * 22, width: 10, height: 10 }}
-          title={`${port.label}${port.required ? ' (required)' : ''}`}
-        />
-      ))}
-      {definition.outputs.map((port, index) => (
-        <Handle
-          key={port.id}
-          id={port.id}
-          type="source"
-          position={Position.Right}
-          style={{ top: 48 + index * 22, width: 10, height: 10 }}
-          title={port.label}
-        />
-      ))}
-
-      <div className="mt-3 flex justify-between gap-4">
-        <ul className="list-none space-y-1 p-0">
+      {/* Each port dot lives inside its own label row, so it is centred on that
+          row by layout. Positioning them by a guessed pixel offset drifts the
+          moment a title wraps or the type scale changes, which reads as dots
+          belonging to the wrong port. -16px cancels the card's padding, putting
+          the dot on the card edge. */}
+      <div className="mt-3 flex justify-between gap-6">
+        <ul className="list-none space-y-1.5 p-0">
           {definition.inputs.map((port) => (
-            <li key={port.id} className="b88-caption">
+            <li key={port.id} className="b88-caption relative">
+              <Handle
+                id={port.id}
+                type="target"
+                position={Position.Left}
+                style={{ left: -16 }}
+                data-compatible={compatibility(port.id, 'target')}
+                aria-label={`${port.label}${port.required ? ', required' : ''} input`}
+              />
               {port.label}
               {port.required ? ' *' : ''}
             </li>
           ))}
         </ul>
-        <ul className="list-none space-y-1 p-0 text-right">
-          {definition.outputs.map((port) => (
-            <li key={port.id} className="b88-caption">
-              {port.label}
+        <ul className="list-none space-y-1.5 p-0 text-right">
+          {outputs.map((port) => {
+            const count = data.outputCounts?.[port.id as keyof MediaLibraryOutputCounts];
+            return (
+            <li key={port.id} className="b88-caption relative">
+              <Handle
+                id={port.id}
+                type="source"
+                position={Position.Right}
+                style={{ right: -16 }}
+                data-compatible={compatibility(port.id, 'source')}
+                aria-label={`${port.label} output`}
+              />
+              {port.label}{typeof count === 'number' ? ` · ${count}` : ''}
             </li>
-          ))}
+            );
+          })}
+          {outputs.length === 0 && <li className="b88-caption">No ready media</li>}
         </ul>
       </div>
     </div>
@@ -371,17 +856,50 @@ function StepNode({ data, selected }: NodeProps<Node<StepData>>) {
 
 const NODE_TYPES = { step: StepNode };
 
-const toFlowNode = (node: CanvasNode): Node<StepData> => ({
+const toFlowNode = (
+  node: CanvasNode,
+  mediaFolders: WorkflowMediaFolderOption[],
+  mediaCounts: WorkflowMediaCounts,
+  mediaAssets: WorkflowMediaAssetOption[],
+): Node<StepData> => ({
   id: node.id,
   type: 'step',
   position: { x: node.positionX, y: node.positionY },
-  data: { label: node.name, type: node.type },
+  data: {
+    label: node.name,
+    type: node.type,
+    outputCounts:
+      node.type === 'MEDIA_LIBRARY'
+        ? mediaLibraryOutputCounts(node.config, mediaFolders, mediaCounts, mediaAssets)
+        : undefined,
+  },
 });
 
-const toFlowEdge = (edge: CanvasEdge): Edge => ({
+const flowEdgeToCanvas = (edge: Edge): CanvasEdge => ({
   id: edge.id,
-  source: edge.sourceNodeId,
-  sourceHandle: edge.sourcePort,
-  target: edge.targetNodeId,
-  targetHandle: edge.targetPort,
+  sourceNodeId: edge.source,
+  sourcePort: edge.sourceHandle ?? '',
+  targetNodeId: edge.target,
+  targetPort: edge.targetHandle ?? '',
 });
+
+const toFlowEdge = (
+  edge: CanvasEdge,
+  nodes: Map<string, CanvasNode>,
+  canEdit: boolean,
+): Edge => {
+  const lookup = new Map(
+    [...nodes.entries()].map(([id, node]) => [id, { name: node.name, type: node.type }]),
+  );
+  const { ariaLabel } = describeConnection(edge, lookup);
+  return {
+    id: edge.id,
+    source: edge.sourceNodeId,
+    sourceHandle: edge.sourcePort,
+    target: edge.targetNodeId,
+    targetHandle: edge.targetPort,
+    ariaLabel,
+    deletable: canEdit,
+    interactionWidth: EDGE_HIT_WIDTH,
+  };
+};

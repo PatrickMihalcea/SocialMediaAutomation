@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { localInputToUtc, nextOccurrence, toUtc, utcToLocalInput } from './time';
+import {
+  COMMON_TIMEZONES,
+  localInputToUtc,
+  nextOccurrence,
+  timezoneLabel,
+  timezoneOptions,
+  toUtc,
+  utcToLocalInput,
+} from './time';
 
 describe('timezone conversion', () => {
   it('round-trips a local wall clock through UTC', () => {
@@ -33,5 +41,33 @@ describe('timezone conversion', () => {
     expect(() => localInputToUtc('2026-09-15', 'America/New_York')).toThrow(
       'Enter a complete local date and time.',
     );
+  });
+});
+
+describe('timezone labels', () => {
+  it('prefers the curated label', () => {
+    expect(timezoneLabel('America/New_York')).toBe('Eastern Time');
+  });
+
+  it('names the locality of an uncurated zone', () => {
+    expect(timezoneLabel('America/Phoenix')).toBe('Phoenix Time');
+    expect(timezoneLabel('Europe/Zurich')).toBe('Zurich Time');
+    expect(timezoneLabel('America/Argentina/Buenos_Aires')).toBe('Buenos Aires Time');
+  });
+
+  it('falls back when there is no zone to name', () => {
+    expect(timezoneLabel('')).toBe('Workspace local time');
+  });
+});
+
+describe('timezone options', () => {
+  it('leaves the curated list alone for a curated zone', () => {
+    expect(timezoneOptions('Europe/Berlin')).toEqual(COMMON_TIMEZONES);
+  });
+
+  it('adds an uncurated zone so the select cannot silently resave as UTC', () => {
+    const options = timezoneOptions('America/Phoenix');
+    expect(options[0]).toBe('America/Phoenix');
+    expect(options).toHaveLength(COMMON_TIMEZONES.length + 1);
   });
 });

@@ -4,7 +4,7 @@ import { Badge, Button, EmptyState } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { notFound } from '@/lib/errors';
-import { formatInZone, WEEKDAY_SHORT } from '@/lib/scheduling/time';
+import { formatInZone, timezoneLabel, WEEKDAY_SHORT } from '@/lib/scheduling/time';
 import { toGraph } from '@/lib/workflows/snapshot';
 import { topoOrder } from '@/lib/workflows/graph';
 import { WorkflowCanvasLoader } from '@/components/workflow-canvas-loader';
@@ -14,6 +14,7 @@ import { WorkflowRunsChart } from '@/components/workflow-runs-chart';
 import { WorkflowRunsTable } from '@/components/workflow-runs-table';
 import { RunWorkflowButton } from '@/components/workflow-run-button';
 import { RUN_STATUS_LABEL, RUN_STATUS_TONE } from '@/lib/workflows/labels';
+import { WorkflowListItemActions, WorkflowPauseToggle } from '@/components/workflow-list';
 
 export const metadata = { title: 'Workflow' };
 
@@ -45,24 +46,76 @@ async function WorkflowDetail({
   const view = (await searchParams).view === 'steps' ? 'steps' : 'runs';
   const ctx = await requireWorkspace(slug, 'workflow:view');
 
-  const workflow = await db.workflow.findFirst({
-    where: { id: workflowId, workspaceId: ctx.workspace.id },
-    include: {
-      nodes: { orderBy: { createdAt: 'asc' } },
-      edges: true,
-      createdBy: { select: { name: true, email: true } },
-      runs: {
-        orderBy: { createdAt: 'desc' },
-        take: HISTORY,
-        include: {
-          nodeRuns: {
-            select: { nodeId: true, status: true, durationMs: true },
+  const [workflow, socialAccounts, audioAssets, mediaAssets, mediaFolders, mediaCountRows] = await Promise.all([
+    db.workflow.findFirst({
+      where: { id: workflowId, workspaceId: ctx.workspace.id },
+      include: {
+        nodes: { orderBy: { createdAt: 'asc' } },
+        edges: true,
+        createdBy: { select: { name: true, email: true } },
+        runs: {
+          orderBy: { createdAt: 'desc' },
+          take: HISTORY,
+          include: {
+            nodeRuns: {
+              select: { nodeId: true, status: true, durationMs: true },
+            },
           },
         },
       },
-    },
-  });
+    }),
+    db.socialAccount.findMany({
+      where: { workspaceId: ctx.workspace.id, status: 'ACTIVE' },
+      select: { id: true, accountName: true, accountHandle: true, platform: true },
+      orderBy: { accountName: 'asc' },
+    }),
+    db.mediaAsset.findMany({
+      where: { workspaceId: ctx.workspace.id, status: 'READY', type: 'AUDIO' },
+      select: { id: true, filename: true, folderId: true, bpm: true, beatGrid: true },
+      orderBy: { filename: 'asc' },
+    }),
+    db.mediaAsset.findMany({
+      where: {
+        workspaceId: ctx.workspace.id,
+        status: 'READY',
+        type: { in: ['IMAGE', 'VIDEO', 'AUDIO'] },
+      },
+      select: { id: true, filename: true, folderId: true, type: true },
+      orderBy: [{ type: 'asc' }, { filename: 'asc' }],
+      take: 1000,
+    }),
+    db.mediaFolder.findMany({
+      where: { workspaceId: ctx.workspace.id },
+      select: { id: true, name: true, parentId: true },
+      orderBy: { name: 'asc' },
+    }),
+    db.mediaAsset.groupBy({
+      by: ['folderId', 'type'],
+      where: {
+        workspaceId: ctx.workspace.id,
+        status: 'READY',
+        type: { in: ['IMAGE', 'VIDEO', 'AUDIO'] },
+      },
+      _count: { _all: true },
+    }),
+  ]);
   if (!workflow) throw notFound('That workflow no longer exists.');
+
+  const mediaCounts = { images: 0, videos: 0, audio: 0 };
+  const folderCounts = new Map(
+    mediaFolders.map((folder) => [
+      folder.id,
+      { images: 0, videos: 0, audio: 0 },
+    ]),
+  );
+  for (const row of mediaCountRows) {
+    const key = row.type === 'IMAGE' ? 'images' : row.type === 'VIDEO' ? 'videos' : 'audio';
+    mediaCounts[key] += row._count._all;
+    if (row.folderId) {
+      const counts = folderCounts.get(row.folderId);
+      if (counts) counts[key] += row._count._all;
+    }
+  }
 
   // Lanes follow execution order, so the swimlanes read top-to-bottom the way
   // the pipeline actually runs rather than in whatever order rows were created.
@@ -107,9 +160,40 @@ async function WorkflowDetail({
           )}
         </div>
         <div className="flex items-center gap-3">
+          <Button href={`/w/${slug}/workflows/guide`} variant="secondary">Guide</Button>
+          {workflow.archivedAt
+            ? <Badge tone="neutral">Archived</Badge>
+            : !workflow.enabled && (
+              <>
+                <Badge tone="neutral">Schedule paused</Badge>
+                {ctx.can('workflow:edit') && (
+                  <WorkflowPauseToggle
+                    slug={slug}
+                    workflowId={workflow.id}
+                    enabled={workflow.enabled}
+                  />
+                )}
+              </>
+            )}
           {last && <Badge tone={RUN_STATUS_TONE[last.status]}>{RUN_STATUS_LABEL[last.status]}</Badge>}
+          {ctx.can('workflow:edit') && (
+            <WorkflowListItemActions
+              slug={slug}
+              workflow={{
+                id: workflow.id,
+                name: workflow.name,
+                description: workflow.description,
+                enabled: workflow.enabled,
+                archived: Boolean(workflow.archivedAt),
+              }}
+            />
+          )}
           {ctx.can('workflow:run') && (
-            <RunWorkflowButton slug={slug} workflowId={workflow.id} disabled={workflow.nodes.length === 0} />
+            <RunWorkflowButton
+              slug={slug}
+              workflowId={workflow.id}
+              disabled={workflow.nodes.length === 0 || Boolean(workflow.archivedAt)}
+            />
           )}
         </div>
       </div>
@@ -125,7 +209,21 @@ async function WorkflowDetail({
             <WorkflowCanvasLoader
               slug={slug}
               workflowId={workflow.id}
-              canEdit={ctx.can('workflow:edit')}
+              canEdit={ctx.can('workflow:edit') && !workflow.archivedAt}
+              accounts={socialAccounts}
+              audioAssets={audioAssets.map((asset) => ({
+                id: asset.id,
+                filename: asset.filename,
+                folderId: asset.folderId,
+                bpm: asset.bpm,
+                hasBeatGrid: asset.beatGrid.length > 1,
+              }))}
+              mediaAssets={mediaAssets}
+              mediaFolders={mediaFolders.map((folder) => ({
+                ...folder,
+                counts: folderCounts.get(folder.id)!,
+              }))}
+              mediaCounts={mediaCounts}
               initialNodes={workflow.nodes.map((node) => ({
                 id: node.id,
                 type: node.type,
@@ -145,17 +243,17 @@ async function WorkflowDetail({
           </div>
 
           <div className="mt-10 grid gap-10 lg:grid-cols-2">
-            <WorkflowDetails workflow={workflow} lastRun={last} />
-            {ctx.can('workflow:edit') && (
+            <WorkflowDetails workflow={workflow} timezone={ctx.workspace.timezone} lastRun={last} />
+            {ctx.can('workflow:edit') && !workflow.archivedAt && (
               <WorkflowSchedule
                 slug={slug}
+                timezone={ctx.workspace.timezone}
                 workflow={{
                   id: workflow.id,
                   scheduleEnabled: workflow.scheduleEnabled,
                   scheduleWeekdays: workflow.scheduleWeekdays,
                   scheduleHour: workflow.scheduleHour,
                   scheduleMinute: workflow.scheduleMinute,
-                  timezone: workflow.timezone,
                 }}
               />
             )}
@@ -174,7 +272,7 @@ async function WorkflowDetail({
                 <WorkflowRunsChart
                   slug={slug}
                   workflowId={workflow.id}
-                  timezone={workflow.timezone}
+                  timezone={ctx.workspace.timezone}
                   lanes={lanes}
                   runs={chronological.map((run) => ({
                     id: run.id,
@@ -193,7 +291,7 @@ async function WorkflowDetail({
                 <WorkflowRunsTable
                   slug={slug}
                   workflowId={workflow.id}
-                  timezone={workflow.timezone}
+                  timezone={ctx.workspace.timezone}
                   runs={workflow.runs.map((run) => ({
                     id: run.id,
                     status: run.status,
@@ -210,12 +308,13 @@ async function WorkflowDetail({
           </div>
 
           <aside className="space-y-8">
-            <WorkflowDetails workflow={workflow} lastRun={last} />
+            <WorkflowDetails workflow={workflow} timezone={ctx.workspace.timezone} lastRun={last} />
 
             <section>
               <p className="b88-eyebrow">Schedule</p>
-              <p className="b88-body-sm mt-3">{describeSchedule(workflow)}</p>
-              <p className="b88-caption mt-3">Scheduled runs need nobody signed in.</p>
+              <p className="b88-body-sm mt-3">
+                {describeSchedule(workflow, ctx.workspace.timezone)}
+              </p>
             </section>
 
             {ctx.can('workflow:edit') && (
@@ -232,15 +331,18 @@ async function WorkflowDetail({
 
 function WorkflowDetails({
   workflow,
+  timezone,
   lastRun,
 }: {
   workflow: {
     id: string;
-    timezone: string;
     nodes: unknown[];
     edges: unknown[];
     createdBy: { name: string | null; email: string } | null;
   };
+  // The workspace zone, never the workflow's mirrored column: a row written
+  // before the zone moved would otherwise report the old one.
+  timezone: string;
   lastRun?: { startedAt: Date | null };
 }) {
   return (
@@ -257,32 +359,32 @@ function WorkflowDetails({
         <Detail
           label="Last run"
           value={
-            lastRun?.startedAt
-              ? formatInZone(lastRun.startedAt, workflow.timezone, 'd LLL HH:mm')
-              : 'Never'
+            lastRun?.startedAt ? formatInZone(lastRun.startedAt, timezone, 'd LLL HH:mm') : 'Never'
           }
         />
-        <Detail label="Timezone" value={workflow.timezone} />
+        <Detail label="Timezone" value={timezoneLabel(timezone)} />
       </dl>
     </section>
   );
 }
 
-function describeSchedule(workflow: {
-  scheduleEnabled: boolean;
-  scheduleWeekdays: number[];
-  scheduleHour: number;
-  scheduleMinute: number;
-  timezone: string;
-  nextRunAt: Date | null;
-}): string {
+function describeSchedule(
+  workflow: {
+    scheduleEnabled: boolean;
+    scheduleWeekdays: number[];
+    scheduleHour: number;
+    scheduleMinute: number;
+    nextRunAt: Date | null;
+  },
+  timezone: string,
+): string {
   if (!workflow.scheduleEnabled || workflow.scheduleWeekdays.length === 0) {
     return 'Runs manually only.';
   }
   const days = workflow.scheduleWeekdays.map((day) => WEEKDAY_SHORT[day]).join(', ');
   const at = `${String(workflow.scheduleHour).padStart(2, '0')}:${String(workflow.scheduleMinute).padStart(2, '0')}`;
   const next = workflow.nextRunAt
-    ? ` Next ${formatInZone(workflow.nextRunAt, workflow.timezone, 'd LLL HH:mm')}.`
+    ? ` Next ${formatInZone(workflow.nextRunAt, timezone, 'd LLL HH:mm')}.`
     : '';
   return `${days} at ${at}.${next}`;
 }

@@ -3,7 +3,7 @@ import { Platform, PostStatus } from '@prisma/client';
 import { Button } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
-import { formatInZone, timezoneLabel } from '@/lib/scheduling/time';
+import { formatInZone } from '@/lib/scheduling/time';
 import { PLATFORM_LABELS } from '@/lib/social/registry';
 import { CalendarPagePreview } from '@/components/page-previews';
 import { CalendarShell, type CalendarPost } from '@/components/calendar-shell';
@@ -100,8 +100,7 @@ async function CalendarData({
 
   return (
     <div className="mt-6 min-h-[680px]">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <p className="b88-caption">Calendar · {timezoneLabel(ctx.workspace.timezone)}</p>
+      <div className="flex justify-end">
         <Button href={`/w/${slug}/compose`}>Create post</Button>
       </div>
       <CalendarShell

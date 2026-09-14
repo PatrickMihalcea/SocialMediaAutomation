@@ -1,5 +1,5 @@
 import 'server-only';
-import { PostStatus, Prisma, type WorkspaceRole } from '@prisma/client';
+import { PostStatus, Prisma, WorkflowRunTrigger, type WorkspaceRole } from '@prisma/client';
 import { db } from '@/lib/db';
 import { generateObject } from '@/lib/ai';
 import { buildSystemPrompt } from '@/lib/ai/brand-voice';
@@ -7,6 +7,9 @@ import { assistantReplySchema, contentIdeasSchema, type AssistantReply } from '@
 import { can } from '@/lib/auth/rbac';
 import { forbidden, invalid, notFound } from '@/lib/errors';
 import { assertPostNotLive, savePost } from '@/lib/posts/service';
+import { workflowAssistantSkill, validateProposedGraph } from '@/lib/workflows/assistant-graph';
+import { createWorkflowFromProposal, updateWorkflowFromProposal } from '@/lib/workflows/create-from-proposal';
+import { startWorkflowRun } from '@/lib/workflows/engine';
 
 const PROPOSAL_TTL_MS = 30 * 60 * 1000;
 
@@ -52,14 +55,15 @@ export async function sendAssistantMessage(input: {
     extra: [
       'You are a workspace assistant.',
       'Actions must be proposed using the structured action field. Never claim an action has already happened.',
-      'You may propose creating up to ten drafts, scheduling existing posts, assigning a post to an existing campaign, attaching existing ready media, updating existing post copy, or repurposing an existing post into a new draft.',
+      'You may propose creating up to ten drafts, scheduling existing posts, assigning a post to an existing campaign, attaching existing ready media, updating existing post copy, repurposing an existing post into a new draft, creating a workflow, editing any part of an existing workflow graph, or running an existing workflow.',
       'Use only entity ids and display names from the workspace context below.',
-      'Campaign creation, media generation or search, deletion, and publishing are not available here.',
+      'Campaign creation, inline media generation, deletion, and direct publishing are not available here. A confirmed workflow run may execute its configured steps, including a Publish step, so say that clearly in the proposal.',
       'When asked for an unavailable action, say that plainly and direct the user to the relevant workspace page. Never imply an unavailable action will run.',
+      workflowAssistantSkill(),
       await assistantWorkspaceContext(input.workspaceId),
     ].join(' '),
   });
-  if (/\bideas?\b/i.test(content)) {
+  if (/\bideas?\b/i.test(content) && !/\bworkflow\b/i.test(content)) {
     const ideas = await generateObject({
       workspaceId: input.workspaceId,
       userId: input.userId,
@@ -156,14 +160,15 @@ async function storeReply(input: {
 }
 
 export function assistantCapabilityReply(content: string): string | null {
-  if (/\b(publish|delete|remove)\b/i.test(content)) {
+  if (/\b(publish|delete|remove)\b/i.test(content) && !/\bworkflow\b/i.test(content)) {
     return 'I cannot publish or delete posts from this assistant. Open the post in Composer, where Bridge88 checks your current permission and asks for the required confirmation.';
   }
   if (
     /\b(generate|create|find|search|make)\b.*\b(image|images|media|asset|video|clips?)\b/i.test(content)
     && !/\battach\b/i.test(content)
+    && !/\bworkflow\b/i.test(content)
   ) {
-    return 'Media search, image generation, and video workflows are not connected to this assistant yet. Open Media to find an existing filename you can ask me to attach, or open AI studio to start a simulated media job.';
+    return 'Media search, image generation, and video jobs are not connected to this assistant yet. Open Media to find an existing filename you can ask me to attach, or open AI studio to start a simulated media job. To automate that pipeline, ask me to create a workflow.';
   }
   if (/\b(create|make|start)\b.*\bcampaign\b/i.test(content)) {
     return 'Campaign creation is not connected to this assistant yet. Open Campaigns to create the campaign, then use Composer to add its posts.';
@@ -223,9 +228,13 @@ export async function confirmProposal(input: {
   if (!proposal.success || !proposal.data) throw invalid('That proposal is no longer valid.');
   const required = proposal.data.kind === 'schedule_posts'
     ? 'post:schedule'
+    : proposal.data.kind === 'run_workflow'
+      ? 'workflow:run'
     : proposal.data.kind === 'create_drafts' || proposal.data.kind === 'repurpose_content'
       ? 'post:create'
-      : 'post:update';
+      : proposal.data.kind === 'create_workflow' || proposal.data.kind === 'update_workflow'
+        ? 'workflow:edit'
+        : 'post:update';
   if (!can(input.role, required)) throw forbidden('Your current role cannot confirm this proposal.');
 
   const claimed = await db.aiMessage.updateMany({
@@ -237,9 +246,25 @@ export async function confirmProposal(input: {
     return { status: current?.proposalStatus ?? 'UNKNOWN' };
   }
   try {
-    await executeProposal(input.workspaceId, input.userId, proposal.data);
-    await db.aiMessage.update({ where: { id: message.id }, data: { proposalStatus: 'COMPLETED' } });
-    return { status: 'COMPLETED' as const };
+    const executed = await executeProposal(input.workspaceId, input.userId, proposal.data);
+    await db.aiMessage.update({
+      where: { id: message.id },
+      data: {
+        proposalStatus: 'COMPLETED',
+        proposal: executed?.workflowId
+          ? ({
+              ...proposal.data,
+              workflowId: executed.workflowId,
+              ...(executed.runId ? { runId: executed.runId } : {}),
+            } as unknown as Prisma.InputJsonValue)
+          : undefined,
+      },
+    });
+    return {
+      status: 'COMPLETED' as const,
+      workflowId: executed?.workflowId,
+      runId: executed?.runId,
+    };
   } catch (error) {
     await db.aiMessage.update({ where: { id: message.id }, data: { proposalStatus: 'PENDING' } });
     throw error;
@@ -247,6 +272,46 @@ export async function confirmProposal(input: {
 }
 
 export async function executeProposal(workspaceId: string, userId: string, proposal: NonNullable<AssistantReply['action']>) {
+  if (proposal.kind === 'run_workflow') {
+    const runId = await startWorkflowRun({
+      workflowId: proposal.workflowId,
+      workspaceId,
+      userId,
+      trigger: WorkflowRunTrigger.MANUAL,
+    });
+    return { workflowId: proposal.workflowId, runId };
+  }
+  if (proposal.kind === 'create_workflow') {
+    const created = await createWorkflowFromProposal({
+      workspaceId,
+      userId,
+      name: proposal.name,
+      description: proposal.description,
+      scheduleEnabled: proposal.scheduleEnabled,
+      scheduleWeekdays: proposal.scheduleWeekdays,
+      scheduleHour: proposal.scheduleHour,
+      scheduleMinute: proposal.scheduleMinute,
+      nodes: proposal.nodes,
+      edges: proposal.edges,
+    });
+    return { workflowId: created.id };
+  }
+  if (proposal.kind === 'update_workflow') {
+    const updated = await updateWorkflowFromProposal({
+      workspaceId,
+      userId,
+      workflowId: proposal.workflowId,
+      name: proposal.name,
+      description: proposal.description,
+      scheduleEnabled: proposal.scheduleEnabled,
+      scheduleWeekdays: proposal.scheduleWeekdays,
+      scheduleHour: proposal.scheduleHour,
+      scheduleMinute: proposal.scheduleMinute,
+      nodeUpdates: proposal.nodeUpdates,
+      graphEdits: proposal.graphEdits,
+    });
+    return { workflowId: updated.id };
+  }
   if (proposal.kind === 'create_drafts') {
     const accounts = await db.socialAccount.findMany({
       where: { workspaceId, status: 'ACTIVE' },
@@ -436,7 +501,7 @@ function assertUnique(values: string[], message: string) {
 }
 
 async function assistantWorkspaceContext(workspaceId: string): Promise<string> {
-  const [posts, campaigns, media] = await Promise.all([
+  const [posts, campaigns, media, folders, workflows, channels] = await Promise.all([
     db.post.findMany({
       where: { workspaceId },
       orderBy: { updatedAt: 'desc' },
@@ -459,7 +524,51 @@ async function assistantWorkspaceContext(workspaceId: string): Promise<string> {
       where: { workspaceId, status: 'READY' },
       orderBy: { updatedAt: 'desc' },
       take: 50,
-      select: { id: true, filename: true, type: true },
+      select: { id: true, filename: true, type: true, folderId: true },
+    }),
+    db.mediaFolder.findMany({
+      where: { workspaceId },
+      orderBy: { name: 'asc' },
+      take: 100,
+      select: { id: true, name: true, parentId: true },
+    }),
+    db.workflow.findMany({
+      where: { workspaceId, archivedAt: null },
+      orderBy: { updatedAt: 'desc' },
+      take: 20,
+      select: {
+        id: true,
+        name: true,
+        scheduleEnabled: true,
+        scheduleWeekdays: true,
+        scheduleHour: true,
+        scheduleMinute: true,
+        nodes: {
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            type: true,
+            name: true,
+            config: true,
+            positionX: true,
+            positionY: true,
+          },
+        },
+        edges: {
+          select: {
+            id: true,
+            sourceNodeId: true,
+            sourcePort: true,
+            targetNodeId: true,
+            targetPort: true,
+          },
+        },
+      },
+    }),
+    db.socialAccount.findMany({
+      where: { workspaceId, status: 'ACTIVE' },
+      orderBy: { accountName: 'asc' },
+      select: { id: true, platform: true, accountName: true, accountHandle: true },
     }),
   ]);
   return `WORKSPACE_CONTEXT_BEGIN${JSON.stringify({
@@ -472,6 +581,9 @@ async function assistantWorkspaceContext(workspaceId: string): Promise<string> {
     })),
     campaigns,
     media,
+    folders,
+    workflows,
+    channels,
   })}WORKSPACE_CONTEXT_END`;
 }
 
@@ -480,6 +592,43 @@ async function hydrateProposal(
   proposal: NonNullable<AssistantReply['action']>,
 ): Promise<NonNullable<AssistantReply['action']>> {
   if (proposal.kind === 'create_drafts') return proposal;
+  if (proposal.kind === 'create_workflow') {
+    try {
+      const graph = validateProposedGraph(proposal.nodes, proposal.edges);
+      if (proposal.scheduleEnabled && proposal.scheduleWeekdays.length === 0) {
+        throw new Error('Choose at least one weekday before enabling the workflow schedule.');
+      }
+      const unattendedPublish = graph.nodes.find(
+        (node) =>
+          node.type === 'PUBLISH'
+          && (node.config as { requireApproval?: boolean }).requireApproval === false,
+      );
+      if (proposal.scheduleEnabled && unattendedPublish) {
+        throw new Error(
+          `"${unattendedPublish.name}" must require approval before this workflow can run on a schedule.`,
+        );
+      }
+      return { ...proposal, nodes: graph.nodes, edges: graph.edges };
+    } catch (error) {
+      throw invalid(error instanceof Error ? error.message : 'That workflow graph is not valid.');
+    }
+  }
+  if (proposal.kind === 'update_workflow') {
+    const workflow = await db.workflow.findFirst({
+      where: { id: proposal.workflowId, workspaceId, archivedAt: null },
+      select: { id: true, name: true },
+    });
+    if (!workflow) throw invalid('The assistant selected a workflow that is not available in this workspace.');
+    return { ...proposal, workflowName: workflow.name };
+  }
+  if (proposal.kind === 'run_workflow') {
+    const workflow = await db.workflow.findFirst({
+      where: { id: proposal.workflowId, workspaceId, archivedAt: null },
+      select: { id: true, name: true },
+    });
+    if (!workflow) throw invalid('The assistant selected a workflow that is not available in this workspace.');
+    return { ...proposal, workflowName: workflow.name };
+  }
   if (proposal.kind === 'schedule_posts') {
     const posts = await Promise.all(proposal.posts.map(async (target) => {
       const post = await db.post.findFirst({

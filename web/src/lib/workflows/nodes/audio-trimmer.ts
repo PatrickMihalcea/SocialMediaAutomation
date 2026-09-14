@@ -1,22 +1,18 @@
 import 'server-only';
-import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { promisify } from 'node:util';
 import { MediaStatus, MediaType } from '@prisma/client';
 import { db } from '@/lib/db';
-import { env } from '@/lib/env';
 import { mediaKey, storage } from '@/lib/storage';
+import { enqueue } from '@/lib/queue';
 import { PermanentJobError } from '@/lib/queue/runner';
 import { hasFfmpeg } from '@/lib/media/process';
+import { renderAudioTrim, renderVideoEdit } from '@/lib/media/ffmpeg-edit';
 import { resolveBeatGrid } from '@/lib/audio/analyse';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
 
-const run_ = promisify(execFile);
-
 interface Config {
+  mode: 'range' | 'bars';
   startSeconds: number | null;
+  endSeconds: number | null;
   bars: number;
   snapToDownbeat: boolean;
 }
@@ -31,90 +27,111 @@ interface Config {
  */
 export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>> {
   const config = ctx.config as Config;
-  const audioId = typeof ctx.inputs.audio === 'string' ? ctx.inputs.audio : null;
-  if (!audioId) throw new PermanentJobError('No track reached this step.');
+  const mediaId = typeof ctx.inputs.audio === 'string' ? ctx.inputs.audio : null;
+  if (!mediaId) throw new PermanentJobError('No audio or video reached this step.');
   if (!(await hasFfmpeg())) {
-    throw new PermanentJobError('Trimming audio needs ffmpeg, which is not installed here.');
+    throw new PermanentJobError('Trimming media needs ffmpeg, which is not installed here.');
   }
 
   const source = await db.mediaAsset.findFirst({
-    where: { id: audioId, workspaceId: ctx.workspaceId, type: MediaType.AUDIO },
+    where: {
+      id: mediaId,
+      workspaceId: ctx.workspaceId,
+      type: { in: [MediaType.AUDIO, MediaType.VIDEO] },
+    },
   });
-  if (!source) throw new PermanentJobError('That track is no longer in the media library.');
+  if (!source) throw new PermanentJobError('That audio or video is no longer in the media library.');
 
-  const grid = await resolveBeatGrid(source);
-  const beatsPerBar = grid.beatsPerBar || 4;
-  const wanted = config.bars * beatsPerBar;
+  let grid: Awaited<ReturnType<typeof resolveBeatGrid>> | null = null;
+  let startSeconds = config.startSeconds ?? 0;
+  let endSeconds = config.endSeconds ?? source.duration ?? 0;
+  let startIndex = 0;
+  let endIndex = 0;
 
-  const startIndex = chooseStart(grid, config);
-  const endIndex = Math.min(startIndex + wanted, grid.beats.length - 1);
-  const startSeconds = grid.beats[startIndex];
-  const endSeconds = grid.beats[endIndex];
+  if (config.mode === 'bars') {
+    if (source.type !== MediaType.AUDIO) {
+      throw new PermanentJobError('Musical bars can only trim audio. Use Time range for video.');
+    }
+    grid = await resolveBeatGrid(source);
+    const beatsPerBar = grid.beatsPerBar || 4;
+    startIndex = chooseStart(grid, config);
+    endIndex = Math.min(startIndex + config.bars * beatsPerBar, grid.beats.length - 1);
+    startSeconds = grid.beats[startIndex];
+    endSeconds = grid.beats[endIndex];
+  }
   if (!(endSeconds > startSeconds)) {
-    throw new PermanentJobError('That track is too short for the number of bars requested.');
+    throw new PermanentJobError('The trim end must be after its start and inside the media duration.');
+  }
+  if (source.duration != null && endSeconds > source.duration + 0.01) {
+    throw new PermanentJobError('The trim end is beyond the media duration.');
   }
 
-  const dir = await mkdtemp(path.join(tmpdir(), 'b88-trim-'));
-  try {
-    const input = path.join(dir, 'in.bin');
-    const output = path.join(dir, 'out.m4a');
-    await writeFile(input, await storage().get(source.storageKey));
+  const sourceBytes = await storage().get(source.storageKey);
+  const video = source.type === MediaType.VIDEO;
+  const data = video
+    ? await renderVideoEdit(sourceBytes, source.filename, { startSeconds, endSeconds })
+    : await renderAudioTrim(sourceBytes, startSeconds, endSeconds);
+  const extension = video ? 'mp4' : 'm4a';
+  const mimeType = video ? 'video/mp4' : 'audio/mp4';
+  const filename = `${source.filename.replace(/\.[^.]+$/, '')}-trimmed.${extension}`;
+  const key = mediaKey(ctx.workspaceId, filename, 'derived');
+  await storage().put(key, data, mimeType);
 
-    await run_(
-      'ffmpeg',
-      [
-        '-hide_banner', '-nostdin', '-v', 'error', '-y',
-        '-i', input,
-        // Filter-level trimming rather than an input -ss: seeking an mp3 before
-        // the decoder depends on how the build handles encoder-delay side data.
-        '-af', `atrim=start=${startSeconds.toFixed(6)}:end=${endSeconds.toFixed(6)},asetpts=PTS-STARTPTS`,
-        '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
-        '-fflags', '+bitexact', '-flags', '+bitexact', '-map_metadata', '-1',
-        output,
-      ],
-      { timeout: env.RENDER_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024 },
+  const sourceBeats = grid?.beats ?? source.beatGrid;
+  const beatPositions = sourceBeats
+    .map((time, index) => ({ time, index }))
+    .filter(({ time }) => time >= startSeconds && time <= endSeconds);
+  const rebased = beatPositions.map(({ time }) => Number((time - startSeconds).toFixed(6)));
+  const sourceDownbeats = grid?.downbeats ?? source.downbeats;
+
+  const asset = await db.mediaAsset.create({
+    data: {
+      workspaceId: ctx.workspaceId,
+      uploadedById: ctx.userId,
+      filename,
+      mimeType,
+      type: source.type,
+      size: data.byteLength,
+      width: video ? source.width : null,
+      height: video ? source.height : null,
+      duration: endSeconds - startSeconds,
+      storageKey: key,
+      status: MediaStatus.READY,
+      derivedFromId: source.id,
+      derivationPreset: JSON.stringify({
+        kind: 'media-trim',
+        mode: config.mode,
+        startSeconds,
+        endSeconds,
+        ...(config.mode === 'bars' ? { bars: config.bars } : {}),
+      }),
+      bpm: video ? null : (grid?.bpm ?? source.bpm),
+      beatGrid: video ? [] : rebased,
+      downbeats: video
+        ? []
+        : sourceDownbeats
+            .filter((time) => time >= startSeconds && time <= endSeconds)
+            .map((time) => Number((time - startSeconds).toFixed(6))),
+      beatStrength: video
+        ? []
+        : beatPositions.map(({ index }) => (grid?.beatStrength ?? source.beatStrength)[index] ?? 0),
+      beatsPerBar: video ? null : (grid?.beatsPerBar ?? source.beatsPerBar),
+      beatAnalyzer: video ? null : (grid?.analyzer ?? source.beatAnalyzer),
+      beatGridVersion: video ? null : (grid?.version ?? source.beatGridVersion),
+      analysedAt: video ? null : new Date(),
+    },
+    select: { id: true },
+  });
+
+  await ctx.emitAssets('audio', [asset.id]);
+  if (video) {
+    await enqueue(
+      'process-media',
+      { mediaAssetId: asset.id },
+      { workspaceId: ctx.workspaceId, dedupeKey: `process-media:${asset.id}` },
     );
-
-    const data = await readFile(output);
-    const filename = `${source.filename.replace(/\.[^.]+$/, '')}-${config.bars}bars.m4a`;
-    const key = mediaKey(ctx.workspaceId, filename, 'derived');
-    await storage().put(key, data, 'audio/mp4');
-
-    const rebased = grid.beats
-      .slice(startIndex, endIndex + 1)
-      .map((t) => Number((t - startSeconds).toFixed(6)));
-    const rebasedDownbeats = rebased.filter((_, i) => i % beatsPerBar === 0);
-
-    const asset = await db.mediaAsset.create({
-      data: {
-        workspaceId: ctx.workspaceId,
-        uploadedById: ctx.userId,
-        filename,
-        mimeType: 'audio/mp4',
-        type: MediaType.AUDIO,
-        size: data.byteLength,
-        duration: endSeconds - startSeconds,
-        storageKey: key,
-        status: MediaStatus.READY,
-        derivedFromId: source.id,
-        derivationPreset: JSON.stringify({ kind: 'audio-trim', startSeconds, bars: config.bars }),
-        bpm: grid.bpm,
-        beatGrid: rebased,
-        downbeats: rebasedDownbeats,
-        beatStrength: grid.beatStrength.slice(startIndex, endIndex + 1),
-        beatsPerBar,
-        beatAnalyzer: grid.analyzer,
-        beatGridVersion: grid.version,
-        analysedAt: new Date(),
-      },
-      select: { id: true },
-    });
-
-    await ctx.emitAssets('audio', [asset.id]);
-    return { audio: asset.id, startSeconds, bars: config.bars };
-  } finally {
-    await rm(dir, { recursive: true, force: true });
   }
+  return { audio: asset.id, startSeconds, endSeconds, mode: config.mode };
 }
 
 function chooseStart(

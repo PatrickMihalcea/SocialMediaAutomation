@@ -1,5 +1,6 @@
 'use server';
 
+import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { Prisma, WorkflowRunTrigger } from '@prisma/client';
@@ -7,8 +8,14 @@ import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { audit } from '@/lib/audit';
 import { conflict, invalid, notFound } from '@/lib/errors';
-import { getDefinition, isNodeType, parseConfig } from '@/lib/workflows/definitions';
-import { checkCompatible } from '@/lib/workflows/ports';
+import {
+  getDefinition,
+  isCreatableNodeType,
+  nodeSaveConfigIssue,
+  parseConfig,
+  zodValidationMessage,
+} from '@/lib/workflows/definitions';
+import { checkAddedEdge } from '@/lib/workflows/port-resolution';
 import { reaches } from '@/lib/workflows/graph';
 import {
   cancelWorkflowRun,
@@ -16,6 +23,8 @@ import {
   startWorkflowRun,
 } from '@/lib/workflows/engine';
 import { computeNextRun } from '@/lib/workflows/schedule';
+import { selectItems } from '@/lib/workflows/select-items';
+import { storage } from '@/lib/storage';
 
 function refresh(slug: string, workflowId?: string) {
   revalidatePath(`/w/${slug}/workflows`);
@@ -60,7 +69,9 @@ const scheduleSchema = z.object({
   scheduleWeekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
   scheduleHour: z.number().int().min(0).max(23).optional(),
   scheduleMinute: z.number().int().min(0).max(59).optional(),
-  timezone: z.string().min(1).max(100).optional(),
+  // No timezone: it belongs to the workspace, and a workflow that could pick
+  // its own would run at a wall-clock time the rest of the workspace disagrees
+  // with. Workspace settings is the one place it changes.
 });
 
 export async function updateWorkflowAction(
@@ -76,14 +87,17 @@ export async function updateWorkflowAction(
   });
   if (!existing) throw notFound('That workflow no longer exists.');
 
-  const merged = { ...existing, ...parsed };
+  const merged = { ...existing, ...parsed, timezone: ctx.workspace.timezone };
   const updated = await db.workflow.update({
     where: { id: workflowId },
     data: {
       ...parsed,
+      // Re-asserted so a row stored before the workspace moved zones is brought
+      // back in line by the next save.
+      timezone: ctx.workspace.timezone,
       // Recomputed on every save so a schedule change takes effect at the next
       // tick rather than at the slot the old settings had already booked.
-      nextRunAt: computeNextRun(merged),
+      nextRunAt: merged.enabled && !merged.archivedAt ? computeNextRun(merged) : null,
     },
     select: { id: true, name: true, nextRunAt: true },
   });
@@ -94,10 +108,19 @@ export async function updateWorkflowAction(
 
 export async function deleteWorkflowAction(slug: string, workflowId: string) {
   const ctx = await requireWorkspace(slug, 'workflow:edit');
-  const deleted = await db.workflow.deleteMany({
+  const workflow = await db.workflow.findFirst({
     where: { id: workflowId, workspaceId: ctx.workspace.id },
+    select: { id: true, archivedAt: true },
   });
-  if (!deleted.count) throw notFound('That workflow no longer exists.');
+  if (!workflow) throw notFound('That workflow no longer exists.');
+  if (!workflow.archivedAt) throw invalid('Archive this workflow before deleting it permanently.');
+
+  const activeRuns = await db.workflowRun.count({
+    where: { workflowId, workspaceId: ctx.workspace.id, status: { in: ['QUEUED', 'RUNNING'] } },
+  });
+  if (activeRuns) throw conflict('Wait for the active run to finish before deleting this workflow.');
+
+  await db.workflow.delete({ where: { id: workflowId } });
 
   await audit({
     workspaceId: ctx.workspace.id,
@@ -109,6 +132,362 @@ export async function deleteWorkflowAction(slug: string, workflowId: string) {
   refresh(slug);
 }
 
+export async function duplicateWorkflowAction(slug: string, workflowId: string) {
+  const ctx = await requireWorkspace(slug, 'workflow:edit');
+  const source = await db.workflow.findFirst({
+    where: { id: workflowId, workspaceId: ctx.workspace.id },
+    include: { nodes: true, edges: true },
+  });
+  if (!source) throw notFound('That workflow no longer exists.');
+
+  const copy = await db.$transaction(async (tx) => {
+    const workflow = await tx.workflow.create({
+      data: {
+        workspaceId: ctx.workspace.id,
+        createdById: ctx.user.id,
+        name: `${source.name.slice(0, 115)} copy`,
+        description: source.description,
+        viewport: source.viewport as Prisma.InputJsonValue,
+        enabled: false,
+        scheduleEnabled: false,
+        scheduleWeekdays: source.scheduleWeekdays,
+        scheduleHour: source.scheduleHour,
+        scheduleMinute: source.scheduleMinute,
+        timezone: ctx.workspace.timezone,
+        nextRunAt: null,
+      },
+      select: { id: true, name: true },
+    });
+
+    const nodeIds = new Map(source.nodes.map((node) => [node.id, randomUUID()]));
+    if (source.nodes.length) {
+      await tx.workflowNode.createMany({
+        data: source.nodes.map((node) => ({
+          id: nodeIds.get(node.id)!,
+          workflowId: workflow.id,
+          workspaceId: ctx.workspace.id,
+          type: node.type,
+          name: node.name,
+          config: node.config as Prisma.InputJsonValue,
+          positionX: node.positionX,
+          positionY: node.positionY,
+          version: node.version,
+        })),
+      });
+    }
+    if (source.edges.length) {
+      await tx.workflowEdge.createMany({
+        data: source.edges.map((edge) => ({
+          workflowId: workflow.id,
+          workspaceId: ctx.workspace.id,
+          sourceNodeId: nodeIds.get(edge.sourceNodeId)!,
+          sourcePort: edge.sourcePort,
+          targetNodeId: nodeIds.get(edge.targetNodeId)!,
+          targetPort: edge.targetPort,
+        })),
+      });
+    }
+    return workflow;
+  });
+
+  await audit({
+    workspaceId: ctx.workspace.id,
+    userId: ctx.user.id,
+    action: 'workflow.duplicated',
+    entityType: 'workflow',
+    entityId: copy.id,
+    metadata: { sourceWorkflowId: source.id, name: copy.name },
+  });
+  refresh(slug);
+  return copy;
+}
+
+export async function setWorkflowArchivedAction(
+  slug: string,
+  workflowId: string,
+  archived: boolean,
+) {
+  const ctx = await requireWorkspace(slug, 'workflow:edit');
+  const existing = await db.workflow.findFirst({
+    where: { id: workflowId, workspaceId: ctx.workspace.id },
+    select: { id: true },
+  });
+  if (!existing) throw notFound('That workflow no longer exists.');
+
+  const updated = await db.workflow.update({
+    where: { id: workflowId },
+    data: {
+      archivedAt: archived ? new Date() : null,
+      // Restoring is intentionally manual: an archived schedule must never
+      // silently resume unattended work.
+      enabled: false,
+      scheduleEnabled: false,
+      nextRunAt: null,
+    },
+    select: { id: true, archivedAt: true },
+  });
+  await audit({
+    workspaceId: ctx.workspace.id,
+    userId: ctx.user.id,
+    action: archived ? 'workflow.archived' : 'workflow.restored',
+    entityType: 'workflow',
+    entityId: workflowId,
+  });
+  refresh(slug, workflowId);
+  return updated;
+}
+
+export type WorkflowTrimPreview =
+  | {
+      state: 'ready';
+      asset: {
+        id: string;
+        type: 'AUDIO' | 'VIDEO';
+        filename: string;
+        duration: number;
+        url: string;
+        posterUrl: string | null;
+      };
+    }
+  | { state: 'unavailable'; reason: string };
+
+/**
+ * Resolves only a deterministic design-time source. Random or generated values
+ * deliberately do not pretend to be the media a future run will receive.
+ */
+export async function getWorkflowTrimPreviewAction(
+  slug: string,
+  nodeId: string,
+): Promise<WorkflowTrimPreview> {
+  const ctx = await requireWorkspace(slug, 'workflow:view');
+  const target = await db.workflowNode.findFirst({
+    where: { id: nodeId, workspaceId: ctx.workspace.id, type: 'AUDIO_TRIMMER' },
+    select: { workflowId: true },
+  });
+  if (!target) throw notFound('That Trimmer step no longer exists.');
+
+  const workflow = await db.workflow.findFirst({
+    where: { id: target.workflowId, workspaceId: ctx.workspace.id },
+    select: {
+      nodes: { select: { id: true, type: true, config: true } },
+      edges: {
+        select: {
+          sourceNodeId: true,
+          sourcePort: true,
+          targetNodeId: true,
+          targetPort: true,
+        },
+      },
+    },
+  });
+  if (!workflow) throw notFound('That workflow no longer exists.');
+
+  const byId = new Map(workflow.nodes.map((node) => [node.id, node]));
+  const incoming = workflow.edges.find(
+    (edge) => edge.targetNodeId === nodeId && edge.targetPort === 'audio',
+  );
+  if (!incoming) {
+    return { state: 'unavailable', reason: 'Connect a specific audio or video source to preview it.' };
+  }
+
+  const scalarId = await resolvePreviewScalar(
+    incoming.sourceNodeId,
+    incoming.sourcePort,
+    byId,
+    workflow.edges,
+    ctx.workspace.id,
+    new Set(),
+  );
+  if (!scalarId) {
+    return {
+      state: 'unavailable',
+      reason: 'This source is random or generated at run time, so it cannot be previewed yet.',
+    };
+  }
+
+  const asset = await db.mediaAsset.findFirst({
+    where: {
+      id: scalarId,
+      workspaceId: ctx.workspace.id,
+      status: 'READY',
+      type: { in: ['AUDIO', 'VIDEO'] },
+    },
+    select: {
+      id: true,
+      type: true,
+      filename: true,
+      duration: true,
+      storageKey: true,
+      thumbnailKey: true,
+    },
+  });
+  if (!asset || asset.duration == null) {
+    return { state: 'unavailable', reason: 'The connected media is not ready to preview.' };
+  }
+  return {
+    state: 'ready',
+    asset: {
+      id: asset.id,
+      type: asset.type as 'AUDIO' | 'VIDEO',
+      filename: asset.filename,
+      duration: asset.duration,
+      url: await storage().signedUrl(asset.storageKey, 3600),
+      posterUrl: asset.thumbnailKey ? await storage().signedUrl(asset.thumbnailKey, 3600) : null,
+    },
+  };
+}
+
+type PreviewNode = {
+  id: string;
+  type: string;
+  config: Prisma.JsonValue;
+};
+type PreviewEdge = {
+  sourceNodeId: string;
+  sourcePort: string;
+  targetNodeId: string;
+  targetPort: string;
+};
+
+async function resolvePreviewScalar(
+  nodeId: string,
+  port: string,
+  nodes: Map<string, PreviewNode>,
+  edges: PreviewEdge[],
+  workspaceId: string,
+  visiting: Set<string>,
+): Promise<string | null> {
+  const key = `${nodeId}:${port}`;
+  if (visiting.has(key)) return null;
+  visiting.add(key);
+  const node = nodes.get(nodeId);
+  const config = (node?.config ?? {}) as Record<string, unknown>;
+  if (node?.type === 'MUSIC_SELECTOR' && port === 'audio') {
+    return config.mode === 'specific' && typeof config.mediaAssetId === 'string'
+      ? config.mediaAssetId
+      : null;
+  }
+  if (node?.type !== 'PICK' || port !== 'item' || config.mode === 'random') return null;
+  const incoming = edges.find(
+    (edge) => edge.targetNodeId === nodeId && edge.targetPort === 'items',
+  );
+  if (!incoming) return null;
+  const items = await resolvePreviewList(
+    incoming.sourceNodeId,
+    incoming.sourcePort,
+    nodes,
+    edges,
+    workspaceId,
+    visiting,
+  );
+  if (!items.length) return null;
+  try {
+    return selectItems(items, {
+      mode: config.mode as 'first' | 'last' | 'index',
+      count: 1,
+      index: typeof config.index === 'number' ? config.index : 0,
+      seed: 'preview',
+    })[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolvePreviewList(
+  nodeId: string,
+  port: string,
+  nodes: Map<string, PreviewNode>,
+  edges: PreviewEdge[],
+  workspaceId: string,
+  visiting: Set<string>,
+): Promise<string[]> {
+  const node = nodes.get(nodeId);
+  const config = (node?.config ?? {}) as Record<string, unknown>;
+  if (node?.type === 'MEDIA_LIBRARY' && (port === 'audio' || port === 'videos')) {
+    if (typeof config.assetId === 'string') return [config.assetId];
+    const mediaType = port === 'audio' ? 'AUDIO' : 'VIDEO';
+    let folderIds: string[] | null = null;
+    if (typeof config.folderId === 'string') {
+      const folders = await db.mediaFolder.findMany({
+        where: { workspaceId },
+        select: { id: true, parentId: true },
+      });
+      const selected = new Set([config.folderId]);
+      if (config.includeSubfolders !== false) {
+        for (let changed = true; changed;) {
+          changed = false;
+          for (const folder of folders) {
+            if (folder.parentId && selected.has(folder.parentId) && !selected.has(folder.id)) {
+              selected.add(folder.id);
+              changed = true;
+            }
+          }
+        }
+      }
+      folderIds = [...selected];
+    }
+    const assets = await db.mediaAsset.findMany({
+      where: {
+        workspaceId,
+        status: 'READY',
+        type: mediaType,
+        ...(folderIds ? { folderId: { in: folderIds } } : {}),
+      },
+      select: { id: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: 1000,
+    });
+    return assets.map((asset) => asset.id);
+  }
+  if (node?.type === 'COMBINE_MEDIA' && port === 'media') {
+    const order = Array.isArray(config.sourceOrder)
+      ? config.sourceOrder.filter((item): item is string => typeof item === 'string')
+      : ['media1', 'media2', 'media3', 'media4'];
+    const combined: string[] = [];
+    for (const input of order) {
+      const incoming = edges.find(
+        (edge) => edge.targetNodeId === nodeId && edge.targetPort === input,
+      );
+      if (incoming) {
+        combined.push(...await resolvePreviewList(
+          incoming.sourceNodeId,
+          incoming.sourcePort,
+          nodes,
+          edges,
+          workspaceId,
+          new Set(visiting),
+        ));
+      }
+    }
+    return combined;
+  }
+  if (node?.type === 'PICK' && port === 'selection' && config.mode !== 'random') {
+    const incoming = edges.find(
+      (edge) => edge.targetNodeId === nodeId && edge.targetPort === 'items',
+    );
+    if (!incoming) return [];
+    const items = await resolvePreviewList(
+      incoming.sourceNodeId,
+      incoming.sourcePort,
+      nodes,
+      edges,
+      workspaceId,
+      visiting,
+    );
+    try {
+      return selectItems(items, {
+        mode: config.mode as 'first' | 'last' | 'index',
+        count: typeof config.count === 'number' ? config.count : 1,
+        index: typeof config.index === 'number' ? config.index : 0,
+        seed: 'preview',
+      });
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 // ---------------------------------------------------------------- nodes
 
 export async function addNodeAction(
@@ -117,7 +496,7 @@ export async function addNodeAction(
   input: { type: string; positionX: number; positionY: number },
 ) {
   const ctx = await requireWorkspace(slug, 'workflow:edit');
-  if (!isNodeType(input.type)) throw invalid('That step type is not available.');
+  if (!isCreatableNodeType(input.type)) throw invalid('That step type is not available for new workflows.');
   const definition = getDefinition(input.type)!;
 
   const workflow = await db.workflow.findFirst({
@@ -134,7 +513,7 @@ export async function addNodeAction(
       name: definition.label,
       // Defaults come from the node's own schema, so a new node is immediately
       // valid rather than half-configured.
-      config: definition.configSchema.parse({}) as Prisma.InputJsonValue,
+      config: parseConfig(input.type, {}) as Prisma.InputJsonValue,
       positionX: input.positionX,
       positionY: input.positionY,
     },
@@ -160,9 +539,15 @@ export async function updateNodeAction(
     try {
       config = parseConfig(node.type, input.config) as Prisma.JsonValue;
     } catch (error) {
-      if (error instanceof z.ZodError) throw error;
+      if (error instanceof z.ZodError) {
+        const validation = zodValidationMessage(error);
+        throw invalid(validation.message, validation.fields);
+      }
       throw invalid('Those settings are not valid for this step.');
     }
+
+    const saveIssue = nodeSaveConfigIssue(node.type, config);
+    if (saveIssue) throw invalid(saveIssue.message, saveIssue.fields);
   }
 
   const updated = await db.workflowNode.update({
@@ -242,9 +627,6 @@ export async function connectNodesAction(
       const inPort = getDefinition(target.type)?.inputs.find((p) => p.id === input.targetPort);
       if (!outPort || !inPort) throw invalid('That connection point no longer exists.');
 
-      const incompatible = checkCompatible(outPort.type, inPort.type);
-      if (incompatible) throw invalid(incompatible.reason);
-
       const edges = await tx.workflowEdge.findMany({
         where: { workflowId, workspaceId: ctx.workspace.id },
       });
@@ -258,6 +640,11 @@ export async function connectNodesAction(
       if (occupied) {
         throw conflict(`"${target.name}" already has something connected to its ${inPort.label} input.`);
       }
+
+      // Last, so a generic port resolves over a graph that is already known to
+      // be loop-free and single-writer.
+      const incompatible = checkAddedEdge({ nodes, edges }, input);
+      if (incompatible) throw invalid(incompatible.reason);
 
       const edge = await tx.workflowEdge.create({
         data: { workflowId, workspaceId: ctx.workspace.id, ...input },

@@ -10,6 +10,11 @@ export type ComposerAccount = {
 };
 
 export type ComposerAsset = {
+  /**
+   * The asset itself. Distinct from thumbnailUrl because a video preview needs
+   * both: the file to play, and a poster to show before it plays.
+   */
+  url: string;
   id: string;
   filename: string;
   type: string;

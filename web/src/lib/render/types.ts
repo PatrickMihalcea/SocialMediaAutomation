@@ -8,9 +8,14 @@
  */
 
 export interface RenderImage {
-  /** Already cover-cropped and supersampled by the layout step. */
   bytes: Buffer;
   mimeType: string;
+}
+
+export interface RenderClip extends RenderImage {
+  kind: 'image' | 'video';
+  /** Images are already laid out PNGs; videos are original encoded bytes. */
+  fit: 'cover' | 'blur-pad';
 }
 
 export interface KenBurns {
@@ -33,7 +38,7 @@ export interface TextOverlay {
 }
 
 export interface RenderSegment {
-  imageIndex: number;
+  clipIndex: number;
   startFrame: number;
   /** Exclusive. Segments tile [0, totalFrames) with no gap and no overlap. */
   endFrame: number;
@@ -78,7 +83,7 @@ export interface RenderPlan {
   totalFrames: number;
   /** 2 keeps zoompan's integer crop origin from visibly jerking. */
   supersample: number;
-  images: RenderImage[];
+  clips: RenderClip[];
   segments: RenderSegment[];
   audio: RenderAudio | null;
   /** Trades throughput for byte-reproducible output. */
@@ -106,7 +111,10 @@ export interface VideoRenderer {
 /** What a BEAT_SLIDESHOW step hands its downstream overlay node. */
 export interface BeatSegment {
   index: number;
-  imageAssetId: string;
+  mediaAssetId: string;
+  mediaKind: 'IMAGE' | 'VIDEO';
+  /** Compatibility alias for historical image-only run output. */
+  imageAssetId?: string;
   startFrame: number;
   endFrame: number;
   startSeconds: number;

@@ -1,9 +1,9 @@
 import Link from 'next/link';
-import { Field, MediaUploader, Select, TextArea } from '@/bridge88/components';
+import { Field, MediaUploader, TextArea } from '@/bridge88/components';
 import { createWorkspaceAction } from '@/app/actions/workspace';
 import { ActionForm } from '@/components/action-form';
 import { PendingButton } from '@/components/action-ui';
-import { COMMON_TIMEZONES } from '@/lib/scheduling/time';
+import { DetectedTimezone } from '@/components/detected-timezone';
 import { requireUser } from '@/lib/auth/guard';
 
 export const metadata = { title: 'New workspace' };
@@ -21,9 +21,7 @@ export default async function NewWorkspacePage() {
         <TextArea name="description" label="What does the business do?" rows={4} required />
         <Field name="industry" label="Industry" />
         <Field name="targetAudience" label="Target audience" />
-        <Select name="timezone" label="Timezone" defaultValue="UTC">
-          {COMMON_TIMEZONES.map((zone) => <option key={zone}>{zone}</option>)}
-        </Select>
+        <DetectedTimezone />
         <div>
           <p className="b88-label">Workspace logo</p>
           <MediaUploader

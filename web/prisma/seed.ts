@@ -337,29 +337,34 @@ async function seedBedroomWorkflow(workspaceId: string, userId: string) {
     size: '1024x1536',
     maxImages: 8,
   });
-  const music = await node('MUSIC_SELECTOR', 'Pick a track', 340, 260, {
-    mode: 'random',
+  const library = await node('MEDIA_LIBRARY', 'Media library', 340, 260, {
     folderId: null,
-    mediaAssetId: null,
-    requireBeatGrid: false,
+    includeSubfolders: true,
   });
-  const slideshow = await node('BEAT_SLIDESHOW', 'Cut to the beat', 660, 140, {
+  const track = await node('PICK', 'Select a track', 560, 260, {
+    mode: 'random',
+    count: 1,
+    index: 0,
+  });
+  const combined = await node('COMBINE_MEDIA', 'Combine room media', 580, 40, {
+    sourceOrder: ['media1', 'media2', 'media3', 'media4'],
+  });
+  const slideshow = await node('BEAT_SLIDESHOW', 'Cut to the beat', 820, 140, {
     beatsPerClip: 8,
-    width: 1080,
-    height: 1920,
+    size: '1080x1920',
     fps: 30,
     fit: 'cover',
     kenBurns: true,
     visualLeadMs: 0,
     fadeOutSeconds: 1.2,
   });
-  const overlay = await node('TEXT_OVERLAY', 'Number each room', 980, 140, {
+  const overlay = await node('TEXT_OVERLAY', 'Number each room', 1100, 140, {
     template: '{index}',
     font: 'Archivo-Bold',
     position: 'top',
     fontSize: 0,
   });
-  const draft = await node('CREATE_DRAFT', 'Leave a draft', 1300, 140, {
+  const draft = await node('CREATE_DRAFT', 'Leave a draft', 1420, 140, {
     title: 'Which bedroom are you choosing?',
     caption: 'Which bedroom are you choosing?',
     campaignId: null,
@@ -379,8 +384,15 @@ async function seedBedroomWorkflow(workspaceId: string, userId: string) {
     });
 
   await edge(idea.id, 'prompts', images.id, 'prompts');
-  await edge(images.id, 'images', slideshow.id, 'images');
-  await edge(music.id, 'audio', slideshow.id, 'audio');
+  await edge(idea.id, 'titles', images.id, 'titles');
+  await edge(images.id, 'images', combined.id, 'media1');
+  await edge(images.id, 'titles', combined.id, 'titles1');
+  await edge(library.id, 'images', combined.id, 'media2');
+  await edge(library.id, 'imageTitles', combined.id, 'titles2');
+  await edge(combined.id, 'media', slideshow.id, 'images');
+  await edge(combined.id, 'titles', slideshow.id, 'titles');
+  await edge(library.id, 'audio', track.id, 'items');
+  await edge(track.id, 'item', slideshow.id, 'audio');
   await edge(slideshow.id, 'video', overlay.id, 'video');
   await edge(slideshow.id, 'segments', overlay.id, 'segments');
   await edge(overlay.id, 'video', draft.id, 'video');
@@ -389,7 +401,7 @@ async function seedBedroomWorkflow(workspaceId: string, userId: string) {
   return {
     id: workflow.id,
     workspaceId,
-    nodes: [idea, images, music, slideshow, overlay, draft],
+    nodes: [idea, images, library, track, combined, slideshow, overlay, draft],
   };
 }
 

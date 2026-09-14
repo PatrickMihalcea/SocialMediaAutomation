@@ -7,6 +7,8 @@ export interface NodeRunContext {
   runId: string;
   nodeRunId: string;
   nodeName: string;
+  /** The workflow's name, used to name the media a step produces. */
+  workflowName: string;
   /** Null for a scheduled run — nobody is signed in. */
   userId: string | null;
   /** 1 on the first try. */

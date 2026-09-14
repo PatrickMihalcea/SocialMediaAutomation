@@ -15,7 +15,9 @@ describe('checkCompatible', () => {
   it('refuses to silently collect a single value into a list', () => {
     // Implicit widening would make the run graph lie about its own arity.
     const problem = checkCompatible(text(false), text(true));
-    expect(problem?.reason).toContain('Collect');
+    expect(problem?.reason).toContain('takes a list');
+    // Naming a step the palette does not have sends the user looking for it.
+    expect(problem?.reason).not.toContain('Collect');
   });
 
   it('refuses to silently pick one item out of a list', () => {

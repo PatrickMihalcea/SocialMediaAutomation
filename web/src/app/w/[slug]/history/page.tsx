@@ -13,7 +13,6 @@ import {
   parseHistoryFilters,
 } from '@/lib/audit-view';
 import { HistoryPagePreview } from '@/components/page-previews';
-import { timezoneLabel } from '@/lib/scheduling/time';
 
 const PAGE_SIZE = 10;
 
@@ -118,10 +117,11 @@ async function HistoryData({
 
   return (
     <div className="mt-6 min-h-[460px] max-w-5xl">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <p className="b88-caption">Workspace · {timezoneLabel(ctx.workspace.timezone)}</p>
-        {filters.postId && <Button href={`/w/${slug}/posts/${filters.postId}`} variant="secondary">Open post</Button>}
-      </div>
+      {filters.postId && (
+        <div className="flex justify-end">
+          <Button href={`/w/${slug}/posts/${filters.postId}`} variant="secondary">Open post</Button>
+        </div>
+      )}
 
       <Form
         action={`/w/${slug}/history`}

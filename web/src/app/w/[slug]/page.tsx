@@ -7,7 +7,7 @@ import { DashboardPagePreview } from '@/components/page-previews';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { PLATFORM_LABELS } from '@/lib/social/registry';
-import { formatInZone, timezoneLabel } from '@/lib/scheduling/time';
+import { formatInZone } from '@/lib/scheduling/time';
 import { POST_STATUS_LABELS } from '@/lib/posts/labels';
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
@@ -87,8 +87,6 @@ async function DashboardData({ slug }: { slug: string }) {
 
   return (
     <>
-      <p className="b88-caption mt-2">{timezoneLabel(workspace.timezone)}</p>
-
       <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Scheduled today" value={String(today)} />
         <StatCard label="Scheduled this week" value={String(thisWeek)} />

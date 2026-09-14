@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildEncoderArgs, buildFilterGraph } from '@/lib/render/graph-builder';
+import { buildClipInputArgs } from '@/lib/render/input-args';
 import type { ResolvedRenderPlan } from '@/lib/render/types';
 
 function plan(overrides: Partial<ResolvedRenderPlan> = {}): ResolvedRenderPlan {
@@ -9,7 +10,11 @@ function plan(overrides: Partial<ResolvedRenderPlan> = {}): ResolvedRenderPlan {
     fps: 30,
     totalFrames: 225,
     supersample: 2,
-    images: [],
+    clips: [
+      { kind: 'image', bytes: Buffer.alloc(0), mimeType: 'image/png', fit: 'cover' },
+      { kind: 'image', bytes: Buffer.alloc(0), mimeType: 'image/png', fit: 'cover' },
+      { kind: 'image', bytes: Buffer.alloc(0), mimeType: 'image/png', fit: 'cover' },
+    ],
     deterministic: false,
     audio: {
       bytes: Buffer.alloc(0),
@@ -19,9 +24,9 @@ function plan(overrides: Partial<ResolvedRenderPlan> = {}): ResolvedRenderPlan {
       fadeOutSeconds: 1.2,
     },
     segments: [
-      { imageIndex: 0, startFrame: 0, endFrame: 60, motion: { fromZoom: 1, toZoom: 1.1 }, overlays: [overlay('1')] },
-      { imageIndex: 1, startFrame: 60, endFrame: 150, motion: { fromZoom: 1.1, toZoom: 1 }, overlays: [overlay('2')] },
-      { imageIndex: 2, startFrame: 150, endFrame: 225, motion: { fromZoom: 1, toZoom: 1.1 }, overlays: [overlay('3')] },
+      { clipIndex: 0, startFrame: 0, endFrame: 60, motion: { fromZoom: 1, toZoom: 1.1 }, overlays: [overlay('1')] },
+      { clipIndex: 1, startFrame: 60, endFrame: 150, motion: { fromZoom: 1.1, toZoom: 1 }, overlays: [overlay('2')] },
+      { clipIndex: 2, startFrame: 150, endFrame: 225, motion: { fromZoom: 1, toZoom: 1.1 }, overlays: [overlay('3')] },
     ],
     ...overrides,
   };
@@ -82,7 +87,7 @@ describe('buildFilterGraph', () => {
     const withColon = plan({
       segments: [
         {
-          imageIndex: 0,
+          clipIndex: 0,
           startFrame: 0,
           endFrame: 30,
           motion: null,
@@ -99,6 +104,44 @@ describe('buildFilterGraph', () => {
     expect(graph).not.toContain('atrim');
     expect(graph).not.toContain('[a]');
   });
+
+  it('trims a looped video input to its exact beat slot', () => {
+    const graph = buildFilterGraph(plan({
+      clips: [{ kind: 'video', bytes: Buffer.alloc(0), mimeType: 'video/mp4', fit: 'cover' }],
+      segments: [{
+        clipIndex: 0,
+        startFrame: 0,
+        endFrame: 60,
+        motion: null,
+        overlays: [],
+      }],
+      totalFrames: 60,
+      audio: null,
+    }));
+    expect(graph).toContain('trim=duration=2.000000');
+    expect(graph).toContain('fps=30');
+    expect(graph).toContain('force_original_aspect_ratio=increase');
+    expect(graph).toContain('crop=1080:1920');
+    expect(graph).not.toContain('zoompan');
+  });
+
+  it('uses a blurred background when a source video should remain fully visible', () => {
+    const graph = buildFilterGraph(plan({
+      clips: [{ kind: 'video', bytes: Buffer.alloc(0), mimeType: 'video/mp4', fit: 'blur-pad' }],
+      segments: [{
+        clipIndex: 0,
+        startFrame: 0,
+        endFrame: 30,
+        motion: null,
+        overlays: [],
+      }],
+      totalFrames: 30,
+      audio: null,
+    }));
+    expect(graph).toContain('split=2');
+    expect(graph).toContain('boxblur=20:2');
+    expect(graph).toContain('force_original_aspect_ratio=decrease');
+  });
 });
 
 describe('buildEncoderArgs', () => {
@@ -112,5 +155,17 @@ describe('buildEncoderArgs', () => {
     // Multi-threaded x264 is not bit-reproducible at any thread count but its own.
     const args = buildEncoderArgs({ fps: 30, audio: null, deterministic: true });
     expect(args.join(' ')).toContain('threads=1');
+  });
+});
+
+describe('buildClipInputArgs', () => {
+  it('loops video sources while leaving still-image inputs unchanged', () => {
+    expect(buildClipInputArgs([
+      { file: '/tmp/image.png', kind: 'image' },
+      { file: '/tmp/clip.mp4', kind: 'video' },
+    ])).toEqual([
+      '-i', '/tmp/image.png',
+      '-stream_loop', '-1', '-i', '/tmp/clip.mp4',
+    ]);
   });
 });

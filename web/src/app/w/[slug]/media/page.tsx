@@ -92,7 +92,13 @@ async function MediaData({
       },
     }),
     db.mediaFolder.findMany({ where: { workspaceId: ctx.workspace.id }, orderBy: { name: 'asc' } }),
-    db.mediaTag.findMany({ where: { workspaceId: ctx.workspace.id }, orderBy: { name: 'asc' } }),
+    db.mediaTag.findMany({
+      where: { workspaceId: ctx.workspace.id },
+      orderBy: { name: 'asc' },
+      // Counted so the sidebar can say how much each tag actually holds; a tag
+      // list without them gives no clue which ones are in use.
+      include: { _count: { select: { assets: true } } },
+    }),
     db.job.findMany({
       where: { workspaceId: ctx.workspace.id, type: 'process-media', status: 'FAILED' },
       orderBy: { completedAt: 'desc' },
@@ -148,15 +154,16 @@ async function MediaData({
     ...folder,
     label: folderLabel(folder.id, folders),
   }));
+  const tagItems = tags.map((tag) => ({ id: tag.id, name: tag.name, assetCount: tag._count.assets }));
 
   return (
     <div className="flow-root min-h-[680px]">
-      <MediaFilters slug={slug} tags={tags} current={query} />
+      <MediaFilters slug={slug} current={query} />
       <MediaLibrary
         slug={slug}
         assets={assets}
         folders={folderItems}
-        tags={tags}
+        tags={tagItems}
         canEdit={ctx.can('media:update') && ctx.can('media:upload')}
         canDelete={ctx.can('media:delete')}
         currentFolder={query.folder ?? null}

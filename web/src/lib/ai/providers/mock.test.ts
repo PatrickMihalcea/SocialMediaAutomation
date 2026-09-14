@@ -25,12 +25,15 @@ describe('mock AI structured output', () => {
     ['Attach launch.png media to Launch Notes', 'attach_media', 1],
     ['Shorten Launch Notes', 'update_post_content', 1],
     ['Repurpose Launch Notes for a fresh audience', 'repurpose_content', 1],
+    ['Create a weekly reel workflow about coastal rooms', 'create_workflow', 1],
+    ['Run Launch workflow', 'run_workflow', 1],
   ])('returns a faithful simulated %s proposal', async (prompt, kind, expectedItems) => {
     const provider = new MockAiProvider();
     const context = {
       posts: [{ id: '11111111-1111-4111-8111-111111111111', title: 'Launch Notes', status: 'DRAFT' }],
       campaigns: [{ id: '22222222-2222-4222-8222-222222222222', name: 'Spring Launch' }],
       media: [{ id: '33333333-3333-4333-8333-333333333333', filename: 'launch.png', type: 'IMAGE' }],
+      workflows: [{ id: '44444444-4444-4444-8444-444444444444', name: 'Launch workflow' }],
     };
     const result = await provider.completeObject({
       schema: assistantReplySchema,

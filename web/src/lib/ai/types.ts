@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ImageSize } from '@/lib/ai/image-sizes';
 
 /**
  * Provider-agnostic AI surface. Everything the product asks of a model goes
@@ -93,7 +94,7 @@ export interface AiProvider {
     temperature?: number;
   }): Promise<AiObjectResult<T>>;
 
-  generateImage(input: { prompt: string; size?: '1024x1024' | '1024x1536' | '1536x1024' }): Promise<AiImageResult>;
+  generateImage(input: { prompt: string; size?: ImageSize }): Promise<AiImageResult>;
 }
 
 export class AiError extends Error {

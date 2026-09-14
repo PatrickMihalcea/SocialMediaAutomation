@@ -11,6 +11,11 @@ const dbMock = vi.hoisted(() => ({
   post: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   campaign: { findFirst: vi.fn() },
   mediaAsset: { findMany: vi.fn() },
+  workflow: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
+  workflowNode: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+  workflowEdge: { create: vi.fn() },
+  workspace: { findFirst: vi.fn() },
+  auditLog: { create: vi.fn() },
   $transaction: vi.fn(),
 }));
 const serviceMock = vi.hoisted(() => ({
@@ -117,6 +122,9 @@ describe('assistant capability disclosure', () => {
   it('leaves supported ideas and action requests to the provider', () => {
     expect(assistantCapabilityReply('Give me 20 LinkedIn ideas about AI agents')).toBeNull();
     expect(assistantCapabilityReply('Create one draft about AI agents')).toBeNull();
+    expect(assistantCapabilityReply('Create a weekly reel workflow about coastal rooms')).toBeNull();
+    expect(assistantCapabilityReply('Create a video workflow for product shots')).toBeNull();
+    expect(assistantCapabilityReply('Run the Bedroom picker workflow')).toBeNull();
     expect(assistantCapabilityReply('Make the Launch post more technical')).toBeNull();
     expect(assistantCapabilityReply('Schedule Launch post tomorrow at 9')).toBeNull();
     expect(assistantCapabilityReply('Move tomorrow’s LinkedIn post to Friday')).toBeNull();
@@ -354,6 +362,45 @@ describe('assistant action executors', () => {
       role: 'OWNER',
       messageId: 'message-1',
     })).resolves.toEqual({ status: 'EXECUTING' });
+    expect(serviceMock.savePost).not.toHaveBeenCalled();
+  });
+});
+
+describe('assistant workflow proposals', () => {
+  it('creates a weekly reel graph without touching posts', async () => {
+    const { weeklyReelTemplate } = await import('@/lib/workflows/assistant-graph');
+    const graph = weeklyReelTemplate('coastal rooms');
+    dbMock.workspace.findFirst.mockResolvedValue({ timezone: 'UTC' });
+    dbMock.$transaction.mockImplementation(async (fn: (tx: typeof dbMock) => Promise<unknown>) => {
+      let n = 0;
+      const tx = {
+        workflow: {
+          create: vi.fn().mockResolvedValue({ id: POST_ID, name: graph.name }),
+          update: vi.fn(),
+        },
+        workflowNode: {
+          create: vi.fn().mockImplementation(async () => {
+            n += 1;
+            return { id: `11111111-1111-4111-8111-${String(n).padStart(12, '0')}` };
+          }),
+        },
+        workflowEdge: { create: vi.fn() },
+      };
+      return fn(tx as never);
+    });
+
+    await expect(executeProposal('workspace-1', 'user-1', {
+      kind: 'create_workflow',
+      summary: 'Create coastal rooms reel',
+      name: graph.name,
+      description: graph.description,
+      scheduleEnabled: true,
+      scheduleWeekdays: [1],
+      scheduleHour: 9,
+      scheduleMinute: 0,
+      nodes: graph.nodes,
+      edges: graph.edges,
+    })).resolves.toEqual({ workflowId: POST_ID });
     expect(serviceMock.savePost).not.toHaveBeenCalled();
   });
 });

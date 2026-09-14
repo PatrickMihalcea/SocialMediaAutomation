@@ -11,6 +11,7 @@ import { mediaKey, storage } from '@/lib/storage';
 import { PermanentJobError } from '@/lib/queue/runner';
 import { analyseAudioAsset } from '@/lib/audio/analyse';
 import { notify } from '@/lib/notifications/service';
+import { renderVideoEdit } from '@/lib/media/ffmpeg-edit';
 
 const run = promisify(execFile);
 
@@ -338,32 +339,12 @@ export async function createVideoDerivative(input: {
   let output = sourceBytes;
 
   if (rendered) {
-    const dir = await mkdtemp(path.join(tmpdir(), 'b88-media-edit-'));
-    const sourceExt = path.extname(source.filename) || '.mp4';
-    const sourcePath = path.join(dir, `source${sourceExt}`);
-    const outputPath = path.join(dir, 'output.mp4');
-    try {
-      await writeFile(sourcePath, sourceBytes);
-      const filters: string[] = [];
-      if (input.edit.crop) {
-        const { width, height, left, top } = input.edit.crop;
-        filters.push(`crop=${width}:${height}:${left}:${top}`);
-      }
-      if (input.edit.resize) filters.push(`scale=${input.edit.resize.width}:${input.edit.resize.height}`);
-      const args = ['-v', 'error'];
-      if (input.edit.trimStart !== undefined) args.push('-ss', String(Math.max(0, input.edit.trimStart)));
-      args.push('-i', sourcePath);
-      if (input.edit.trimEnd !== undefined) {
-        const duration = Math.max(0.01, input.edit.trimEnd - (input.edit.trimStart ?? 0));
-        args.push('-t', String(duration));
-      }
-      if (filters.length) args.push('-vf', filters.join(','));
-      args.push('-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart', '-y', outputPath);
-      await run('ffmpeg', args);
-      output = await readFile(outputPath);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    output = await renderVideoEdit(sourceBytes, source.filename, {
+      startSeconds: input.edit.trimStart,
+      endSeconds: input.edit.trimEnd,
+      crop: input.edit.crop,
+      resize: input.edit.resize,
+    });
   }
 
   const filename = videoDerivativeName(source.filename, input.presetId, rendered);

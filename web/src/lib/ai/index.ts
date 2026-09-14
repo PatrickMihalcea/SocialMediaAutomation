@@ -6,6 +6,7 @@ import { env } from '@/lib/env';
 import { OpenAiProvider } from '@/lib/ai/providers/openai';
 import { MockAiProvider } from '@/lib/ai/providers/mock';
 import type { AiImageResult, AiMessage, AiObjectResult, AiProvider } from '@/lib/ai/types';
+import type { ImageSize } from '@/lib/ai/image-sizes';
 import { assertWithinLimit, currentMonthUsage, incrementUsage } from '@/lib/billing/limits';
 
 let providerInstance: AiProvider | null = null;
@@ -69,7 +70,7 @@ export async function generateImage(input: {
   workspaceId: string;
   userId: string;
   prompt: string;
-  size?: '1024x1024' | '1024x1536' | '1536x1024';
+  size?: ImageSize;
 }): Promise<AiImageResult & { generationId: string }> {
   const used = await currentMonthUsage(input.workspaceId, 'ai_generations');
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);

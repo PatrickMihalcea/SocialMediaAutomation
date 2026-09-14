@@ -34,6 +34,7 @@ async function AssistantData({ params }: { params: Promise<{ slug: string }> }) 
   return (
     <AiAssistant
       slug={slug}
+      timezone={ctx.workspace.timezone}
       simulated={env.AI_PROVIDER === 'mock'}
       initialConversations={conversations.map((conversation) => ({
         id: conversation.id,

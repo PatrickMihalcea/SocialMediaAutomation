@@ -51,6 +51,44 @@ type Proposal =
       newTitle: string;
       text: string;
       hashtags: string[];
+    }
+  | {
+      kind: 'create_workflow';
+      summary: string;
+      name: string;
+      description?: string | null;
+      scheduleEnabled: boolean;
+      scheduleWeekdays: number[];
+      scheduleHour: number;
+      scheduleMinute: number;
+      nodes: Array<{ key: string; type: string; name?: string }>;
+      edges: Array<{ sourceKey: string; sourcePort: string; targetKey: string; targetPort: string }>;
+      workflowId?: string;
+    }
+  | {
+      kind: 'update_workflow';
+      summary: string;
+      workflowId: string;
+      workflowName: string;
+      name?: string;
+      description?: string | null;
+      scheduleEnabled?: boolean;
+      scheduleWeekdays?: number[];
+      scheduleHour?: number;
+      scheduleMinute?: number;
+      nodeUpdates?: Array<{ nodeId: string; name?: string }>;
+      graphEdits?: Array<{
+        operation: 'add_node' | 'update_node' | 'remove_node' | 'connect' | 'disconnect';
+        name?: string;
+        type?: string;
+      }>;
+    }
+  | {
+      kind: 'run_workflow';
+      summary: string;
+      workflowId: string;
+      workflowName: string;
+      runId?: string;
     };
 
 type Message = {
@@ -64,10 +102,12 @@ type Conversation = { id: string; title: string; messages: Message[] };
 
 export function AiAssistant({
   slug,
+  timezone,
   initialConversations,
   simulated = false,
 }: {
   slug: string;
+  timezone: string;
   initialConversations: Conversation[];
   simulated?: boolean;
 }) {
@@ -127,7 +167,21 @@ export function AiAssistant({
         setConversations((current) => current.map((conversation) => ({
           ...conversation,
           messages: conversation.messages.map((item) => item.id === message.id
-            ? { ...item, proposalStatus: result.status }
+            ? {
+              ...item,
+              proposalStatus: result.status,
+              proposal: result.workflowId && item.proposal && (
+                item.proposal.kind === 'create_workflow'
+                || item.proposal.kind === 'update_workflow'
+                || item.proposal.kind === 'run_workflow'
+              )
+                ? {
+                    ...item.proposal,
+                    workflowId: result.workflowId,
+                    ...(result.runId ? { runId: result.runId } : {}),
+                  }
+                : item.proposal,
+            }
             : item),
         })));
         setNotice(completionCopy(message.proposal));
@@ -189,6 +243,7 @@ export function AiAssistant({
             <div className="mx-auto max-w-lg py-8 text-center">
               <div className="flex flex-wrap justify-center gap-2">
                 <Button href={`/w/${slug}/compose`} variant="secondary">Create post</Button>
+                <Button href={`/w/${slug}/workflows`} variant="secondary">Open workflows</Button>
                 <Button href={`/w/${slug}/studio`} variant="secondary">Open AI studio</Button>
               </div>
             </div>
@@ -259,7 +314,7 @@ export function AiAssistant({
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); } }}
             className="b88-input flex-1 basis-40 overflow-y-auto"
             style={{ height: 'var(--control-size)', minHeight: 'var(--control-size)', borderRadius: 'var(--radius-pill)', padding: '8px 16px', lineHeight: '22px', resize: 'none' }}
-            placeholder="Ask for content or a schedule"
+            placeholder="Ask for content, a schedule, or a workflow"
             aria-label="Assistant message"
           />
           <Button type="button" className="shrink-0" onClick={send} disabled={pending || !content.trim()} aria-busy={pendingTask === 'send'}>
@@ -282,14 +337,16 @@ export function AiAssistant({
           </>
         )}
       >
-        {proposalToConfirm?.proposal && <ProposalDetails proposal={proposalToConfirm.proposal} />}
+        {proposalToConfirm?.proposal && (
+          <ProposalDetails proposal={proposalToConfirm.proposal} timezone={timezone} />
+        )}
       </Dialog>
       {notice && <div onClick={() => setNotice('')}><Toast tone="success">{notice}</Toast></div>}
     </>
   );
 }
 
-function ProposalDetails({ proposal }: { proposal: Proposal }) {
+function ProposalDetails({ proposal, timezone }: { proposal: Proposal; timezone: string }) {
   if (proposal.kind === 'create_drafts') {
     return (
       <div className="mt-4 max-h-72 space-y-3 overflow-y-auto">
@@ -353,6 +410,66 @@ function ProposalDetails({ proposal }: { proposal: Proposal }) {
       </div>
     );
   }
+  if (proposal.kind === 'create_workflow') {
+    return (
+      <div className="mt-4 max-h-72 space-y-3 overflow-y-auto rounded-md bg-surface-soft p-3 text-sm">
+        <p className="font-[540]">{proposal.name}</p>
+        {proposal.description && <p className="mt-2">{proposal.description}</p>}
+        <p className="mt-2">
+          {proposal.scheduleEnabled
+            ? `Scheduled at ${formatTime(proposal.scheduleHour, proposal.scheduleMinute)} on ${formatWeekdays(proposal.scheduleWeekdays)} (${timezone}).`
+            : 'Manual runs only. It will not start until you open it and run it.'}
+        </p>
+        <ul className="mt-3 list-disc space-y-1 pl-5">
+          {proposal.nodes.map((node) => (
+            <li key={node.key}>{node.name || node.type}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  if (proposal.kind === 'update_workflow') {
+    return (
+      <div className="mt-4 rounded-md bg-surface-soft p-3 text-sm">
+        <p><span className="font-[540]">{proposal.name || proposal.workflowName}</span> will be updated. Existing runs stay as they are.</p>
+        {proposal.scheduleEnabled !== undefined && (
+          <p className="mt-2">
+            {proposal.scheduleEnabled
+              ? `Schedule: ${formatTime(proposal.scheduleHour ?? 9, proposal.scheduleMinute ?? 0)} on ${formatWeekdays(proposal.scheduleWeekdays ?? [])} (${timezone}).`
+              : 'The weekly schedule will be turned off.'}
+          </p>
+        )}
+        {Boolean(proposal.graphEdits?.length) && (
+          <div className="mt-3">
+            <p className="font-[540]">
+              {proposal.graphEdits!.length} graph {proposal.graphEdits!.length === 1 ? 'change' : 'changes'}
+            </p>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {proposal.graphEdits!.map((edit, index) => (
+                <li key={`${edit.operation}-${index}`}>
+                  {edit.operation.replaceAll('_', ' ')}
+                  {edit.name ? ` · ${edit.name}` : edit.type ? ` · ${edit.type}` : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (proposal.kind === 'run_workflow') {
+    return (
+      <div className="mt-4 rounded-md bg-surface-soft p-3 text-sm">
+        <p>
+          <span className="font-[540]">{proposal.workflowName}</span> will start after confirmation.
+        </p>
+        <p className="mt-2">
+          Its configured steps may use AI quota, create media, create posts, or publish when the
+          workflow contains a Publish step without approval.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="mt-4 max-h-72 overflow-y-auto rounded-md bg-surface-soft p-3 text-sm">
       <p>A new draft named <span className="font-[540]">{proposal.newTitle}</span> will be created from <span className="font-[540]">{proposal.sourcePostTitle}</span>.</p>
@@ -409,7 +526,8 @@ function formatTime(hour: number, minute: number): string {
 
 function formatWeekdays(weekdays: number[]): string {
   const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const selected = (weekdays.length ? weekdays : [1, 3, 5]).map((day) => names[day]);
+  const selected = weekdays.map((day) => names[day]);
+  if (selected.length === 0) return 'no weekdays';
   return selected.length === 1 ? selected[0] : `${selected.slice(0, -1).join(', ')} and ${selected.at(-1)}`;
 }
 
@@ -420,6 +538,9 @@ function proposalDialogTitle(proposal: Proposal | null): string {
   if (proposal.kind === 'assign_campaign') return 'Assign this campaign?';
   if (proposal.kind === 'attach_media') return 'Attach this media?';
   if (proposal.kind === 'update_post_content') return 'Replace this post copy?';
+  if (proposal.kind === 'create_workflow') return 'Create this workflow?';
+  if (proposal.kind === 'update_workflow') return 'Apply these workflow changes?';
+  if (proposal.kind === 'run_workflow') return 'Run this workflow?';
   return 'Create this repurposed draft?';
 }
 
@@ -427,12 +548,22 @@ function proposalDestination(slug: string, proposal: Proposal | null): string {
   if (!proposal) return `/w/${slug}/assistant`;
   if (proposal.kind === 'schedule_posts') return `/w/${slug}/calendar`;
   if (proposal.kind === 'create_drafts' || proposal.kind === 'repurpose_content') return `/w/${slug}/drafts`;
+  if (proposal.kind === 'create_workflow' || proposal.kind === 'update_workflow') {
+    return proposal.workflowId ? `/w/${slug}/workflows/${proposal.workflowId}` : `/w/${slug}/workflows`;
+  }
+  if (proposal.kind === 'run_workflow') {
+    return proposal.runId
+      ? `/w/${slug}/workflows/${proposal.workflowId}/runs/${proposal.runId}`
+      : `/w/${slug}/workflows/${proposal.workflowId}`;
+  }
   return `/w/${slug}/compose/${proposal.postId}`;
 }
 
 function proposalDestinationLabel(proposal: Proposal | null): string {
   if (proposal?.kind === 'schedule_posts') return 'View calendar';
   if (proposal?.kind === 'create_drafts' || proposal?.kind === 'repurpose_content') return 'View drafts';
+  if (proposal?.kind === 'create_workflow' || proposal?.kind === 'update_workflow') return 'Open workflow';
+  if (proposal?.kind === 'run_workflow') return 'View run';
   return 'View post';
 }
 
@@ -441,5 +572,8 @@ function completionCopy(proposal: Proposal | null): string {
   if (proposal?.kind === 'assign_campaign') return 'Campaign assigned';
   if (proposal?.kind === 'attach_media') return 'Media attached';
   if (proposal?.kind === 'update_post_content') return 'Post copy updated';
+  if (proposal?.kind === 'create_workflow') return 'Workflow created';
+  if (proposal?.kind === 'update_workflow') return 'Workflow updated';
+  if (proposal?.kind === 'run_workflow') return 'Workflow started';
   return 'Drafts created';
 }

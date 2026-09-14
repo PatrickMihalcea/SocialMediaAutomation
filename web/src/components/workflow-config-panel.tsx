@@ -1,17 +1,190 @@
 'use client';
 
 import { useMemo, useState, useTransition } from 'react';
+import Link from 'next/link';
+import { CircleHelp } from 'lucide-react';
 import { z } from 'zod';
-import { Button, Checkbox, Field, Select, StatusMessage } from '@/bridge88/components';
-import { getDefinition } from '@/lib/workflows/definitions';
+import {
+  Button,
+  Checkbox,
+  Dropdown,
+  Field,
+  IconButton,
+  StatusMessage,
+  type DropdownOption,
+} from '@/bridge88/components';
+import {
+  PUBLISH_CHANNEL_REQUIRED,
+  getDefinition,
+  nodeUsesChannelPicker,
+  parseConfig,
+  type WorkflowAudioOption,
+  type WorkflowChannelOption,
+  type WorkflowMediaAssetOption,
+  type WorkflowMediaFolderOption,
+} from '@/lib/workflows/definitions';
+import { PLATFORM_LABELS } from '@/lib/social/labels';
+import { IMAGE_SIZE_LABELS, imageSizeFitNote } from '@/lib/ai/image-sizes';
+import {
+  DEFAULT_VIDEO_OUTPUT_SIZE,
+  VIDEO_OUTPUT_PRESETS,
+  isVideoOutputSize,
+  matchVideoOutputPreset,
+} from '@/lib/workflows/video-output-presets';
 import { updateNodeAction } from '@/app/actions/workflows';
 import type { CanvasNode } from '@/components/workflow-canvas';
+import { TEXT_OVERLAY_PRESETS, WORKFLOW_FIELD_HELP } from '@/lib/workflows/help';
+import {
+  WorkflowCombineOrder,
+  type CombineSourceId,
+} from '@/components/workflow-combine-order';
+import { WorkflowTrimmerEditor } from '@/components/workflow-trimmer-editor';
+
+const CUSTOM_VIDEO_SIZE = '__custom__';
+const CUSTOM_VALUE = '__custom__';
+
+/** What the burnt-in label reads as on the first cut. */
+function previewOverlay(template: string): string {
+  const filled = template.replaceAll('{index}', '1').replaceAll('{title}', 'Coastal minimal');
+  return filled.trim() || 'nothing';
+}
+
+/**
+ * A choice control plus its optional explanation.
+ *
+ * Dropdown rather than the native Select: it positions its own popup against
+ * the trigger, where a native one is left to the browser and can land far from
+ * the control it belongs to.
+ */
+function ChoiceField({
+  label,
+  hint,
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  options: DropdownOption[];
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <Dropdown
+        label={label}
+        options={options}
+        value={value}
+        disabled={disabled}
+        onChange={onChange}
+      />
+      {hint && <p className="mt-1.5 text-sm">{hint}</p>}
+    </div>
+  );
+}
+
+/**
+ * A named shortlist of values, with a typed-in fallback.
+ *
+ * Replaces a row of toggle buttons beside a raw field. The buttons put every
+ * option on screen permanently, gave no single place that stated the current
+ * choice, and still needed the field next to them — so the same setting was
+ * editable two ways at once. A dropdown names the current value and only shows
+ * the field when the user picks Custom.
+ */
+function PresetField({
+  label,
+  hint,
+  presets,
+  value,
+  kind,
+  disabled,
+  preview,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  presets: Array<{ label: string; value: string | number }>;
+  value: string | number | null;
+  kind: 'text' | 'number';
+  disabled: boolean;
+  preview?: (value: string | number | null) => string;
+  onChange: (value: string | number | null) => void;
+}) {
+  const matches = (candidate: string | number) => candidate === value;
+  // Sticky: a custom value can pass through a preset's exact value while it is
+  // still being typed, which would otherwise pull the field out from under the
+  // cursor.
+  const [custom, setCustom] = useState(() => !presets.some((preset) => matches(preset.value)));
+  const selected = custom ? null : presets.find((preset) => matches(preset.value));
+
+  return (
+    <div className="space-y-3">
+      <Dropdown
+        label={label}
+        disabled={disabled}
+        value={selected ? String(selected.value) : CUSTOM_VALUE}
+        options={[
+          ...presets.map((preset) => ({ value: String(preset.value), label: preset.label })),
+          { value: CUSTOM_VALUE, label: kind === 'number' ? 'Custom number' : 'Custom text' },
+        ]}
+        onChange={(chosen) => {
+          if (chosen === CUSTOM_VALUE) {
+            setCustom(true);
+            return;
+          }
+          setCustom(false);
+          const preset = presets.find((candidate) => String(candidate.value) === chosen);
+          if (preset) onChange(preset.value);
+        }}
+      />
+      {!selected && (
+        <Field
+          label={kind === 'number' ? 'Custom number' : 'Custom text'}
+          type={kind === 'number' ? 'number' : 'text'}
+          value={value == null ? '' : String(value)}
+          disabled={disabled}
+          hint={preview?.(value)}
+          onChange={(event) => {
+            const raw = event.target.value;
+            if (kind !== 'number') return onChange(raw);
+            onChange(raw === '' ? null : Number(raw));
+          }}
+        />
+      )}
+      {hint && <p className="text-sm">{hint}</p>}
+    </div>
+  );
+}
+
+function beatSlideshowSizeValue(config: Record<string, unknown>): string {
+  if (typeof config.size === 'string' && isVideoOutputSize(config.size)) return config.size;
+  if (typeof config.width === 'number' && typeof config.height === 'number') {
+    return matchVideoOutputPreset(config.width, config.height) ?? CUSTOM_VIDEO_SIZE;
+  }
+  return DEFAULT_VIDEO_OUTPUT_SIZE;
+}
+
+function beatSlideshowSizeOptions(config: Record<string, unknown>): Array<{ id: string; label: string }> {
+  const options = VIDEO_OUTPUT_PRESETS.map((preset) => ({ id: preset.id, label: preset.label }));
+  if (beatSlideshowSizeValue(config) !== CUSTOM_VIDEO_SIZE) return options;
+  if (typeof config.width !== 'number' || typeof config.height !== 'number') return options;
+  return [
+    ...options,
+    { id: CUSTOM_VIDEO_SIZE, label: `${config.width}×${config.height} (saved size)` },
+  ];
+}
 
 interface FieldSpec {
   key: string;
   label: string;
   kind: 'text' | 'number' | 'boolean' | 'enum';
   options?: string[];
+  optionLabels?: Record<string, string>;
+  description?: string;
+  presets?: Array<{ label: string; value: string | number }>;
 }
 
 /**
@@ -24,26 +197,85 @@ interface FieldSpec {
 export function NodeConfigPanel({
   slug,
   node,
+  accounts,
+  audioAssets,
+  mediaAssets,
+  mediaFolders,
   canEdit,
   onSaved,
   onDelete,
 }: {
   slug: string;
   node: CanvasNode;
+  accounts: WorkflowChannelOption[];
+  audioAssets: WorkflowAudioOption[];
+  mediaAssets: WorkflowMediaAssetOption[];
+  mediaFolders: WorkflowMediaFolderOption[];
   canEdit: boolean;
   onSaved: (node: CanvasNode) => void;
   onDelete: () => void;
 }) {
   const definition = getDefinition(node.type);
   const [name, setName] = useState(node.name);
-  const [config, setConfig] = useState<Record<string, unknown>>(
-    (node.config as Record<string, unknown>) ?? {},
+  const [config, setConfig] = useState<Record<string, unknown>>(() =>
+    normalizeNodeConfig(node.type, node.config),
   );
   const [error, setError] = useState('');
-  const [saved, setSaved] = useState(false);
+  /** The settings as they were when the save succeeded, or null before one. */
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  const fields = useMemo(() => (definition ? describeSchema(definition.configSchema) : []), [definition]);
+  const fields = useMemo(() => {
+    if (!definition) return [];
+    const help = WORKFLOW_FIELD_HELP[node.type as keyof typeof WORKFLOW_FIELD_HELP] ?? {};
+    const specs = describeSchema(definition.configSchema).map((field) => {
+      const metadata = help[field.key as keyof typeof help];
+      return metadata
+        ? {
+            ...field,
+            label: metadata.label,
+            description: metadata.description,
+            optionLabels: metadata.optionLabels,
+            presets: metadata.presets,
+          }
+        : field;
+    });
+
+    // Both size pickers are dimension enums the user should not have to decode;
+    // only the beat slideshow carries the legacy width/height pair.
+    if (node.type === 'BEAT_SLIDESHOW') {
+      return specs
+        .filter((field) => field.key !== 'width' && field.key !== 'height')
+        .map((field) =>
+          field.key === 'size'
+            ? {
+                ...field,
+                label: help.size?.label ?? 'Video format',
+                description: help.size?.description,
+                optionLabels: Object.fromEntries(
+                  VIDEO_OUTPUT_PRESETS.map((preset) => [preset.id, preset.label]),
+                ),
+              }
+            : field,
+        );
+    }
+
+    if (node.type === 'IMAGE_GENERATOR') {
+      return specs.map((field): FieldSpec =>
+        field.key === 'size'
+          ? {
+              ...field,
+              label: help.size?.label ?? 'Image format',
+              description: help.size?.description,
+              optionLabels: IMAGE_SIZE_LABELS,
+            }
+          : field,
+      );
+    }
+
+    return specs;
+  }, [definition, node.type]);
 
   if (!definition) {
     return (
@@ -56,25 +288,101 @@ export function NodeConfigPanel({
     );
   }
 
+  const selectedChannelIds = Array.isArray(config.socialAccountIds)
+    ? (config.socialAccountIds as string[])
+    : [];
+
+  function toggleChannel(accountId: string, checked: boolean) {
+    setConfig((current) => {
+      const ids = Array.isArray(current.socialAccountIds)
+        ? [...(current.socialAccountIds as string[])]
+        : [];
+      const next = checked ? [...ids, accountId] : ids.filter((id) => id !== accountId);
+      return { ...current, socialAccountIds: next };
+    });
+  }
+
   function save() {
     setError('');
-    setSaved(false);
+
+    const snapshot = snapshotOf(name, config);
+    const payload = normalizeNodeConfig(node.type, config);
+    const channelIds = Array.isArray(payload.socialAccountIds)
+      ? (payload.socialAccountIds as string[])
+      : [];
+    if (node.type === 'PUBLISH' && channelIds.length === 0) {
+      setError(PUBLISH_CHANNEL_REQUIRED);
+      return;
+    }
+
     startTransition(async () => {
       try {
-        const updated = await updateNodeAction(slug, node.id, { name, config });
+        const updated = await updateNodeAction(slug, node.id, { name, config: payload });
         onSaved(updated as unknown as CanvasNode);
-        setSaved(true);
+        setSavedSnapshot(snapshot);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'Those settings could not be saved.');
       }
     });
   }
 
+  /**
+   * "Saved." is a claim about what is stored, so it stands only while the panel
+   * still holds exactly what was sent. It used to be a flag set on success and
+   * cleared on the next submit, which left it sitting above a setting the user
+   * had just changed — telling them an unsaved edit was safe.
+   *
+   * Derived rather than cleared by each of the ten or so change handlers, so a
+   * new control cannot forget to reset it. Editing a value back to what was
+   * saved restores the message, which is correct: the form matches the record.
+   */
+  const saved = savedSnapshot !== null && savedSnapshot === snapshotOf(name, config);
+
+  /**
+   * Which settings this node is actually showing right now.
+   *
+   * Two of the nodes swap a control in and out with their own mode, so this
+   * depends on the node's current config rather than on its type alone.
+   */
+  const shownFields = fields.filter((field) => {
+    if (node.type === 'AUDIO_TRIMMER') return false;
+    if (node.type === 'MUSIC_SELECTOR') {
+      if (field.key === 'mediaAssetId') return config.mode === 'specific';
+      if (field.key === 'folderId') return config.mode !== 'specific';
+    }
+    if (node.type === 'MEDIA_LIBRARY') {
+      if (field.key === 'assetId') return false;
+      if (field.key === 'includeSubfolders') return typeof config.assetId !== 'string';
+    }
+    if (node.type === 'PICK' && field.key === 'index') return config.mode === 'index';
+    return true;
+  });
   return (
     <div className="space-y-4 rounded-lg border border-hairline p-6">
       <div>
-        <p className="b88-eyebrow">Step settings</p>
-        <p className="b88-body-sm mt-2">{definition.description}</p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="b88-eyebrow">Step settings</p>
+          {/* One switch for every explanation in the panel. Off by default, so
+              the settings read as controls rather than documentation. */}
+          <IconButton
+            icon={CircleHelp}
+            label={showHelp ? 'Hide setting explanations' : 'Explain these settings'}
+            aria-pressed={showHelp}
+            className={showHelp ? 'shadow-[inset_0_0_0_1px_var(--ink)]' : ''}
+            onClick={() => setShowHelp((current) => !current)}
+          />
+        </div>
+        {showHelp && (
+          <div className="mt-3 rounded-md bg-[var(--surface-soft)] p-4">
+            <p className="b88-body-sm">{definition.description}</p>
+            <Link
+              className="b88-body-sm mt-2 inline-block"
+              href={`/w/${slug}/workflows/guide#${node.type.toLowerCase().replaceAll('_', '-')}`}
+            >
+              Open the full guide
+            </Link>
+          </div>
+        )}
       </div>
 
       <Field
@@ -84,40 +392,207 @@ export function NodeConfigPanel({
         onChange={(event) => setName(event.target.value)}
       />
 
-      {fields.map((field) => {
+      {node.type === 'COMBINE_MEDIA' && (
+        <WorkflowCombineOrder
+          value={combineSourceOrder(config.sourceOrder)}
+          disabled={!canEdit}
+          onChange={(sourceOrder) => setConfig((current) => ({ ...current, sourceOrder }))}
+        />
+      )}
+
+      {node.type === 'AUDIO_TRIMMER' && (
+        <WorkflowTrimmerEditor
+          slug={slug}
+          nodeId={node.id}
+          disabled={!canEdit}
+          value={{
+            mode: config.mode === 'bars' ? 'bars' : 'range',
+            startSeconds: typeof config.startSeconds === 'number' ? config.startSeconds : null,
+            endSeconds: typeof config.endSeconds === 'number' ? config.endSeconds : null,
+            bars: typeof config.bars === 'number' ? config.bars : 8,
+            snapToDownbeat: config.snapToDownbeat !== false,
+          }}
+          onChange={(next) => setConfig((current) => ({ ...current, ...next }))}
+        />
+      )}
+
+      {shownFields.map((field) => {
         const value = config[field.key];
-        if (field.kind === 'boolean') {
+        if (node.type === 'MUSIC_SELECTOR' && field.key === 'mediaAssetId') {
           return (
-            <Checkbox
+            <ChoiceField
               key={field.key}
               label={field.label}
-              checked={Boolean(value)}
+              hint={showHelp ? field.description : undefined}
+              value={String(value ?? '')}
               disabled={!canEdit}
-              onChange={(event) => setConfig((c) => ({ ...c, [field.key]: event.target.checked }))}
+              options={[
+                { value: '', label: 'Choose a track' },
+                ...audioAssets.map((asset) => ({
+                  value: asset.id,
+                  label: [
+                    asset.filename,
+                    asset.bpm ? `${Math.round(asset.bpm)} BPM` : null,
+                    asset.hasBeatGrid ? 'beats ready' : null,
+                  ].filter(Boolean).join(' · '),
+                })),
+              ]}
+              onChange={(chosen) =>
+                setConfig((current) => ({ ...current, mediaAssetId: chosen || null }))
+              }
             />
           );
         }
-        if (field.kind === 'enum') {
+        if (node.type === 'MUSIC_SELECTOR' && field.key === 'folderId') {
           return (
-            <Select
+            <ChoiceField
               key={field.key}
               label={field.label}
+              hint={showHelp ? field.description : undefined}
               value={String(value ?? '')}
               disabled={!canEdit}
-              onChange={(event) => setConfig((c) => ({ ...c, [field.key]: event.target.value }))}
-            >
-              {(field.options ?? []).map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </Select>
+              options={[
+                { value: '', label: 'Entire music library' },
+                ...mediaFolders.map((folder) => ({ value: folder.id, label: folder.name })),
+              ]}
+              onChange={(chosen) =>
+                setConfig((current) => ({ ...current, folderId: chosen || null }))
+              }
+            />
+          );
+        }
+        if (node.type === 'MEDIA_LIBRARY' && field.key === 'folderId') {
+          const selectedAssetId =
+            typeof config.assetId === 'string' ? config.assetId : null;
+          const selectedFolderId =
+            typeof config.folderId === 'string' ? config.folderId : null;
+          return (
+            <ChoiceField
+              key={field.key}
+              label={field.label}
+              hint={showHelp ? field.description : undefined}
+              value={
+                selectedAssetId
+                  ? `asset:${selectedAssetId}`
+                  : selectedFolderId
+                    ? `folder:${selectedFolderId}`
+                    : ''
+              }
+              disabled={!canEdit}
+              options={[
+                { value: '', label: 'Entire media library' },
+                ...mediaFolders.map((folder) => ({
+                  value: `folder:${folder.id}`,
+                  label: `Folder · ${folder.name}`,
+                })),
+                ...mediaAssets.map((asset) => ({
+                  value: `asset:${asset.id}`,
+                  label: `${mediaTypeLabel(asset.type)} · ${asset.filename}`,
+                })),
+              ]}
+              onChange={(chosen) => setConfig((current) => ({
+                ...current,
+                folderId: chosen.startsWith('folder:') ? chosen.slice(7) : null,
+                assetId: chosen.startsWith('asset:') ? chosen.slice(6) : null,
+              }))}
+            />
+          );
+        }
+        if (node.type === 'TEXT_OVERLAY' && field.key === 'template') {
+          return (
+            <PresetField
+              key={field.key}
+              label={field.label}
+              hint={showHelp ? field.description : undefined}
+              presets={TEXT_OVERLAY_PRESETS.map((option) => ({
+                label: option.label,
+                value: option.value,
+              }))}
+              value={String(value ?? '')}
+              kind="text"
+              disabled={!canEdit}
+              // The only setting whose effect is not obvious from its value.
+              preview={(current) => `Shows ${previewOverlay(String(current ?? ''))}`}
+              onChange={(next) => setConfig((current) => ({ ...current, template: next ?? '' }))}
+            />
+          );
+        }
+        if (field.kind === 'boolean') {
+          return (
+            <div key={field.key}>
+              <Checkbox
+                label={field.label}
+                checked={Boolean(value)}
+                disabled={!canEdit}
+                onChange={(event) => setConfig((c) => ({ ...c, [field.key]: event.target.checked }))}
+              />
+              {showHelp && field.description && (
+                <p className="ml-8 mt-1 text-sm">{field.description}</p>
+              )}
+            </div>
+          );
+        }
+        if (field.kind === 'enum') {
+          const isBeatSize = node.type === 'BEAT_SLIDESHOW' && field.key === 'size';
+          const sizeOptions = isBeatSize ? beatSlideshowSizeOptions(config) : null;
+          const enumValue = isBeatSize
+            ? beatSlideshowSizeValue(config)
+            : String(value ?? '');
+
+          // The crop is a consequence of the choice, not documentation, so it
+          // stays visible: the shapes the model offers are not the shapes the
+          // video formats need, and silence there is how that surprises people.
+          const fitNote = node.type === 'IMAGE_GENERATOR' && field.key === 'size'
+            ? imageSizeFitNote(enumValue)
+            : null;
+
+          return (
+            <ChoiceField
+              key={field.key}
+              label={field.label}
+              hint={[fitNote, showHelp ? field.description : null].filter(Boolean).join(' ') || undefined}
+              value={enumValue}
+              disabled={!canEdit}
+              options={(sizeOptions ?? (field.options ?? []).map((option) => ({
+                id: option,
+                label: field.optionLabels?.[option] ?? option,
+              }))).map((option) => ({ value: option.id, label: option.label }))}
+              onChange={(chosen) =>
+                setConfig((c) => {
+                  const next = { ...c };
+                  if (isBeatSize) {
+                    if (chosen === CUSTOM_VIDEO_SIZE) return c;
+                    next.size = chosen;
+                    delete next.width;
+                    delete next.height;
+                    return next;
+                  }
+                  next[field.key] = chosen;
+                  return next;
+                })
+              }
+            />
+          );
+        }
+        if (field.presets?.length) {
+          return (
+            <PresetField
+              key={field.key}
+              label={field.label}
+              hint={showHelp ? field.description : undefined}
+              presets={field.presets}
+              value={value as string | number | null}
+              kind={field.kind === 'number' ? 'number' : 'text'}
+              disabled={!canEdit}
+              onChange={(next) => setConfig((c) => ({ ...c, [field.key]: next }))}
+            />
           );
         }
         return (
           <Field
             key={field.key}
             label={field.label}
+            hint={showHelp ? field.description : undefined}
             type={field.kind === 'number' ? 'number' : 'text'}
             value={value == null ? '' : String(value)}
             disabled={!canEdit}
@@ -135,6 +610,40 @@ export function NodeConfigPanel({
           />
         );
       })}
+
+      {nodeUsesChannelPicker(node.type) && (
+        <div>
+          <p className="b88-label">Publishing channels</p>
+          {/* Publish cannot save without one, so that stays visible. What an
+              empty Create draft selection means is an explanation. */}
+          {node.type === 'CREATE_DRAFT'
+            ? showHelp && <p className="b88-caption mt-2">Unchecked uses every channel</p>
+            : <p className="b88-caption mt-2">Pick at least one</p>}
+          {accounts.length === 0 ? (
+            <StatusMessage tone="error" className="mt-3">
+              No active channels are connected to this workspace. Connect a channel before
+              configuring this step.
+            </StatusMessage>
+          ) : (
+            <div className="mt-3 grid gap-y-0.5">
+              {accounts.map((account) => {
+                const handle = account.accountHandle ?? account.accountName;
+                const platformLabel =
+                  PLATFORM_LABELS[account.platform as keyof typeof PLATFORM_LABELS] ?? account.platform;
+                return (
+                  <Checkbox
+                    key={account.id}
+                    label={`${platformLabel} · ${handle}`}
+                    checked={selectedChannelIds.includes(account.id)}
+                    disabled={!canEdit}
+                    onChange={(event) => toggleChannel(account.id, event.target.checked)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {error && <StatusMessage tone="error">{error}</StatusMessage>}
       {saved && <StatusMessage tone="success">Saved.</StatusMessage>}
@@ -197,3 +706,34 @@ const humanise = (key: string) =>
     .replace(/^./, (c) => c.toUpperCase())
     .replace(/\bId\b/, 'ID')
     .trim();
+
+function normalizeNodeConfig(type: string, raw: unknown): Record<string, unknown> {
+  if (type === 'BEAT_SLIDESHOW' || type === 'AUDIO_TRIMMER' || nodeUsesChannelPicker(type)) {
+    return parseConfig(type, raw) as Record<string, unknown>;
+  }
+  return (raw as Record<string, unknown>) ?? {};
+}
+
+function combineSourceOrder(value: unknown): CombineSourceId[] {
+  const valid: CombineSourceId[] = ['media1', 'media2', 'media3', 'media4'];
+  if (!Array.isArray(value)) return valid;
+  const selected = value.filter(
+    (item): item is CombineSourceId =>
+      typeof item === 'string' && valid.includes(item as CombineSourceId),
+  );
+  return selected.length === valid.length && new Set(selected).size === valid.length
+    ? selected
+    : valid;
+}
+
+function mediaTypeLabel(type: WorkflowMediaAssetOption['type']): string {
+  if (type === 'IMAGE') return 'Image';
+  if (type === 'VIDEO') return 'Video';
+  return 'Audio';
+}
+
+/** Key order is not meaningful here, so it must not decide whether a form is dirty. */
+function snapshotOf(name: string, config: Record<string, unknown>): string {
+  const entries = Object.keys(config).sort().map((key) => [key, config[key]]);
+  return JSON.stringify([name, entries]);
+}

@@ -17,7 +17,7 @@ import {
   StatusMessage,
   TextArea,
 } from '@/bridge88/components';
-import { uploadMediaAction } from '@/app/actions/media';
+import { uploadMedia } from '@/lib/media/upload-client';
 import { loadMoreComposerAssetsAction, type ComposerState } from '@/app/actions/posts';
 import { PendingButton } from '@/components/action-ui';
 import { ComposerPreview } from '@/components/composer-preview';
@@ -123,11 +123,28 @@ export function ComposerForm({
     writeStoredDraft(storageKey, draft);
   }, [draft, storageKey]);
 
+  /**
+   * The post as the writer has it, without the bookkeeping a save writes back.
+   *
+   * sourceUpdatedAt is excluded deliberately: the success handler below stamps
+   * the server's new value onto the draft, and including it would make the post
+   * look edited the instant it was saved.
+   */
+  const draftSnapshot = useMemo(() => {
+    const { sourceUpdatedAt: _stamp, ...edited } = draft;
+    return JSON.stringify(edited);
+  }, [draft]);
+  const liveSnapshot = useRef(draftSnapshot);
+  liveSnapshot.current = draftSnapshot;
+  /** What was saved, so a confirmation stops claiming a later edit is stored. */
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+
   useEffect(() => {
     if (state.status === 'success') {
       if (state.savedUpdatedAt) {
         setDraft((current) => ({ ...current, sourceUpdatedAt: state.savedUpdatedAt ?? current.sourceUpdatedAt }));
       }
+      setSavedSnapshot(liveSnapshot.current);
       clearStoredDraft(storageKey);
       if (state.redirectTo) router.push(state.redirectTo);
     }
@@ -154,6 +171,11 @@ export function ComposerForm({
   const fieldErrors = state.fields ?? {};
   const readOnly = !lifecycleActions.includes('edit');
   const selectedAccounts = accounts.filter((account) => draft.selectedAccountIds.includes(account.id));
+  // The channel being edited first, then the rest, so the pane reorders rather
+  // than the edited preview jumping around as tabs change.
+  const previewAccounts = activeAccount
+    ? [activeAccount, ...selectedAccounts.filter((account) => account.id !== activeAccount.id)]
+    : selectedAccounts;
   const demoMode = selectedAccounts.some((account) => account.isDemo);
   const displayTimezone = timezoneLabel(timezone);
 
@@ -310,11 +332,7 @@ export function ComposerForm({
     try {
       const formData = new FormData();
       files.forEach((file) => formData.append('files', file));
-      const result = await uploadMediaAction(slug, formData);
-      if (result.status === 'error' && result.error) {
-        setUploadError(result.error);
-        return;
-      }
+      await uploadMedia(slug, formData);
       router.refresh();
     } catch (cause) {
       setUploadError(cause instanceof Error ? cause.message : 'Upload failed.');
@@ -386,7 +404,9 @@ export function ComposerForm({
             <StatusMessage tone="error" className="mb-6">{state.error}</StatusMessage>
           </div>
         )}
-        {state.success && <StatusMessage tone="success" className="mb-6">{state.success}</StatusMessage>}
+        {state.success && savedSnapshot === draftSnapshot && (
+          <StatusMessage tone="success" className="mb-6">{state.success}</StatusMessage>
+        )}
 
         <form className="grid gap-6" onSubmit={(event) => { event.preventDefault(); submitWithIntent('draft'); }}>
           <Field
@@ -766,8 +786,19 @@ export function ComposerForm({
         </form>
       </section>
 
-      <aside className="space-y-3 self-start">
-        <ComposerPreview account={activeAccount} version={activeVersion} assets={libraryAssets} />
+      {/* One preview per selected channel. Showing only the tab being edited
+          hid the thing the composer exists to check — that the same post reads
+          correctly on every channel it is going to. The channel being edited
+          leads, so the pane still follows the editor. */}
+      <aside className="space-y-6 self-start">
+        {previewAccounts.map((account) => (
+          <ComposerPreview
+            key={account.id}
+            account={account}
+            version={draft.versions[account.id]}
+            assets={libraryAssets}
+          />
+        ))}
       </aside>
     </div>
     <Dialog

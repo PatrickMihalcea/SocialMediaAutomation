@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 import { env } from '@/lib/env';
 import { AiError, type AiImageResult, type AiObjectResult, type AiProvider, type AiTextResult, type AiMessage } from '@/lib/ai/types';
+import type { ImageSize } from '@/lib/ai/image-sizes';
 
 const TIMEOUT_MS = 60_000;
 
@@ -89,7 +90,7 @@ export class OpenAiProvider implements AiProvider {
     }
   }
 
-  async generateImage(input: { prompt: string; size?: '1024x1024' | '1024x1536' | '1536x1024' }): Promise<AiImageResult> {
+  async generateImage(input: { prompt: string; size?: ImageSize }): Promise<AiImageResult> {
     try {
       const res = await this.sdk().images.generate({
         model: this.imageModel,

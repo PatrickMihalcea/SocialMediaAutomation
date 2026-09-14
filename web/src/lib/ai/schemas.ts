@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  proposedWorkflowEdgeSchema,
+  proposedWorkflowNodeSchema,
+  workflowGraphEditSchema,
+} from '@/lib/workflows/assistant-graph';
 
 /**
  * Structured output contracts. Every AI call the application acts on names one
@@ -137,6 +142,46 @@ export const assistantReplySchema = z.object({
         newTitle: z.string().min(1).max(200),
         text: z.string().min(1).max(65_000),
         hashtags: z.array(z.string().max(100)).max(30).default([]),
+      }).strict(),
+      z.object({
+        kind: z.literal('create_workflow'),
+        summary: z.string().min(1).max(500),
+        name: z.string().min(2).max(120),
+        description: z.string().max(1000).nullable().optional(),
+        scheduleEnabled: z.boolean().default(false),
+        scheduleWeekdays: z.array(z.number().int().min(0).max(6)).max(7).default([]),
+        scheduleHour: z.number().int().min(0).max(23).default(9),
+        scheduleMinute: z.number().int().min(0).max(59).default(0),
+        nodes: z.array(proposedWorkflowNodeSchema).min(1).max(20),
+        edges: z.array(proposedWorkflowEdgeSchema).max(40).default([]),
+        /** Filled after the user confirms, so the assistant can link to the editor. */
+        workflowId: z.string().uuid().optional(),
+      }).strict(),
+      z.object({
+        kind: z.literal('update_workflow'),
+        summary: z.string().min(1).max(500),
+        workflowId: z.string().uuid(),
+        workflowName: z.string().min(1).max(200),
+        name: z.string().min(2).max(120).optional(),
+        description: z.string().max(1000).nullable().optional(),
+        scheduleEnabled: z.boolean().optional(),
+        scheduleWeekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+        scheduleHour: z.number().int().min(0).max(23).optional(),
+        scheduleMinute: z.number().int().min(0).max(59).optional(),
+        nodeUpdates: z.array(z.object({
+          nodeId: z.string().uuid(),
+          name: z.string().min(1).max(80).optional(),
+          config: z.record(z.string(), z.unknown()).optional(),
+        }).strict()).max(20).default([]),
+        graphEdits: z.array(workflowGraphEditSchema).max(40).default([]),
+      }).strict(),
+      z.object({
+        kind: z.literal('run_workflow'),
+        summary: z.string().min(1).max(500),
+        workflowId: z.string().uuid(),
+        workflowName: z.string().min(1).max(200),
+        /** Filled after confirmation so the completed action links to live run details. */
+        runId: z.string().uuid().optional(),
       }).strict(),
     ])
     .nullable()

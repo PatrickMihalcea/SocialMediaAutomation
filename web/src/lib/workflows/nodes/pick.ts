@@ -1,29 +1,58 @@
 import 'server-only';
 import { PermanentJobError } from '@/lib/queue/runner';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
+import { selectIndices, type SelectionMode } from '@/lib/workflows/select-items';
 
 interface Config {
+  mode: SelectionMode;
+  count: number;
   index: number;
 }
 
 /**
- * Takes one item out of a list.
+ * Selects one or more items from a list.
  *
- * Exists because port typing is strict: a list output cannot be dropped onto a
- * single-value input. Making that conversion an explicit step keeps the graph
- * honest about its own arity instead of silently taking the first item.
+ * Both output shapes are explicit: `selection` remains a list while `item`
+ * exposes its first value to a downstream step that accepts only one.
+ *
+ * `labels` is an optional parallel list that is reordered by the same positions
+ * as the items. Media ids and the names that belong to them travel as two
+ * lists, so a random selection applied to one and not the other would put every
+ * label on the wrong clip — and nothing would say so until someone watched the
+ * finished video.
  */
 export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>> {
   const config = ctx.config as Config;
   const items = Array.isArray(ctx.inputs.items) ? ctx.inputs.items : [];
-  if (items.length === 0) throw new PermanentJobError('Nothing reached this step to pick from.');
+  const labels = Array.isArray(ctx.inputs.labels) ? ctx.inputs.labels.map(String) : null;
+  if (items.length === 0) throw new PermanentJobError('Nothing reached this step to select from.');
 
-  // A negative index counts back from the end, so -1 is the last item.
-  const index = config.index < 0 ? items.length + config.index : config.index;
-  if (index < 0 || index >= items.length) {
+  // A mismatched label list is a wiring mistake. Trimming or padding to fit
+  // would shift every label by one and still produce a video, so it is refused.
+  if (labels && labels.length !== items.length) {
     throw new PermanentJobError(
-      `This step is set to item ${config.index}, but only ${items.length} arrived.`,
+      `This step received ${items.length} items but ${labels.length} labels. Both lists must come from the same source in the same order.`,
     );
   }
-  return { item: items[index] };
+
+  try {
+    const positions = selectIndices(items.length, {
+      mode: config.mode,
+      count: config.count,
+      index: config.index,
+      // Two selection steps in one run should not accidentally choose the same
+      // sample, while retries of either step must reproduce their own sample.
+      seed: `${ctx.runId}:${ctx.nodeRunId}`,
+    });
+    const selection = positions.map((position) => items[position]);
+    return {
+      item: selection[0],
+      selection,
+      labels: labels ? positions.map((position) => labels[position]) : [],
+    };
+  } catch (error) {
+    throw new PermanentJobError(
+      error instanceof Error ? error.message : 'These items could not be selected.',
+    );
+  }
 }

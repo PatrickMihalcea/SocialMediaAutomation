@@ -1,10 +1,10 @@
 import { redirect } from 'next/navigation';
 import { Button, Field, TextArea } from '@/bridge88/components';
-import { COMMON_TIMEZONES } from '@/lib/scheduling/time';
 import { listMyWorkspaces, requireUser, requireWorkspace } from '@/lib/auth/guard';
 import { advanceOnboardingAction, createWorkspaceAction } from '@/app/actions/workspace';
 import { ActionForm } from '@/components/action-form';
 import { PendingButton } from '@/components/action-ui';
+import { DetectedTimezone } from '@/components/detected-timezone';
 import { db } from '@/lib/db';
 
 export default async function OnboardingPage({
@@ -59,7 +59,7 @@ function WorkspaceDetails() {
         <TextArea name="description" label="What does the business do?" rows={4} required />
         <Field name="industry" label="Industry" />
         <Field name="targetAudience" label="Target audience" placeholder="Software teams at growing companies" />
-        <label><span className="b88-label">Timezone</span><select name="timezone" className="b88-input" defaultValue="UTC">{COMMON_TIMEZONES.map((zone) => <option key={zone}>{zone}</option>)}</select></label>
+        <DetectedTimezone />
         <label><span className="b88-label">Default language</span><select name="defaultLanguage" className="b88-input" defaultValue="en"><option value="en">English</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="ro">Romanian</option></select></label>
         <div className="flex justify-end"><PendingButton type="submit" className="w-full sm:w-auto" pendingLabel="Creating workspace">Create workspace</PendingButton></div>
       </ActionForm>

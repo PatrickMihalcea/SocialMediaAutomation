@@ -10,11 +10,13 @@ import { prepareImage } from '@/lib/render/layout';
 import { renderer } from '@/lib/render';
 import type { BeatSegment, RenderPlan } from '@/lib/render/types';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
+import { resolveVideoOutputDimensions } from '@/lib/workflows/video-output-presets';
 
 interface Config {
   beatsPerClip: number;
-  width: number;
-  height: number;
+  size?: string;
+  width?: number;
+  height?: number;
   fps: number;
   fit: 'cover' | 'blur-pad';
   kenBurns: boolean;
@@ -25,18 +27,19 @@ interface Config {
 const SUPERSAMPLE = 2;
 
 /**
- * Cuts the images to the beat and renders one video.
+ * Cuts images and source video clips to the beat and renders one video.
  *
  * The interesting decisions all happen in buildBeatPlan, which is pure — this
  * node is the part that talks to the database, the object store and the encoder.
  */
 export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>> {
   const config = ctx.config as Config;
-  const imageIds = asIds(ctx.inputs.images);
+  const { width, height } = resolveVideoOutputDimensions(config);
+  const mediaIds = asIds(ctx.inputs.images);
   const audioId = typeof ctx.inputs.audio === 'string' ? ctx.inputs.audio : null;
   const titles = asStrings(ctx.inputs.titles);
 
-  if (imageIds.length === 0) throw new PermanentJobError('No images reached this step.');
+  if (mediaIds.length === 0) throw new PermanentJobError('No images or videos reached this step.');
   if (!audioId) throw new PermanentJobError('No track reached this step.');
 
   const engine = renderer();
@@ -48,13 +51,17 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
 
   // Tenancy check: media ids arrive as plain JSON from an upstream step, so they
   // are re-fetched scoped to this workspace rather than trusted.
-  const images = await db.mediaAsset.findMany({
-    where: { id: { in: imageIds }, workspaceId: ctx.workspaceId, type: MediaType.IMAGE },
+  const mediaAssets = await db.mediaAsset.findMany({
+    where: {
+      id: { in: mediaIds },
+      workspaceId: ctx.workspaceId,
+      type: { in: [MediaType.IMAGE, MediaType.VIDEO] },
+    },
   });
-  if (images.length !== imageIds.length) {
-    throw new PermanentJobError('Some images are no longer in the media library.');
+  if (mediaAssets.length !== mediaIds.length) {
+    throw new PermanentJobError('Some images or videos are no longer in the media library.');
   }
-  const ordered = imageIds.map((id) => images.find((image) => image.id === id)!);
+  const ordered = mediaIds.map((id) => mediaAssets.find((asset) => asset.id === id)!);
 
   const audio = await db.mediaAsset.findFirst({
     where: { id: audioId, workspaceId: ctx.workspaceId, type: MediaType.AUDIO },
@@ -74,30 +81,33 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   await ctx.heartbeat();
 
   const used = ordered.slice(0, plan.imageCount);
-  const prepared = [];
-  for (const image of used) {
-    const bytes = await storage().get(image.storageKey);
-    prepared.push(
-      await prepareImage(bytes, {
-        width: config.width,
-        height: config.height,
+  const clips: RenderPlan['clips'] = [];
+  for (const asset of used) {
+    const bytes = await storage().get(asset.storageKey);
+    if (asset.type === MediaType.IMAGE) {
+      const prepared = await prepareImage(bytes, {
+        width,
+        height,
         supersample: SUPERSAMPLE,
         fit: config.fit,
-      }),
-    );
+      });
+      clips.push({ kind: 'image', ...prepared, fit: config.fit });
+    } else {
+      clips.push({ kind: 'video', bytes, mimeType: asset.mimeType, fit: config.fit });
+    }
     await ctx.heartbeat();
   }
 
   const renderPlan: RenderPlan = {
-    width: config.width,
-    height: config.height,
+    width,
+    height,
     fps: config.fps,
     totalFrames: plan.totalFrames,
     supersample: SUPERSAMPLE,
-    images: prepared,
+    clips,
     deterministic: false,
     segments: plan.cutFrames.slice(0, -1).map((startFrame, index) => ({
-      imageIndex: index,
+      clipIndex: index,
       startFrame,
       endFrame: plan.cutFrames[index + 1],
       // Alternating direction stops a long run of clips feeling mechanical.
@@ -120,7 +130,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   await ctx.assertNotCancelled();
   const result = await engine.render(renderPlan);
 
-  const filename = `beat-video-${Date.now()}.${result.extension}`;
+  const filename = outputName(ctx.workflowName, 'cut', ctx.runId, result.extension);
   const key = mediaKey(ctx.workspaceId, filename, 'derived');
   await storage().put(key, result.data, result.mimeType);
 
@@ -151,7 +161,8 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
         startBeatIndex: plan.startBeatIndex,
         adjustment: plan.adjustment,
         beatAnalyzer: grid.analyzer,
-        imageAssetIds: used.map((i) => i.id),
+        mediaAssetIds: used.map((item) => item.id),
+        imageAssetIds: used.filter((item) => item.type === MediaType.IMAGE).map((item) => item.id),
       }),
     },
     select: { id: true },
@@ -166,7 +177,9 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
 
   const segments: BeatSegment[] = plan.cutFrames.slice(0, -1).map((startFrame, index) => ({
     index,
-    imageAssetId: used[index].id,
+    mediaAssetId: used[index].id,
+    mediaKind: used[index].type as 'IMAGE' | 'VIDEO',
+    ...(used[index].type === MediaType.IMAGE ? { imageAssetId: used[index].id } : {}),
     startFrame,
     endFrame: plan.cutFrames[index + 1],
     startSeconds: startFrame / config.fps,
@@ -185,3 +198,21 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
 const asIds = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
 const asStrings = asIds;
+
+/**
+ * A filename someone will recognise in the media library.
+ *
+ * Output used to be named with an epoch timestamp, which the library's
+ * humaniser strips back to a single adjective — a draft would show "Labelled"
+ * rather than anything resembling the video. The workflow name plus a short run
+ * id keeps it readable and still unique.
+ */
+function outputName(workflowName: string, suffix: string, runId: string, extension: string): string {
+  const stem =
+    workflowName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 48) || 'workflow';
+  return `${stem}-${suffix}-${runId.slice(0, 6)}.${extension}`;
+}

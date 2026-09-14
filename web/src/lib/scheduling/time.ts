@@ -160,7 +160,13 @@ const TIMEZONE_LABELS: Record<string, string> = {
 };
 
 export function timezoneLabel(timezone: string): string {
-  return TIMEZONE_LABELS[timezone] ?? 'Workspace local time';
+  const curated = TIMEZONE_LABELS[timezone];
+  if (curated) return curated;
+  // Browser-detected zones are usually outside the curated map, so name the
+  // IANA locality rather than a fallback that tells the reader nothing. The
+  // original casing is kept: "Asia/Hong_Kong" reads as "Hong Kong Time".
+  const locality = timezone.split('/').pop()?.replaceAll('_', ' ').trim();
+  return locality ? `${locality} Time` : 'Workspace local time';
 }
 
 export const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -201,3 +207,11 @@ export const COMMON_TIMEZONES = [
   'Australia/Sydney',
   'Pacific/Auckland',
 ];
+
+/**
+ * A select whose value matches no option falls back to its first entry, so a
+ * detected zone missing from the curated list would silently resave as UTC.
+ */
+export function timezoneOptions(current: string): string[] {
+  return COMMON_TIMEZONES.includes(current) ? COMMON_TIMEZONES : [current, ...COMMON_TIMEZONES];
+}

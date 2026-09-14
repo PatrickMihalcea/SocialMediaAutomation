@@ -15,7 +15,8 @@ import { audit } from '@/lib/audit';
 import { notify } from '@/lib/notifications/service';
 import { assertAcyclic, descendantsOf, incomingEdges, indegrees } from '@/lib/workflows/graph';
 import { buildSnapshot, readSnapshot, toGraph, type WorkflowSnapshot } from '@/lib/workflows/snapshot';
-import { getDefinition, parseConfig } from '@/lib/workflows/definitions';
+import { getDefinition, nodeRunConfigIssue, parseConfig } from '@/lib/workflows/definitions';
+import { checkGraphTypes } from '@/lib/workflows/port-resolution';
 import { getExecutor } from '@/lib/workflows/executors';
 import { CancelledError, type NodeRunContext } from '@/lib/workflows/node-context';
 
@@ -52,6 +53,12 @@ export async function startWorkflowRun(input: {
     include: { nodes: true, edges: true },
   });
   if (!workflow) throw notFound('That workflow no longer exists.');
+  if (workflow.archivedAt) throw invalid('Restore this workflow before running it.');
+  // Pausing stops unattended work, not deliberate work. Someone editing a
+  // paused copy still needs to run it to see what their edits produce.
+  if (workflow.enabled === false && input.trigger === WorkflowRunTrigger.SCHEDULE) {
+    throw invalid('Resume this workflow before it can run on its schedule.');
+  }
   if (workflow.nodes.length === 0) {
     throw invalid('This workflow has no steps yet. Add at least one before running it.');
   }
@@ -132,12 +139,14 @@ function assertRunnable(snapshot: WorkflowSnapshot): void {
         problems.push(`"${node.name}" needs something connected to its ${port.label} input.`);
       }
     }
-    try {
-      parseConfig(node.type, node.config);
-    } catch {
-      problems.push(`"${node.name}" has settings that are incomplete.`);
-    }
+    const configIssue = nodeRunConfigIssue(node.type, node.name, node.config);
+    if (configIssue) problems.push(configIssue);
   }
+
+  // Catches a graph whose generic steps no longer resolve — e.g. a Pick one
+  // that fed a publish step until its image list was rewired to a video list.
+  const mistyped = checkGraphTypes(snapshot);
+  if (mistyped) problems.push(mistyped.reason);
 
   if (problems.length) throw invalid(problems.join(' '));
 }
@@ -173,18 +182,28 @@ async function claimAndEnqueue(nodeRun: { id: string; workspaceId: string }): Pr
       // across five invisible attempts is unreadable on the canvas, and the
       // queue's generic budget is wrong for a step that costs money per call.
       maxAttempts: 1,
-      dedupeKey: `workflow-node:${nodeRun.id}`,
+      // Scoped to the attempt, not just the node run: a retry is enqueued from
+      // inside the job that is failing, so a key naming only the node run would
+      // dedupe the retry against that still-RUNNING job and drop it, leaving the
+      // step QUEUED with nothing behind it.
+      dedupeKey: dispatchKey(nodeRun.id, 0),
     },
   );
   await db.workflowNodeRun.updateMany({ where: { id: nodeRun.id }, data: { jobId } });
 }
+
+/** One key per dispatch, so consecutive attempts never collapse into one. */
+const dispatchKey = (nodeRunId: string, attempt: number) => `workflow-node:${nodeRunId}:${attempt}`;
 
 /**
  * Re-dispatches a step that is allowed to run again. Clearing jobId is what
  * re-opens the claim above, so every retry path goes through here rather than
  * enqueueing directly.
  */
-async function redispatch(nodeRun: { id: string; workspaceId: string }, runAt?: Date): Promise<void> {
+async function redispatch(
+  nodeRun: { id: string; workspaceId: string; attempt?: number },
+  runAt?: Date,
+): Promise<void> {
   await db.workflowNodeRun.update({ where: { id: nodeRun.id }, data: { jobId: null } });
   const jobId = await enqueue(
     'run-workflow-node',
@@ -193,7 +212,7 @@ async function redispatch(nodeRun: { id: string; workspaceId: string }, runAt?: 
       workspaceId: nodeRun.workspaceId,
       maxAttempts: 1,
       runAt,
-      dedupeKey: `workflow-node:${nodeRun.id}`,
+      dedupeKey: dispatchKey(nodeRun.id, (nodeRun.attempt ?? 0) + 1),
     },
   );
   await db.workflowNodeRun.updateMany({ where: { id: nodeRun.id }, data: { jobId } });
@@ -216,7 +235,7 @@ export async function runWorkflowNode(nodeRunId: string): Promise<void> {
 
   const nodeRun = await db.workflowNodeRun.findUnique({
     where: { id: nodeRunId },
-    include: { run: true },
+    include: { run: { include: { workflow: { select: { name: true } } } } },
   });
   if (!nodeRun) throw new PermanentJobError(`Workflow step ${nodeRunId} no longer exists`);
 
@@ -290,7 +309,9 @@ async function resolveInputs(
 }
 
 async function buildContext(
-  nodeRun: WorkflowNodeRun & { run: { workspaceId: string; triggeredById: string | null } },
+  nodeRun: WorkflowNodeRun & {
+    run: { workspaceId: string; triggeredById: string | null; workflow: { name: string } };
+  },
   inputs: Record<string, unknown>,
 ): Promise<NodeRunContext> {
   return {
@@ -298,6 +319,7 @@ async function buildContext(
     runId: nodeRun.runId,
     nodeRunId: nodeRun.id,
     nodeName: nodeRun.nodeName,
+    workflowName: nodeRun.run.workflow.name,
     userId: nodeRun.run.triggeredById,
     attempt: nodeRun.attempt,
     config: parseConfig(nodeRun.nodeType, nodeRun.config),
@@ -498,7 +520,7 @@ export async function settleRun(runId: string): Promise<void> {
 
   const workflow = await db.workflow.findUnique({
     where: { id: run.workflowId },
-    select: { name: true },
+    select: { name: true, workspace: { select: { slug: true } } },
   });
 
   if (run.triggeredById) {
@@ -514,7 +536,7 @@ export async function settleRun(runId: string): Promise<void> {
         status === WorkflowRunStatus.SUCCEEDED
           ? undefined
           : 'Open the run to see which step stopped and why.',
-      href: `/w/${run.workspaceId}/workflows/${run.workflowId}/runs/${run.id}`,
+      href: `/w/${workflow?.workspace.slug ?? run.workspaceId}/workflows/${run.workflowId}/runs/${run.id}`,
     });
   }
 
@@ -548,7 +570,7 @@ export async function cancelWorkflowRun(runId: string, workspaceId: string): Pro
         runId,
         status: { in: [WorkflowNodeRunStatus.PENDING, WorkflowNodeRunStatus.QUEUED] },
       },
-      select: { id: true },
+      select: { id: true, jobId: true },
     });
     await tx.workflowNodeRun.updateMany({
       where: {
@@ -565,7 +587,7 @@ export async function cancelWorkflowRun(runId: string, workspaceId: string): Pro
         where: {
           queue: 'WORKFLOW',
           status: 'QUEUED',
-          dedupeKey: { in: stopped.map((n) => `workflow-node:${n.id}`) },
+          id: { in: stopped.flatMap((node) => node.jobId ? [node.jobId] : []) },
         },
         data: { status: 'CANCELLED', dedupeKey: null, completedAt: new Date() },
       });
@@ -685,7 +707,7 @@ export async function sweepWorkflowRuns(): Promise<{ requeued: number; settled: 
         { heartbeatAt: null, startedAt: { lt: new Date(Date.now() - STALE_NODE_MS) } },
       ],
     },
-    select: { id: true, workspaceId: true },
+    select: { id: true, workspaceId: true, attempt: true },
     take: 50,
   });
   for (const row of stale) {
@@ -704,7 +726,7 @@ export async function sweepWorkflowRuns(): Promise<{ requeued: number; settled: 
       status: WorkflowNodeRunStatus.QUEUED,
       queuedAt: { lt: new Date(Date.now() - 60_000) },
     },
-    select: { id: true, workspaceId: true, jobId: true },
+    select: { id: true, workspaceId: true, jobId: true, attempt: true },
     take: 50,
   });
   for (const row of orphaned) {
@@ -719,6 +741,9 @@ export async function sweepWorkflowRuns(): Promise<{ requeued: number; settled: 
         })
       : null;
     if (live) continue;
+    // No live job behind a QUEUED step: the dispatch was lost. This is the path
+    // that recovers a retry dropped by any future dedupe mistake, so it must
+    // stay reachable — it only runs where the sweeper runs.
     // A job that exists but has finished, while the node run is still QUEUED,
     // means the dispatch was lost. Anything else is left alone.
     await redispatch(row);

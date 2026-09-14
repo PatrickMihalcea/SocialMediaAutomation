@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState } from 'react';
-import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes, VideoHTMLAttributes } from 'react';
+import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, Ref, SelectHTMLAttributes, TextareaHTMLAttributes, VideoHTMLAttributes } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -314,16 +314,18 @@ export function Dropdown({
       const above = rect.top - gap - viewportPadding;
       const placeBelow = below >= Math.min(desiredHeight, 200) || below >= above;
       const maxHeight = Math.max(80, placeBelow ? below : above);
-      const width = Math.min(rect.width, window.innerWidth - viewportPadding * 2);
-      const left = Math.min(
-        Math.max(viewportPadding, rect.left),
-        window.innerWidth - viewportPadding - width,
-      );
+      // The trigger width is a floor, not a ceiling. Clamping the menu to the
+      // trigger makes every option ellipsis in a narrow column — the config
+      // sidebar truncated its labels to "Choice number af…" — so the menu is
+      // allowed to grow rightwards to fit its content instead.
+      const left = Math.max(viewportPadding, Math.min(rect.left, window.innerWidth - viewportPadding - rect.width));
       setPopupStyle({
         position: 'fixed',
         left,
         top: placeBelow ? rect.bottom + gap : Math.max(viewportPadding, rect.top - gap - Math.min(desiredHeight, maxHeight)),
-        width,
+        minWidth: rect.width,
+        maxWidth: window.innerWidth - viewportPadding - left,
+        width: 'max-content',
         maxHeight,
         visibility: 'visible',
       });
@@ -662,6 +664,7 @@ export function VideoPlayer({
   className = '',
   style,
   videoProps,
+  videoRef,
   unavailableMessage = 'Video unavailable',
   errorMessage = 'This video could not be played.',
 }: {
@@ -677,6 +680,7 @@ export function VideoPlayer({
     className?: string;
     style?: CSSProperties;
   };
+  videoRef?: Ref<HTMLVideoElement>;
   unavailableMessage?: string;
   errorMessage?: string;
 }) {
@@ -699,6 +703,7 @@ export function VideoPlayer({
       <div style={frameStyle}>
         {src && !failed ? (
           <video
+            ref={videoRef}
             {...nativeVideoProps}
             src={src}
             poster={poster}

@@ -5,7 +5,7 @@ import { StatusGlyph } from '@/components/visuals';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { PLATFORM_LABELS } from '@/lib/social/registry';
-import { formatInZone, timezoneLabel } from '@/lib/scheduling/time';
+import { formatInZone } from '@/lib/scheduling/time';
 import type { Prisma } from '@prisma/client';
 import { POST_STATUS_LABELS } from '@/lib/posts/labels';
 
@@ -54,7 +54,7 @@ export default async function DraftsPage({
     <>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="b88-eyebrow">Posts · {timezoneLabel(ctx.workspace.timezone)}</p>
+          <p className="b88-eyebrow">Posts</p>
           <h1 className="b88-page-title mt-3">Drafts</h1>
         </div>
         <Button href={`/w/${slug}/compose`}>Create post</Button>

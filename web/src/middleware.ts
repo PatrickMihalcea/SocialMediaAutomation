@@ -33,5 +33,12 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ['/((?!api/auth|api/webhooks|api/health|api/storage|api/cron|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|svg|ico|txt)$).*)'],
+  // Every /api route is excluded, not just a handful.
+  //
+  // Two reasons. Each route handler authenticates itself through requireUser or
+  // requireWorkspace, so middleware adds nothing but a redirect an API client
+  // cannot use — a 307 to /login instead of a 401. And middleware buffers a
+  // clone of the request body, capped by experimental.middlewareClientMaxBodySize
+  // at 10 MiB, which silently truncated every media upload past that size.
+  matcher: ['/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|svg|ico|txt)$).*)'],
 };

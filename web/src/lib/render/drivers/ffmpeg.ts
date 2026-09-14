@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { env } from '@/lib/env';
 import { ffmpegCapabilities } from '@/lib/media/process';
 import { buildEncoderArgs, buildFilterGraph } from '@/lib/render/graph-builder';
+import { buildClipInputArgs } from '@/lib/render/input-args';
 import type { RenderPlan, RenderResult, ResolvedRenderPlan, VideoRenderer } from '@/lib/render/types';
 
 const run = promisify(execFile);
@@ -30,11 +31,12 @@ export class FfmpegRenderer implements VideoRenderer {
     const caps = await ffmpegCapabilities();
     const dir = await mkdtemp(path.join(tmpdir(), 'b88-render-'));
     try {
-      const imagePaths: string[] = [];
-      for (const [index, image] of plan.images.entries()) {
-        const file = path.join(dir, `${String(index).padStart(2, '0')}.png`);
-        await writeFile(file, image.bytes);
-        imagePaths.push(file);
+      const clipPaths: Array<{ file: string; kind: 'image' | 'video' }> = [];
+      for (const [index, clip] of plan.clips.entries()) {
+        const extension = clip.kind === 'image' ? 'png' : videoExtension(clip.mimeType);
+        const file = path.join(dir, `${String(index).padStart(2, '0')}.${extension}`);
+        await writeFile(file, clip.bytes);
+        clipPaths.push({ file, kind: clip.kind });
       }
 
       // Overlay text goes to files, which shrinks drawtext's double-escaping
@@ -70,7 +72,7 @@ export class FfmpegRenderer implements VideoRenderer {
         '-nostdin',
         '-v', 'error',
         '-y',
-        ...imagePaths.flatMap((file) => ['-i', file]),
+        ...buildClipInputArgs(clipPaths),
         ...(audioPath ? ['-i', audioPath] : []),
         caps.filterScriptFlag, graphPath,
         ...buildEncoderArgs(plan),
@@ -99,4 +101,10 @@ export class FfmpegRenderer implements VideoRenderer {
       await rm(dir, { recursive: true, force: true });
     }
   }
+}
+
+function videoExtension(mimeType: string): string {
+  if (mimeType.includes('webm')) return 'webm';
+  if (mimeType.includes('quicktime')) return 'mov';
+  return 'mp4';
 }

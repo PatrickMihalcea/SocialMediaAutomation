@@ -9,11 +9,9 @@ import { Button, Field, Select } from '@/bridge88/components';
 // results on screen instead of dropping to the route-level loading fallback.
 export function MediaFilters({
   slug,
-  tags,
   current,
 }: {
   slug: string;
-  tags: { id: string; name: string }[];
   current: { q?: string; type?: string; tag?: string; folder?: string; filter?: string; sort?: string };
 }) {
   const router = useRouter();
@@ -46,7 +44,7 @@ export function MediaFilters({
   return (
     <form
       ref={formRef}
-      className="mt-6 grid grid-cols-1 gap-3 rounded-md bg-surface-soft p-4 md:grid-cols-2 xl:grid-cols-[minmax(180px,1fr)_140px_150px_150px_150px_auto]"
+      className="mt-6 grid grid-cols-1 gap-3 rounded-md bg-surface-soft p-4 md:grid-cols-2 xl:grid-cols-[minmax(180px,1fr)_150px_170px_150px_auto]"
       onSubmit={(event) => {
         event.preventDefault();
         submit();
@@ -69,16 +67,17 @@ export function MediaFilters({
       <Select name="type" label="Media type" variant="filter" className="w-full" containerClassName="[&>.b88-label]:sr-only" defaultValue={current.type ?? ''} aria-label="Media type" onChange={submit}>
         <option value="">All types</option><option value="IMAGE">Images</option><option value="VIDEO">Videos</option><option value="GIF">GIFs</option><option value="AUDIO">Audio</option>
       </Select>
-      <Select name="tag" label="Tag" variant="filter" className="w-full" containerClassName="[&>.b88-label]:sr-only" defaultValue={current.tag ?? ''} aria-label="Tag" onChange={submit}>
-        <option value="">All tags</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
-      </Select>
       <Select name="filter" label="Asset source or usage" variant="filter" className="w-full" containerClassName="[&>.b88-label]:sr-only" defaultValue={current.filter ?? ''} aria-label="Asset source or usage" onChange={submit}>
         <option value="">All assets</option><option value="generated">Generated</option><option value="uploaded">Uploaded originals</option><option value="used">Used in posts</option><option value="unused">Unused</option>
       </Select>
       <Select name="sort" label="Sort order" variant="filter" className="w-full" containerClassName="[&>.b88-label]:sr-only" defaultValue={current.sort ?? 'newest'} aria-label="Sort order" onChange={submit}>
         <option value="newest">Newest</option><option value="oldest">Oldest</option><option value="name">Filename</option><option value="size">Largest</option><option value="usage">Most used</option>
       </Select>
+      {/* Carried through rather than offered as a control: folders and tags are
+          both picked in the sidebar, where they can show what they hold. Without
+          these the next filter change would silently drop them from the URL. */}
       {current.folder && <input type="hidden" name="folder" value={current.folder} />}
+      {current.tag && <input type="hidden" name="tag" value={current.tag} />}
       {/* The label never changes text: swapping it resized the button and relaid
           out the auto-sized grid columns on every filter change. */}
       <Button type="submit">Filter</Button>
