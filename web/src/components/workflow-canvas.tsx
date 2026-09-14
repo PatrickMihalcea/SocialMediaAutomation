@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   Background,
   Controls,
@@ -18,7 +17,7 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Badge, Button, StatusMessage } from '@/bridge88/components';
+import { Badge, StatusMessage } from '@/bridge88/components';
 import {
   CATEGORY_LABEL,
   NODE_DEFINITIONS,
@@ -31,7 +30,6 @@ import {
   connectNodesAction,
   deleteNodeAction,
   disconnectAction,
-  runWorkflowAction,
   saveNodePositionsAction,
 } from '@/app/actions/workflows';
 import { NodeConfigPanel } from '@/components/workflow-config-panel';
@@ -69,7 +67,6 @@ export function WorkflowCanvas(props: {
   initialNodes: CanvasNode[];
   initialEdges: CanvasEdge[];
   canEdit: boolean;
-  canRun: boolean;
 }) {
   return (
     <ReactFlowProvider>
@@ -84,16 +81,13 @@ function CanvasInner({
   initialNodes,
   initialEdges,
   canEdit,
-  canRun,
 }: {
   slug: string;
   workflowId: string;
   initialNodes: CanvasNode[];
   initialEdges: CanvasEdge[];
   canEdit: boolean;
-  canRun: boolean;
 }) {
-  const router = useRouter();
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -185,18 +179,6 @@ function CanvasInner({
     });
   }
 
-  function run() {
-    setError('');
-    startTransition(async () => {
-      try {
-        const { runId } = await runWorkflowAction(slug, workflowId);
-        router.push(`/w/${slug}/workflows/${workflowId}/runs/${runId}`);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'That workflow could not be started.');
-      }
-    });
-  }
-
   const palette = useMemo(() => {
     const groups = new Map<NodeCategory, { type: string; label: string; description: string }[]>();
     for (const definition of Object.values(NODE_DEFINITIONS)) {
@@ -214,30 +196,32 @@ function CanvasInner({
   const selectedNode = selected ? configs.current.get(selected) : null;
 
   return (
-    <div className="mt-6 grid gap-6 lg:grid-cols-[220px_1fr_300px]">
+    <div className="grid gap-6 lg:grid-cols-[190px_minmax(0,1fr)_280px]">
       {canEdit && (
-        <aside className="space-y-6">
+        <aside>
           <p className="b88-eyebrow">Add a step</p>
-          {palette.map(([category, items]) => (
-            <div key={category}>
-              <p className="b88-caption">{CATEGORY_LABEL[category]}</p>
-              <ul className="mt-2 list-none space-y-2 p-0">
-                {items.map((item) => (
-                  <li key={item.type}>
-                    <button
-                      type="button"
-                      onClick={() => addStep(item.type)}
-                      disabled={pending}
-                      title={item.description}
-                      className="w-full rounded-md border border-hairline p-3 text-left text-sm transition-opacity hover:opacity-80 disabled:opacity-35"
-                    >
-                      {item.label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          <div className="mt-4 space-y-4">
+            {palette.map(([category, items]) => (
+              <div key={category}>
+                <p className="b88-caption">{CATEGORY_LABEL[category]}</p>
+                <ul className="mt-1.5 list-none space-y-1 p-0">
+                  {items.map((item) => (
+                    <li key={item.type}>
+                      <button
+                        type="button"
+                        onClick={() => addStep(item.type)}
+                        disabled={pending}
+                        title={item.description}
+                        className="w-full rounded-md border border-hairline px-3 py-2 text-left text-sm transition-opacity hover:opacity-80 disabled:opacity-35"
+                      >
+                        {item.label}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
         </aside>
       )}
 
@@ -247,11 +231,7 @@ function CanvasInner({
             {nodes.length} {nodes.length === 1 ? 'STEP' : 'STEPS'} · {edges.length}{' '}
             {edges.length === 1 ? 'CONNECTION' : 'CONNECTIONS'}
           </p>
-          {canRun && (
-            <Button onClick={run} disabled={pending || nodes.length === 0}>
-              {pending ? 'Starting' : 'Run now'}
-            </Button>
-          )}
+          <p className="b88-caption">DRAG A PORT TO CONNECT</p>
         </div>
 
         {error && <StatusMessage tone="error">{error}</StatusMessage>}
@@ -289,6 +269,7 @@ function CanvasInner({
             nodesConnectable={canEdit}
             edgesFocusable={canEdit}
             fitView
+            fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
             proOptions={{ hideAttribution: true }}
           >
             <Background gap={24} size={1} color="var(--hairline)" />

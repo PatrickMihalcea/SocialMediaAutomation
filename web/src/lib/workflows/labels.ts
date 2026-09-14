@@ -10,7 +10,7 @@ type Tone = 'neutral' | 'ink' | 'lime' | 'lilac' | 'cream' | 'mint' | 'coral' | 
 export const RUN_STATUS_LABEL: Record<WorkflowRunStatus, string> = {
   QUEUED: 'Queued',
   RUNNING: 'Running',
-  SUCCEEDED: 'Finished',
+  SUCCEEDED: 'Succeeded',
   FAILED: 'Failed',
   CANCELLED: 'Cancelled',
 };

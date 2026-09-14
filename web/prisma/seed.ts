@@ -217,7 +217,8 @@ async function main() {
   });
 
   await seedMusicLibrary(workspace.id, user.id);
-  await seedBedroomWorkflow(workspace.id, user.id);
+  const bedroomWorkflow = await seedBedroomWorkflow(workspace.id, user.id);
+  await seedWorkflowHistory(bedroomWorkflow, user.id);
 
   console.log(`Seeded ${workspace.name}`);
   console.log(`Login: ${email} / demo-password`);
@@ -385,6 +386,91 @@ async function seedBedroomWorkflow(workspaceId: string, userId: string) {
   await edge(overlay.id, 'video', draft.id, 'video');
 
   console.log('Seeded the "Bedroom picker" workflow');
+  return {
+    id: workflow.id,
+    workspaceId,
+    nodes: [idea, images, music, slideshow, overlay, draft],
+  };
+}
+
+/**
+ * Past runs, so the history chart has something to show on a fresh install.
+ *
+ * Shaped like real history rather than a clean sweep: a couple of failures, one
+ * cancellation, and durations that drift, because a chart of twenty identical
+ * green bars teaches nobody how to read it.
+ */
+async function seedWorkflowHistory(
+  workflow: { id: string; workspaceId: string; nodes: { id: string; name: string }[] },
+  userId: string,
+) {
+  // index: [run status, index of the step that stopped it or -1, minutes]
+  const script: [RunOutcome, number, number][] = [
+    ['SUCCEEDED', -1, 2.4], ['SUCCEEDED', -1, 2.1], ['FAILED', 3, 0.6],
+    ['SUCCEEDED', -1, 2.8], ['SUCCEEDED', -1, 2.2], ['SUCCEEDED', -1, 3.1],
+    ['CANCELLED', 3, 1.4], ['SUCCEEDED', -1, 2.6], ['SUCCEEDED', -1, 2.3],
+    ['SUCCEEDED', -1, 4.9], ['FAILED', 1, 0.3], ['SUCCEEDED', -1, 2.5],
+    ['SUCCEEDED', -1, 2.7], ['SUCCEEDED', -1, 2.2], ['SUCCEEDED', -1, 6.2],
+    ['SUCCEEDED', -1, 2.4], ['SUCCEEDED', -1, 2.9], ['SUCCEEDED', -1, 2.6],
+  ];
+
+  const graph = {
+    version: 1 as const,
+    nodes: workflow.nodes.map((n) => ({
+      id: n.id, type: 'SEED', name: n.name, config: {}, version: 1, positionX: 0, positionY: 0,
+    })),
+    edges: [],
+  };
+
+  for (const [index, [outcome, stoppedAt, minutes]] of script.entries()) {
+    // One run a day, walking backwards from yesterday.
+    const startedAt = new Date(Date.now() - (script.length - index) * 24 * 60 * 60 * 1000);
+    const durationMs = Math.round(minutes * 60_000);
+
+    const run = await db.workflowRun.create({
+      data: {
+        workspaceId: workflow.workspaceId,
+        workflowId: workflow.id,
+        triggeredById: userId,
+        trigger: index % 5 === 0 ? 'SCHEDULE' : 'MANUAL',
+        status: outcome,
+        graph,
+        startedAt,
+        finishedAt: new Date(startedAt.getTime() + durationMs),
+        durationMs,
+        error:
+          outcome === 'FAILED'
+            ? `"${workflow.nodes[stoppedAt]?.name ?? 'A step'}" stopped this run.`
+            : null,
+      },
+    });
+
+    await db.workflowNodeRun.createMany({
+      data: workflow.nodes.map((node, position) => ({
+        workspaceId: workflow.workspaceId,
+        runId: run.id,
+        nodeId: node.id,
+        nodeType: 'SEED',
+        nodeName: node.name,
+        status: nodeOutcome(outcome, stoppedAt, position),
+        attempt: 1,
+        startedAt,
+        finishedAt: new Date(startedAt.getTime() + durationMs / workflow.nodes.length),
+        durationMs: Math.round(durationMs / workflow.nodes.length),
+      })),
+    });
+  }
+  console.log(`Seeded ${script.length} past workflow runs`);
+}
+
+type RunOutcome = 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+
+/** Steps before the stopping point ran; the one that stopped it holds the blame. */
+function nodeOutcome(outcome: RunOutcome, stoppedAt: number, position: number) {
+  if (outcome === 'SUCCEEDED') return 'SUCCEEDED' as const;
+  if (position < stoppedAt) return 'SUCCEEDED' as const;
+  if (position === stoppedAt) return outcome === 'FAILED' ? ('FAILED' as const) : ('CANCELLED' as const);
+  return outcome === 'FAILED' ? ('SKIPPED' as const) : ('CANCELLED' as const);
 }
 
 main()
