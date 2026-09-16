@@ -80,6 +80,9 @@ jobs:
         run: npx prisma migrate deploy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Unpooled. Prisma holds an advisory lock while migrating and that
+          # lock does not survive a transaction pooler.
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
       - name: Run due work
         working-directory: web
@@ -92,6 +95,7 @@ jobs:
           RUN_ONCE_COARSE: ${{ github.event.schedule == '20 */6 * * *' && '1' || '0' }}
           NODE_OPTIONS: '--conditions=react-server'
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
           TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
           APP_URL: ${{ secrets.APP_URL }}
