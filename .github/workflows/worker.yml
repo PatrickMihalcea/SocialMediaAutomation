@@ -1,0 +1,112 @@
+name: Scheduled worker
+
+# Free-tier substitute for a persistent worker process. GitHub Actions runs
+# this on a schedule, does one pass of due work, and throws the VM away — no
+# host to keep paying for or keeping switched on.
+#
+# 2,000 free minutes/month on a private repo, no card required to use them,
+# and GitHub's own billing docs are explicit that usage is BLOCKED once the
+# quota runs out for an account with no payment method on file — it cannot
+# silently turn into a charge.
+#
+# https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions
+
+on:
+  schedule:
+    # Every 5 minutes — the shortest interval GitHub allows. A run that finds
+    # nothing due exits in seconds, so idle ticks cost almost nothing.
+    #
+    # GitHub does not guarantee this fires exactly on time — scheduled runs
+    # queue behind platform load and can slip, more so around the top of the
+    # hour when everyone's cron fires at once. A scheduled post or workflow
+    # firing a few minutes late is the honest cost of the free tier; nothing
+    # here can promise otherwise.
+    - cron: '*/5 * * * *'
+  # Lets a run be started by hand from the Actions tab, for testing this
+  # workflow itself without waiting for the next tick.
+  workflow_dispatch: {}
+
+# Serialises the schedule against itself — two 5-minute ticks piling up behind
+# a slow render would waste a VM's minutes re-scanning work the first one
+# already has. A dispatch (the app waking this up for something someone is
+# actively waiting on) gets its own group instead, keyed on its own run id, so
+# it starts immediately rather than queuing behind whatever the schedule
+# happens to be doing. runJob's conditional claim makes the two running at
+# once safe either way — this is about wasted minutes and felt latency, not
+# correctness.
+concurrency:
+  group: ${{ github.event_name == 'schedule' && 'scheduled-worker' || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  run-once:
+    runs-on: ubuntu-latest
+    # Comfortably under the 5-minute schedule interval, so this job is always
+    # finished — or has voluntarily stopped claiming new work — before the
+    # next tick would start overlapping with it.
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install librosa
+        working-directory: web
+        run: |
+          python3 -m venv .venv-audio
+          .venv-audio/bin/pip install --quiet librosa soundfile numpy
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Apply pending migrations
+        working-directory: web
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Run due work
+        working-directory: web
+        # A comfortable margin under timeout-minutes above, so this process
+        # exits on its own accord — logging what it left for the next tick —
+        # rather than being killed mid-write by the job timeout.
+        run: node --import tsx src/worker/run-once.ts
+        env:
+          RUN_ONCE_BUDGET_MS: '600000'
+          NODE_OPTIONS: '--conditions=react-server'
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          APP_URL: ${{ secrets.APP_URL }}
+          MOCK_MODE: 'false'
+          STORAGE_DRIVER: 's3'
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_REGION: ${{ secrets.S3_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          S3_PUBLIC_BASE_URL: ${{ secrets.S3_PUBLIC_BASE_URL }}
+          AI_PROVIDER: 'openai'
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_TEXT_MODEL: ${{ secrets.OPENAI_TEXT_MODEL }}
+          OPENAI_IMAGE_MODEL: ${{ secrets.OPENAI_IMAGE_MODEL }}
+          RENDER_DRIVER: 'ffmpeg'
+          AUDIO_ANALYZER: 'librosa'
+          PYTHON_BIN: '.venv-audio/bin/python'
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_PRIVACY_STATUS: ${{ secrets.YOUTUBE_PRIVACY_STATUS }}
+          META_APP_ID: ${{ secrets.META_APP_ID }}
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}

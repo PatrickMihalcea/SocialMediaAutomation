@@ -106,6 +106,26 @@ export function MediaLibrary({
   // The drawer reads through to the live list, so a tag added in the preview
   // and a status that finished processing both land without reopening it.
   const previewAsset = preview ? assets.find((asset) => asset.id === preview.id) ?? preview : null;
+
+  /**
+   * Opens one asset's preview straight from `?asset=<id>`.
+   *
+   * A workflow run links here to show the video it just produced, and landing
+   * on a grid of thumbnails where the person then has to find it defeats the
+   * point — the preview is where the video actually plays.
+   *
+   * Only honoured once per id, so closing the drawer does not immediately
+   * reopen it while the query parameter is still in the address bar.
+   */
+  const requestedAssetId = searchParams.get('asset');
+  const openedAsset = useRef<string | null>(null);
+  useEffect(() => {
+    if (!requestedAssetId || openedAsset.current === requestedAssetId) return;
+    const match = assets.find((asset) => asset.id === requestedAssetId);
+    if (!match) return;
+    openedAsset.current = requestedAssetId;
+    setPreview(match);
+  }, [requestedAssetId, assets]);
   const toggle = (id: string) => setSelected((value) =>
     value.includes(id) ? value.filter((item) => item !== id) : [...value, id]);
   const stageFiles = (files: FileList | File[]) => {

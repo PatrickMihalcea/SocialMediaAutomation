@@ -13,6 +13,7 @@ import { notFound } from 'next/navigation';
 import type { PostStatus } from '@prisma/client';
 import { replyToApprovalCommentAction } from '@/app/actions/team';
 import { APPROVAL_DECISION_LABELS, POST_PLATFORM_STATUS_LABELS, POST_STATUS_LABELS } from '@/lib/posts/labels';
+import { approvalOutcome, describeOrigin, postOriginInclude } from '@/lib/posts/origin';
 
 const statusTone = {
   DRAFT: 'outline',
@@ -70,9 +71,11 @@ export default async function PostDetailPage({
         orderBy: { createdAt: 'asc' },
         include: { author: { select: { name: true, email: true } } },
       },
+      ...postOriginInclude,
     },
   });
   if (!post) notFound();
+  const origin = describeOrigin(slug, post);
 
   const channels = await Promise.all(post.platforms.map(async (channel) => ({
     ...channel,
@@ -110,8 +113,19 @@ export default async function PostDetailPage({
 
       {post.status === 'PENDING_APPROVAL' && (
         <StatusMessage tone="neutral" className="mt-6">
-          This post is waiting for review. Open Team and approvals to approve it or request changes.
+          This post is waiting for review. {approvalOutcome(post.releaseOnApproval)}
           <Link href={`/w/${slug}/team`} className="ml-2 font-[480] underline underline-offset-4">Open approvals</Link>
+        </StatusMessage>
+      )}
+      {/*
+        An approved post is the quietest failure state in the app: it looks
+        finished, and nothing is going to publish it. The engine scans for
+        SCHEDULED, never APPROVED, so this has to be said out loud.
+      */}
+      {post.status === 'APPROVED' && (
+        <StatusMessage tone="neutral" className="mt-6">
+          This post is approved but not scheduled — nothing publishes an approved post on its own.
+          Choose a time with Schedule, or send it now with Publish now.
         </StatusMessage>
       )}
       {post.status === 'CANCELLED' && (
@@ -134,13 +148,41 @@ export default async function PostDetailPage({
         <p className="b88-caption">Post record</p>
         <dl className="mt-5 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
           <div><dt className="b88-label">Author</dt><dd className="mt-2">{post.author?.name ?? post.author?.email ?? 'Former member'}</dd></div>
+          {/*
+            The provenance row. A post that appeared overnight from a scheduled
+            run used to be indistinguishable from one a person typed, which is
+            what made an approval request impossible to judge.
+          */}
+          <div>
+            <dt className="b88-label">Origin</dt>
+            <dd className="mt-2">
+              {origin ? (
+                <>
+                  <Link href={origin.runHref} className="underline underline-offset-4">{origin.workflowName}</Link>
+                  <span className="b88-caption mt-1 block">
+                    {origin.stepName} · {origin.triggerPhrase}
+                  </span>
+                </>
+              ) : 'Composed by hand'}
+            </dd>
+          </div>
           <div><dt className="b88-label">Campaign</dt><dd className="mt-2">{post.campaign?.name ?? 'No campaign'}</dd></div>
           <div><dt className="b88-label">Created</dt><dd className="mt-2">{formatInZone(post.createdAt, ctx.workspace.timezone)}</dd></div>
           <div><dt className="b88-label">Updated</dt><dd className="mt-2">{formatInZone(post.updatedAt, ctx.workspace.timezone)}</dd></div>
           <div><dt className="b88-label">Scheduled</dt><dd className="mt-2">{post.scheduledAt ? formatInZone(post.scheduledAt, ctx.workspace.timezone) : 'Not scheduled'}</dd></div>
           <div><dt className="b88-label">Published</dt><dd className="mt-2">{post.publishedAt ? formatInZone(post.publishedAt, ctx.workspace.timezone) : 'Not published'}</dd></div>
           <div><dt className="b88-label">Timezone</dt><dd className="mt-2">{timezoneLabel(post.timezone)}</dd></div>
-          <div><dt className="b88-label">Channels</dt><dd className="mt-2">{channels.length}</dd></div>
+          {/* Named, not counted. "Channels: 2" never told anyone which two. */}
+          <div>
+            <dt className="b88-label">Channels</dt>
+            <dd className="mt-2">
+              {channels.map((channel) => (
+                <span key={channel.id} className="block truncate">
+                  {channel.socialAccount.accountName} · {PLATFORM_LABELS[channel.platform]}
+                </span>
+              ))}
+            </dd>
+          </div>
         </dl>
       </section>
 

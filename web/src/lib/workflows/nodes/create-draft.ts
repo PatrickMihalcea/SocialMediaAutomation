@@ -55,6 +55,13 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     { validateContent: false },
   );
 
+  // Same origin stamp the publish step writes: a draft that appeared on its own
+  // overnight should be able to say which run produced it.
+  await db.post.update({
+    where: { id: post.id },
+    data: { workflowNodeRunId: ctx.nodeRunId },
+  });
+
   return { post: { id: post.id, status: post.status } };
 }
 

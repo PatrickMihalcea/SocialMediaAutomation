@@ -539,6 +539,15 @@ model Post {
   /// IANA zone the author picked the wall-clock time in.
   timezone            String     @default("UTC")
   recurringScheduleId String?    @map("recurring_schedule_id") @db.Uuid
+  /// The workflow step that created this post, when one did. Null for anything
+  /// composed by hand. This is the only record of where an automated post came
+  /// from — without it a reviewer sees a post with no explicable origin.
+  workflowNodeRunId   String?    @map("workflow_node_run_id") @db.Uuid
+  /// What approving this post should set in motion: "now" or "queue", recorded
+  /// by the workflow step that paused for review so the release it was
+  /// configured with survives the pause. Null means approval only marks the
+  /// post approved and a person decides when it goes out.
+  releaseOnApproval   String?    @map("release_on_approval")
   createdAt           DateTime   @default(now()) @map("created_at")
   updatedAt           DateTime   @updatedAt @map("updated_at")
 
@@ -546,6 +555,7 @@ model Post {
   author            User?              @relation(fields: [authorId], references: [id], onDelete: SetNull)
   campaign          Campaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   recurringSchedule RecurringSchedule? @relation(fields: [recurringScheduleId], references: [id], onDelete: SetNull)
+  workflowNodeRun   WorkflowNodeRun?   @relation(fields: [workflowNodeRunId], references: [id], onDelete: SetNull)
   platforms         PostPlatform[]
   queueItem         QueueItem?
   approvalComments  ApprovalComment[]
@@ -554,6 +564,7 @@ model Post {
   @@index([workspaceId, status])
   @@index([workspaceId, scheduledAt])
   @@index([workspaceId, archivedAt])
+  @@index([workflowNodeRunId])
   @@index([scheduledAt])
   @@index([status])
   @@index([campaignId])
@@ -1342,6 +1353,9 @@ model WorkflowNodeRun {
   run            WorkflowRun            @relation(fields: [runId], references: [id], onDelete: Cascade)
   node           WorkflowNode           @relation(fields: [nodeId], references: [id], onDelete: Cascade)
   producedAssets WorkflowNodeRunAsset[]
+  /// Posts this step created. SetNull on the other side: deleting a run must
+  /// never take a real post — possibly a published one — with it.
+  posts          Post[]
 
   /// One attempt-chain per node per run. This is the constraint the whole
   /// scheduler's idempotency rests on.

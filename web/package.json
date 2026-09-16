@@ -23,7 +23,11 @@
     "serve:stop": "node scripts/serve.mjs stop",
     "serve:status": "node scripts/serve.mjs status",
     "dev:bg": "node scripts/serve.mjs dev",
-    "worker:bg": "node scripts/serve.mjs worker"
+    "worker:bg": "node scripts/serve.mjs worker",
+    "doctor": "node --env-file=.env scripts/doctor.mjs",
+    "doctor:production": "node --env-file=.env scripts/doctor.mjs --production",
+    "worker:once": "NODE_OPTIONS=--conditions=react-server node --env-file=.env --import tsx src/worker/run-once.ts",
+    "migrate:storage": "node --env-file=.env scripts/migrate-storage.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -65,6 +69,7 @@
     "autoprefixer": "^10.4.20",
     "eslint": "^9.17.0",
     "eslint-config-next": "^15.1.2",
+    "playwright-core": "^1.63.0",
     "postcss": "^8.4.49",
     "prisma": "^6.1.0",
     "puppeteer-core": "^23.11.1",
@@ -72,5 +77,8 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20.9.0"
   }
 }

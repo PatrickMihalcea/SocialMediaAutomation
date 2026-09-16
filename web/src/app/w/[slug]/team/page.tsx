@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import Link from 'next/link';
 import { Avatar, Badge, Button, EmptyState, Field, Select, StatusMessage } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
@@ -12,6 +13,9 @@ import type { ActionState } from '@/lib/actions/state';
 import { TeamPagePreview } from '@/components/page-previews';
 import { InviteForm } from './invite-form';
 import { WORKSPACE_ROLE_LABELS } from '@/lib/workspaces/labels';
+import { approvalOutcome, approvalOutcomeShort, describeOrigin, postOriginInclude } from '@/lib/posts/origin';
+import { PLATFORM_LABELS } from '@/lib/social/registry';
+import { formatInZone } from '@/lib/scheduling/time';
 
 export const metadata = { title: 'Team' };
 
@@ -56,7 +60,21 @@ async function TeamData({
     }),
     db.post.findMany({
       where: { workspaceId: ctx.workspace.id, status: 'PENDING_APPROVAL' },
-      include: { author: true, platforms: { take: 1 } },
+      include: {
+        author: true,
+        // Every channel, not the first: "which account is this going to" is the
+        // question a reviewer most needs answered, and take: 1 answered it
+        // wrongly whenever a post targeted more than one.
+        platforms: {
+          select: {
+            id: true,
+            text: true,
+            platform: true,
+            socialAccount: { select: { accountName: true, accountHandle: true } },
+          },
+        },
+        ...postOriginInclude,
+      },
       orderBy: { updatedAt: 'asc' },
     }),
   ]);
@@ -115,9 +133,57 @@ async function TeamData({
 
       <section className="b88-card mt-6">
         <p className="b88-caption">Approval queue</p><h2 className="b88-heading mt-2">Waiting for review</h2>
-        {reviews.length ? <div className="mt-5 space-y-4">{reviews.map((post) => (
+        {reviews.length ? <div className="mt-5 space-y-4">{reviews.map((post) => {
+          const origin = describeOrigin(slug, post);
+          return (
           <article key={post.id} className="rounded-md bg-surface-soft p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3"><div><Button href={`/w/${slug}/posts/${post.id}`} variant="tertiary" className="-ml-4 font-[540]">{post.title ?? 'Untitled post'}</Button><p className="mt-2 max-w-2xl whitespace-pre-wrap text-sm">{post.platforms[0]?.text}</p></div><Badge tone="cream">In review</Badge></div>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <Button href={`/w/${slug}/posts/${post.id}`} variant="tertiary" className="-ml-4 font-[540]">{post.title ?? 'Untitled post'}</Button>
+                <p className="mt-2 max-w-2xl whitespace-pre-wrap text-sm">{post.platforms[0]?.text}</p>
+              </div>
+              <Badge tone="cream">In review</Badge>
+            </div>
+
+            {/*
+              The four questions a reviewer has to answer before they can
+              responsibly click Approve: where did this come from, when, where
+              is it going, and what does approving do. The card previously
+              answered none of them.
+            */}
+            <dl className="mt-4 grid gap-4 border-t border-hairline-soft pt-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div>
+                <dt className="b88-label">Posting to</dt>
+                <dd className="mt-1 text-sm">
+                  {post.platforms.map((channel) => (
+                    <span key={channel.id} className="block truncate">
+                      {channel.socialAccount.accountName} · {PLATFORM_LABELS[channel.platform]}
+                    </span>
+                  ))}
+                </dd>
+              </div>
+              <div>
+                <dt className="b88-label">Created by</dt>
+                <dd className="mt-1 text-sm">
+                  {origin ? (
+                    <Link href={origin.runHref} className="underline underline-offset-4">
+                      {origin.workflowName} · {origin.stepName}
+                    </Link>
+                  ) : (
+                    post.author?.name ?? post.author?.email ?? 'Former member'
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="b88-label">Created</dt>
+                <dd className="mt-1 text-sm">{formatInZone(post.createdAt, ctx.workspace.timezone)}</dd>
+              </div>
+              <div>
+                <dt className="b88-label">On approval</dt>
+                <dd className="mt-1 text-sm">{approvalOutcomeShort(post.releaseOnApproval)}</dd>
+              </div>
+            </dl>
+
             {ctx.can('post:approve') && <form className="mt-4">
               <Field name="body" label="Review note" placeholder="Optional context for the author" containerClassName="max-w-md" />
               <div className="mt-3 flex flex-wrap gap-2">
@@ -125,9 +191,11 @@ async function TeamData({
                 <Button formAction={approvalAction.bind(null, slug, post.id, 'CHANGES_REQUESTED')} type="submit" variant="secondary">Request changes</Button>
                 <Button formAction={approvalAction.bind(null, slug, post.id, 'REJECTED')} type="submit" variant="tertiary">Reject</Button>
               </div>
+              <p className="b88-body-sm mt-3">{approvalOutcome(post.releaseOnApproval)}</p>
             </form>}
           </article>
-        ))}</div> : (
+          );
+        })}</div> : (
           <div className="mt-5">
             <EmptyState
               eyebrow="Queue clear"

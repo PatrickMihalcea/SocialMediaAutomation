@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import Link from 'next/link';
 import type { WorkflowNodeRunStatus, WorkflowRunStatus } from '@prisma/client';
-import { Badge, Button, StatusMessage } from '@/bridge88/components';
+import { Badge, Button, humanizeMachineValue, StatusMessage } from '@/bridge88/components';
 import { cancelRunAction, retryNodeAction } from '@/app/actions/workflows';
 import {
   NODE_STATUS_LABEL,
@@ -26,6 +27,10 @@ interface NodeRun {
   finishedAt: string | null;
   durationMs: number | null;
   error: string | null;
+  /** Media this step emitted, in port then position order. */
+  produced?: { id: string; filename: string; type: string }[];
+  /** Set by the draft and publish steps, which create a post. */
+  post?: { id: string; awaitingApproval: boolean; releaseOnApproval: string | null } | null;
 }
 
 interface RunStatus {
@@ -206,8 +211,10 @@ export function WorkflowRunView({
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
-                        <Badge tone={NODE_STATUS_TONE[node.status]}>
-                          {NODE_STATUS_LABEL[node.status]}
+                        <Badge
+                          tone={node.post?.awaitingApproval ? 'cream' : NODE_STATUS_TONE[node.status]}
+                        >
+                          {node.post?.awaitingApproval ? 'Waiting for you' : NODE_STATUS_LABEL[node.status]}
                         </Badge>
                         <span className="text-base">{node.nodeName}</span>
                       </div>
@@ -221,13 +228,67 @@ export function WorkflowRunView({
                         {node.error}
                       </p>
                     )}
-                    {canRun && isNodeTerminal(node.status) && node.status !== 'SUCCEEDED' && (
-                      <div className="mt-3">
+                    {/*
+                      "Passed" on a publish step that has not published anything
+                      is the most misleading thing this view could say. The step
+                      genuinely succeeded — requireApproval is on, so its job was
+                      to create the post and stop — but nothing goes out until
+                      someone approves it, and that has to be stated here.
+                    */}
+                    {node.post?.awaitingApproval && (
+                      <p className="b88-body-sm mt-3">
+                        This step created the post and stopped there. Nothing has been sent yet
+                        {node.post.releaseOnApproval === 'now'
+                          ? ' — approving it publishes it straight away.'
+                          : node.post.releaseOnApproval === 'queue'
+                            ? ' — approving it puts it in the queue for the next posting time.'
+                            : ' — and approving it will not publish it either; it still needs a time.'}
+                      </p>
+                    )}
+                    {/*
+                      Where this step leads. A run that finished is mostly
+                      interesting for what it produced, and the whole point of
+                      reading a failure is to go fix the step that failed — both
+                      were previously dead ends that left you navigating by hand.
+                    */}
+                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                      {(node.produced ?? []).slice(0, 3).map((asset) => (
+                        <Link
+                          key={asset.id}
+                          href={`/w/${slug}/media?asset=${encodeURIComponent(asset.id)}`}
+                          className="b88-body-sm underline underline-offset-4"
+                        >
+                          {asset.type === 'VIDEO' ? 'Watch' : 'View'} {humanizeMachineValue(asset.filename)}
+                        </Link>
+                      ))}
+                      {(node.produced?.length ?? 0) > 3 && (
+                        <span className="b88-caption">+{(node.produced?.length ?? 0) - 3} more</span>
+                      )}
+                      {node.post && (
+                        <Link
+                          href={`/w/${slug}/posts/${node.post.id}`}
+                          className="b88-body-sm underline underline-offset-4"
+                        >
+                          {node.post.awaitingApproval ? 'Review and approve it' : 'Open the post'}
+                        </Link>
+                      )}
+                      {/* Offered on any step, not just failures: the reason a
+                          step did something unexpected is usually its settings.
+                          view=steps is required, not cosmetic — the canvas only
+                          mounts on that tab, so without it the link lands on
+                          Runs and the node selection has nothing to select. */}
+                      <Link
+                        href={`/w/${slug}/workflows/${workflowId}?view=steps&node=${encodeURIComponent(node.nodeId)}`}
+                        className="b88-body-sm underline underline-offset-4"
+                      >
+                        {node.status === 'FAILED' ? 'Fix this step' : 'Step settings'}
+                      </Link>
+                      {canRun && isNodeTerminal(node.status) && node.status !== 'SUCCEEDED' && (
                         <Button variant="secondary" onClick={() => retry(node.id)} disabled={pending}>
                           Run this step again
                         </Button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </li>
                 );
               })}

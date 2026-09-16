@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   audit: vi.fn(),
   notifyWorkspace: vi.fn(),
   notifyRoles: vi.fn(),
+  releasePost: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -41,6 +42,12 @@ vi.mock('@/lib/notifications/email', () => ({ sendInviteEmail: vi.fn() }));
 vi.mock('@/lib/crypto/tokens', () => ({ issueSecret: vi.fn(), hashSecret: vi.fn() }));
 vi.mock('@/lib/billing/limits', () => ({ assertWithinLimit: vi.fn() }));
 vi.mock('@/lib/env', () => ({ publicEnv: { appUrl: 'http://localhost:3000' } }));
+// Stubbed rather than importActual'd: the real module pulls in the queue and
+// the scheduler, and what matters here is only whether approval calls it.
+vi.mock('@/lib/posts/release', () => ({
+  isReleaseMode: (value: unknown) => value === 'now' || value === 'queue',
+  releasePost: mocks.releasePost,
+}));
 
 import { approvalAction, cancelApprovalRequestAction } from '@/app/actions/team';
 
@@ -58,6 +65,60 @@ describe('approval actions', () => {
     mocks.audit.mockResolvedValue(undefined);
     mocks.notifyWorkspace.mockResolvedValue(undefined);
     mocks.notifyRoles.mockResolvedValue(undefined);
+    mocks.releasePost.mockResolvedValue(new Date('2026-01-02T10:00:00Z'));
+  });
+
+  /*
+   * Approving used to be a dead end: the post became APPROVED and nothing in
+   * the publishing engine ever looks at APPROVED — it scans for SCHEDULED. A
+   * workflow's publish step records the release it was configured with, and
+   * these are the tests that keep approval actually performing it.
+   */
+  it.each(['now', 'queue'] as const)(
+    'performs the %s release a workflow recorded when the post is approved',
+    async (mode) => {
+      mocks.postFindFirst.mockResolvedValue({ id: 'post-1', releaseOnApproval: mode });
+
+      await approvalAction('northwind-studio', 'post-1', 'APPROVED', new FormData());
+
+      expect(mocks.releasePost).toHaveBeenCalledWith('workspace-1', 'post-1', mode);
+      expect(mocks.audit).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'approval.released', metadata: expect.objectContaining({ mode }) }),
+      );
+    },
+  );
+
+  it.each(['REJECTED', 'CHANGES_REQUESTED'] as const)('does not release on a %s decision', async (decision) => {
+    mocks.postFindFirst.mockResolvedValue({ id: 'post-1', releaseOnApproval: 'now' });
+
+    await approvalAction('northwind-studio', 'post-1', decision, new FormData());
+
+    expect(mocks.releasePost).not.toHaveBeenCalled();
+  });
+
+  it('leaves a hand-composed post alone, since no release was ever configured', async () => {
+    mocks.postFindFirst.mockResolvedValue({ id: 'post-1', releaseOnApproval: null });
+
+    await approvalAction('northwind-studio', 'post-1', 'APPROVED', new FormData());
+
+    expect(mocks.releasePost).not.toHaveBeenCalled();
+  });
+
+  it('keeps the approval when the release fails, and says why', async () => {
+    mocks.postFindFirst.mockResolvedValue({ id: 'post-1', releaseOnApproval: 'queue' });
+    mocks.releasePost.mockRejectedValueOnce(new Error('The queue is paused, so this post was not scheduled.'));
+
+    // The reviewer's decision is theirs and must stick; a paused queue is a
+    // separate problem they can fix and retry, not a reason to lose it.
+    await expect(
+      approvalAction('northwind-studio', 'post-1', 'APPROVED', new FormData()),
+    ).resolves.toBeUndefined();
+
+    expect(mocks.postUpdate).toHaveBeenCalledWith({ where: { id: 'post-1' }, data: { status: 'APPROVED' } });
+    expect(mocks.notifyWorkspace).toHaveBeenCalledWith(
+      'workspace-1',
+      expect.objectContaining({ body: expect.stringContaining('The queue is paused') }),
+    );
   });
 
   it.each([

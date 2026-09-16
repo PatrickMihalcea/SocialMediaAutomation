@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const dbMock = vi.hoisted(() => ({
   aiMessage: {
+    findMany: vi.fn(),
+    create: vi.fn(),
     findFirst: vi.fn(),
     updateMany: vi.fn(),
     findUnique: vi.fn(),
@@ -9,12 +11,14 @@ const dbMock = vi.hoisted(() => ({
   },
   socialAccount: { findMany: vi.fn() },
   post: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
-  campaign: { findFirst: vi.fn() },
+  campaign: { findFirst: vi.fn(), findMany: vi.fn() },
   mediaAsset: { findMany: vi.fn() },
   workflow: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
   workflowNode: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
   workflowEdge: { create: vi.fn() },
   workspace: { findFirst: vi.fn() },
+  aiConversation: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+  mediaFolder: { findMany: vi.fn() },
   auditLog: { create: vi.fn() },
   $transaction: vi.fn(),
 }));
@@ -31,7 +35,9 @@ vi.mock('@/lib/ai', () => ({ generateObject: vi.fn() }));
 vi.mock('@/lib/ai/brand-voice', () => ({ buildSystemPrompt: vi.fn() }));
 vi.mock('@/lib/posts/service', () => serviceMock);
 
-import { assistantCapabilityReply, confirmProposal, executeProposal } from '@/lib/ai/conversations';
+import { assistantCapabilityReply, confirmProposal, executeProposal, sendAssistantMessage } from '@/lib/ai/conversations';
+import { generateObject } from '@/lib/ai';
+import { buildSystemPrompt } from '@/lib/ai/brand-voice';
 import type { AssistantReply } from '@/lib/ai/schemas';
 
 const POST_ID = '11111111-1111-4111-8111-111111111111';
@@ -117,6 +123,19 @@ describe('assistant capability disclosure', () => {
     ['Tell me about the existing draft', 'cannot inspect'],
   ])('returns an honest gap for %s', (prompt, expected) => {
     expect(assistantCapabilityReply(prompt)).toContain(expected);
+  });
+
+  /**
+   * Refusing outright read as "this product cannot publish", when a Publish
+   * step in a workflow is exactly how it does — the assistant just cannot fire
+   * one off itself. The refusal has to name the route that does work.
+   */
+  it('points a publish request at both the one-off and the automated route', () => {
+    const reply = assistantCapabilityReply('Publish this post now') ?? '';
+
+    expect(reply).toContain('Composer');
+    expect(reply).toMatch(/Publish step/i);
+    expect(reply).toMatch(/workflow/i);
   });
 
   it('leaves supported ideas and action requests to the provider', () => {
@@ -402,5 +421,90 @@ describe('assistant workflow proposals', () => {
       edges: graph.edges,
     })).resolves.toEqual({ workflowId: POST_ID });
     expect(serviceMock.savePost).not.toHaveBeenCalled();
+  });
+});
+
+describe('sendAssistantMessage conversation history', () => {
+  const CONVERSATION_ID = '44444444-4444-4444-8444-444444444444';
+  // One message per minute, so "most recent" is unambiguous under either sort.
+  const stored = Array.from({ length: 40 }, (_, index) => ({
+    id: `m${index}`,
+    role: index % 2 === 0 ? 'USER' : 'ASSISTANT',
+    content: `msg-${index}`,
+    proposal: null,
+    createdAt: new Date(Date.UTC(2026, 0, 1, 0, index)),
+  }));
+
+  function sentMessages() {
+    return vi.mocked(generateObject).mock.calls[0][0].messages;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(buildSystemPrompt).mockResolvedValue('SYSTEM');
+    dbMock.aiConversation.findFirst.mockResolvedValue({ id: CONVERSATION_ID });
+    dbMock.aiConversation.update.mockResolvedValue({});
+    // Models the database rather than returning a fixed slice, so a regression
+    // back to ascending order fails here instead of passing silently.
+    dbMock.aiMessage.findMany.mockImplementation(async (args: {
+      orderBy: { createdAt: 'asc' | 'desc' };
+      take: number;
+    }) => {
+      const direction = args.orderBy.createdAt === 'desc' ? -1 : 1;
+      return [...stored]
+        .sort((a, b) => direction * (a.createdAt.getTime() - b.createdAt.getTime()))
+        .slice(0, args.take);
+    });
+    dbMock.aiMessage.create.mockReturnValue({});
+    dbMock.$transaction.mockResolvedValue([{}, { id: 'reply' }, {}]);
+    for (const model of [dbMock.post, dbMock.campaign, dbMock.mediaAsset, dbMock.mediaFolder, dbMock.workflow, dbMock.socialAccount]) {
+      model.findMany.mockResolvedValue([]);
+    }
+    vi.mocked(generateObject).mockResolvedValue({
+      object: { reply: 'Sure.', action: null },
+      model: 'test',
+      usage: {},
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+  });
+
+  it('carries the most recent turns, not the oldest ones', async () => {
+    await sendAssistantMessage({
+      workspaceId: 'ws', userId: 'user', conversationId: CONVERSATION_ID, content: 'And the one before that?',
+    });
+    const contents = sentMessages().map((message) => message.content);
+    expect(contents).toContain('msg-39');
+    expect(contents).toContain('msg-10');
+    expect(contents).not.toContain('msg-0');
+    expect(contents.at(-1)).toBe('And the one before that?');
+  });
+
+  it('keeps history in chronological order after the system prompt', async () => {
+    await sendAssistantMessage({
+      workspaceId: 'ws', userId: 'user', conversationId: CONVERSATION_ID, content: 'Continue',
+    });
+    const sent = sentMessages();
+    expect(sent[0].role).toBe('system');
+    const history = sent.slice(1, -1);
+    expect(history.map((message) => message.content)).toEqual(
+      stored.slice(10).map((message) => message.content),
+    );
+    expect(history[0].role).toBe('user');
+    expect(history[1].role).toBe('assistant');
+  });
+
+  it('gives the ideas path the same history', async () => {
+    vi.mocked(generateObject).mockResolvedValue({
+      object: { ideas: [{ title: 'One', angle: 'Angle', hook: 'Hook' }] },
+      model: 'test',
+      usage: {},
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    await sendAssistantMessage({
+      workspaceId: 'ws', userId: 'user', conversationId: CONVERSATION_ID, content: 'Give me three more ideas like that',
+    });
+    const contents = sentMessages().map((message) => message.content);
+    expect(contents).toContain('msg-39');
+    expect(contents.at(-1)).toBe('Give me three more ideas like that');
   });
 });

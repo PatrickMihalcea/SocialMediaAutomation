@@ -20,6 +20,36 @@ const schema = z.object({
   AUTH_SECRET: z.string().min(16, 'AUTH_SECRET must be at least 16 characters'),
   TOKEN_ENCRYPTION_KEY: z.string().min(1, 'TOKEN_ENCRYPTION_KEY is required'),
   CRON_SECRET: z.string().default(''),
+  /**
+   * The origin this deployment answers on.
+   *
+   * Separate from NEXT_PUBLIC_APP_URL, which Next inlines into every bundle at
+   * build time — including the server ones. Pointing that at a tunnel and
+   * restarting changes nothing: the OAuth callback and every signed media URL
+   * keep saying localhost, and the failure surfaces as a rejected redirect or a
+   * media error with nothing to debug. This one is read at runtime, so a
+   * restart is enough. Leave it empty to keep the built-in value.
+   */
+  APP_URL: z.string().default(''),
+
+  /**
+   * Wakes the scheduled worker (see .github/workflows/worker.yml) the moment
+   * there is real work for it, instead of leaving it to notice on its own
+   * 5-minute timer. Every field must be set for this to activate; any one
+   * missing and it stays a silent no-op — a deployment without it just falls
+   * back to the schedule, which is correct rather than broken.
+   *
+   * Deliberately not the same credential the workflow file itself uses. Those
+   * are secrets GitHub injects into a run it already started; this is a
+   * token the *app* holds so it can ask GitHub to start one, and needs only
+   * the narrowest scope that allows: a fine-grained PAT with just the
+   * repository's Workflows: write permission, nothing else.
+   */
+  GITHUB_DISPATCH_TOKEN: z.string().default(''),
+  /** "owner/repo" */
+  GITHUB_DISPATCH_REPO: z.string().default(''),
+  GITHUB_DISPATCH_WORKFLOW: z.string().default('worker.yml'),
+  GITHUB_DISPATCH_REF: z.string().default('main'),
 
   MOCK_MODE: boolish(true),
   QUEUE_DRIVER: z.enum(['in-process', 'bullmq']).default('in-process'),
@@ -70,6 +100,12 @@ const schema = z.object({
   TIKTOK_CLIENT_SECRET: z.string().default(''),
   YOUTUBE_CLIENT_ID: z.string().default(''),
   YOUTUBE_CLIENT_SECRET: z.string().default(''),
+  /**
+   * Visibility of an uploaded video. Defaults to public, which is what a
+   * finished product should do — but a first run against a real channel is a
+   * hard thing to take back, so it is a setting rather than a constant.
+   */
+  YOUTUBE_PRIVACY_STATUS: z.enum(['public', 'unlisted', 'private']).default('public'),
 
   STRIPE_SECRET_KEY: z.string().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().default(''),
@@ -91,8 +127,14 @@ function load() {
 
 export const env = load();
 
+/**
+ * The app's own origin, for links and callbacks it hands to someone else.
+ *
+ * APP_URL wins because it is the only one that can change without a rebuild;
+ * NEXT_PUBLIC_APP_URL is the build-time default and what the browser sees.
+ */
 export const publicEnv = {
-  appUrl: process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000',
+  appUrl: env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
 };
 
 /** True when every external call should be served by an in-repo mock. */

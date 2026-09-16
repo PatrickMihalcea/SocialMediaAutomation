@@ -2,8 +2,7 @@ import 'server-only';
 import { PostStatus } from '@prisma/client';
 import { db } from '@/lib/db';
 import { savePost } from '@/lib/posts/service';
-import { addToQueue } from '@/lib/scheduling/queue';
-import { enqueue } from '@/lib/queue';
+import { releasePost } from '@/lib/posts/release';
 import { PermanentJobError } from '@/lib/queue/runner';
 import { notifyRoles } from '@/lib/notifications/service';
 import { resolveAccounts } from '@/lib/workflows/nodes/create-draft';
@@ -33,7 +32,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   const accounts = await resolveAccounts(ctx.workspaceId, config.socialAccountIds);
   const workspace = await db.workspace.findUniqueOrThrow({
     where: { id: ctx.workspaceId },
-    select: { timezone: true, queuePaused: true },
+    select: { slug: true, timezone: true, queuePaused: true },
   });
 
   const status = config.requireApproval ? PostStatus.PENDING_APPROVAL : PostStatus.DRAFT;
@@ -60,33 +59,42 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     { validateContent: true },
   );
 
+  // Stamped on every post this step makes, approval or not. It is the only
+  // record that a workflow produced this post; without it a reviewer meets a
+  // post with no explicable origin — no workflow, no run, no step.
+  await db.post.update({
+    where: { id: post.id },
+    data: {
+      workflowNodeRunId: ctx.nodeRunId,
+      // Carried across the approval pause. Returning below used to drop the
+      // configured mode on the floor, so an approved post sat APPROVED forever
+      // while the engine only ever publishes SCHEDULED ones.
+      releaseOnApproval: config.requireApproval ? config.mode : null,
+    },
+  });
+
   if (config.requireApproval) {
     await notifyRoles(ctx.workspaceId, ['OWNER', 'ADMIN'], {
       type: 'APPROVAL_REQUESTED',
       title: `"${ctx.nodeName}" produced a post for review`,
       body: `A workflow created a post for ${accounts.map((a) => a.accountName).join(', ')}.`,
-      href: `/w/${ctx.workspaceId}/drafts`,
+      // slug, not workspaceId: routes are /w/{slug}/..., so the id built a
+      // link that resolved to nothing — the one notification in the codebase
+      // that got this wrong.
+      // The post itself, not the drafts list: a reviewer needs the caption, the
+      // media and the channels in front of them, and a pending post is not in
+      // drafts anyway.
+      href: `/w/${workspace.slug}/posts/${post.id}`,
     });
     return { post: { id: post.id, status: post.status, awaitingApproval: true } };
   }
 
-  if (config.mode === 'queue') {
-    if (workspace.queuePaused) {
-      throw new PermanentJobError('The queue is paused, so this post was not scheduled.');
-    }
-    const slot = await addToQueue(ctx.workspaceId, post.id);
-    return { post: { id: post.id, status: PostStatus.SCHEDULED, scheduledAt: slot.toISOString() } };
+  if (config.mode === 'queue' && workspace.queuePaused) {
+    throw new PermanentJobError('The queue is paused, so this post was not scheduled.');
   }
+  const scheduledAt = await releasePost(ctx.workspaceId, post.id, config.mode);
 
-  await db.post.update({
-    where: { id: post.id },
-    data: { status: PostStatus.SCHEDULED, scheduledAt: new Date() },
-  });
-  await enqueue(
-    'publish-post',
-    { postId: post.id },
-    { workspaceId: ctx.workspaceId, dedupeKey: `publish:${post.id}` },
-  );
-
-  return { post: { id: post.id, status: PostStatus.SCHEDULED } };
+  return {
+    post: { id: post.id, status: PostStatus.SCHEDULED, scheduledAt: scheduledAt.toISOString() },
+  };
 }

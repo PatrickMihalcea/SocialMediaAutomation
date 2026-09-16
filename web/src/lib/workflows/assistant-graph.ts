@@ -123,6 +123,15 @@ export function workflowAssistantSkill(): string {
     'Return the ordinary assistant envelope {"reply":string,"action":action|null}.',
     'create_workflow action: {"kind":"create_workflow","summary":string,"name":string,"description":string|null,"scheduleEnabled":boolean,"scheduleWeekdays":number[],"scheduleHour":number,"scheduleMinute":number,"nodes":[{"key":string,"type":nodeType,"name":string,"positionX":number,"positionY":number,"config":object}],"edges":[{"sourceKey":string,"sourcePort":string,"targetKey":string,"targetPort":string}]}.',
     'update_workflow action: {"kind":"update_workflow","summary":string,"workflowId":uuid,"workflowName":string,"name"?:string,"description"?:string|null,"scheduleEnabled"?:boolean,"scheduleWeekdays"?:number[],"scheduleHour"?:number,"scheduleMinute"?:number,"nodeUpdates":[],"graphEdits":[edit]}. An edit is add_node with key,type,name,positionX,positionY,config; update_node with nodeId and full config; remove_node with nodeId; connect with sourceNodeRef,sourcePort,targetNodeRef,targetPort; or disconnect with edgeId.',
+    // The prose spec above was not enough on its own: the model kept inventing
+    // operation names ("add", "addNode"), capitalising node keys, and dropping
+    // required fields, which fails the discriminated union and reaches the user
+    // as "the AI returned something Bridge88 could not use". A literal worked
+    // example of the most common request fixes that far more reliably than more
+    // description does.
+    'operation must be exactly one of add_node, update_node, remove_node, connect, disconnect. A node key is lowercase letters, digits and underscores, starting with a letter — "publish" or "yt_publish", never "Publish" or "publish-step".',
+    'Worked example — appending a Publish step to an existing workflow and wiring it to the step that currently produces the finished video: {"kind":"update_workflow","summary":"Add a Publish step posting to the connected YouTube channel","workflowId":"<the workflow uuid from WORKSPACE_CONTEXT>","workflowName":"Treehouses","nodeUpdates":[],"graphEdits":[{"operation":"add_node","key":"publish","type":"PUBLISH","name":"Publish to YouTube","positionX":1900,"positionY":-150,"config":{"socialAccountIds":["<a channel id from WORKSPACE_CONTEXT channels>"],"caption":"","mode":"queue","requireApproval":true}},{"operation":"connect","sourceNodeRef":"<uuid of the step whose video output feeds it>","sourcePort":"video","targetNodeRef":"publish","targetPort":"video"}]}.',
+    'In a connect edit, sourceNodeRef and targetNodeRef are either the uuid of an existing step or the local key of a step added earlier in the same graphEdits array.',
     'run_workflow action: {"kind":"run_workflow","summary":string,"workflowId":uuid,"workflowName":string}.',
     'Catalogue:',
     ...lines,

@@ -16,6 +16,7 @@ import { actionError, actionSuccess, type ActionState } from '@/lib/actions/stat
 import { conflict, invalid } from '@/lib/errors';
 import { audit } from '@/lib/audit';
 import { APPROVAL_DECISION_LABELS } from '@/lib/posts/labels';
+import { isReleaseMode, releasePost } from '@/lib/posts/release';
 
 const inviteMemberSchema = z.object({
   email: z.string().email(),
@@ -172,6 +173,34 @@ export async function approvalAction(
       metadata: { postId, comment: providedComment },
     });
   }
+
+  // Approving used to be where an automated post went to die: it became
+  // APPROVED, and nothing in the publishing engine looks at APPROVED — it scans
+  // for SCHEDULED. A post created by a workflow carries the release its step was
+  // configured with, and approval is what finally performs it.
+  //
+  // Deliberately after the approval commits rather than inside its transaction.
+  // The decision is the reviewer's and must stick; a queue with no posting times
+  // left, or a paused queue, is a separate problem that they can fix and retry
+  // from the post itself, not a reason to lose their approval.
+  let released: Date | null = null;
+  let releaseError: string | null = null;
+  if (decision === 'APPROVED' && isReleaseMode(post.releaseOnApproval)) {
+    try {
+      released = await releasePost(ctx.workspace.id, postId, post.releaseOnApproval);
+      await audit({
+        workspaceId: ctx.workspace.id,
+        userId: ctx.user.id,
+        action: 'approval.released',
+        entityType: 'post',
+        entityId: postId,
+        metadata: { mode: post.releaseOnApproval, scheduledAt: released.toISOString() },
+      });
+    } catch (error) {
+      releaseError = error instanceof Error ? error.message : 'It could not be scheduled.';
+    }
+  }
+
   await notifyWorkspace(ctx.workspace.id, {
     type: 'APPROVAL_COMPLETED',
     title: {
@@ -179,10 +208,16 @@ export async function approvalAction(
       REJECTED: 'A post was rejected',
       CHANGES_REQUESTED: 'Changes were requested',
     }[decision],
-    body,
+    body: releaseError
+      ? `${body} It was approved but not scheduled: ${releaseError}`
+      : released
+        ? `${body} It is now scheduled to publish.`
+        : body,
     href: `/w/${slug}/posts/${postId}`,
   });
   revalidatePath(`/w/${slug}/team`);
+  revalidatePath(`/w/${slug}/queue`);
+  revalidatePath(`/w/${slug}/calendar`);
   revalidatePath(`/w/${slug}/posts/${postId}`);
   revalidatePath(`/w/${slug}/history`);
 }

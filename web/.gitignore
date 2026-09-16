@@ -1,8 +1,11 @@
 node_modules/
 .next/
 out/
-.env
-.env.local
+# Every env file except the committed template. Broader than .env/.env.local on
+# purpose: a .env.backup or .env.production written during setup holds the same
+# secrets and was not covered.
+.env*
+!.env.example
 *.tsbuildinfo
 next-env.d.ts
 /storage/

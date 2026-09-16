@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/recurrence",
       "schedule": "15 0 * * *"
+    },
+    {
+      "path": "/api/cron/workflows",
+      "schedule": "* * * * *"
     }
   ]
 }

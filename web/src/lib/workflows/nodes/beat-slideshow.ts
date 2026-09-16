@@ -58,10 +58,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       type: { in: [MediaType.IMAGE, MediaType.VIDEO] },
     },
   });
-  if (mediaAssets.length !== mediaIds.length) {
-    throw new PermanentJobError('Some images or videos are no longer in the media library.');
-  }
-  const ordered = mediaIds.map((id) => mediaAssets.find((asset) => asset.id === id)!);
+  const ordered = resolveOrderedAssets(mediaIds, mediaAssets);
 
   const audio = await db.mediaAsset.findFirst({
     where: { id: audioId, workspaceId: ctx.workspaceId, type: MediaType.AUDIO },
@@ -197,6 +194,25 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
 
 const asIds = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+
+/**
+ * Matches every requested id against what the database actually returned, and
+ * rebuilds the list in the caller's original order (including repeats).
+ *
+ * Checked by distinct id, not by comparing the two lists' lengths: a merge
+ * step upstream (Combine media, say) can legitimately repeat the same image —
+ * bookending a slideshow with its opening shot is a real edit choice, not a
+ * mistake. `findMany` only ever returns one row per distinct id, so a length
+ * comparison against a list that repeats an id fails every time regardless of
+ * whether anything is actually missing — this is the fix for exactly that.
+ */
+export function resolveOrderedAssets<T extends { id: string }>(mediaIds: string[], found: T[]): T[] {
+  const byId = new Map(found.map((asset) => [asset.id, asset]));
+  if (mediaIds.some((id) => !byId.has(id))) {
+    throw new PermanentJobError('Some images or videos are no longer in the media library.');
+  }
+  return mediaIds.map((id) => byId.get(id)!);
+}
 const asStrings = asIds;
 
 /**

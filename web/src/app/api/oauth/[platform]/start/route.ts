@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { publicEnv } from '@/lib/env';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { rateLimit, LIMITS } from '@/lib/rate-limit';
 import { getAdapter } from '@/lib/social/registry';
@@ -31,7 +32,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const adapter = getAdapter(platform);
   if (!adapter.isConfigured()) {
-    return NextResponse.redirect(new URL(`/w/${ctx.workspace.slug}/channels?oauth=unavailable`, request.url));
+    // publicEnv.appUrl, not request.url: behind a reverse proxy or tunnel,
+    // request.url reflects whatever the server's own local connection looks
+    // like (here, plain http://localhost:3000), not the address the browser
+    // actually used — a redirect built from it sends the browser somewhere
+    // it can't reach at all, rather than back to the app it just came from.
+    return NextResponse.redirect(new URL(`/w/${ctx.workspace.slug}/channels?oauth=unavailable`, publicEnv.appUrl));
   }
 
   const state = issueOpaqueSecret();

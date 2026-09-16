@@ -15,6 +15,7 @@ export { PagePreview, Shimmer } from './preview';
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   children: ReactNode;
   variant?: 'primary' | 'secondary' | 'tertiary' | 'promo';
+  size?: 'md' | 'sm';
   href?: string;
   fullWidth?: boolean;
 };
@@ -22,6 +23,7 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 export function Button({
   children,
   variant = 'primary',
+  size = 'md',
   href,
   fullWidth,
   className = '',
@@ -33,7 +35,16 @@ export function Button({
     tertiary: { background: 'transparent', color: 'var(--ink)', border: '1px solid transparent' },
     promo: { background: 'var(--accent-magenta)', color: '#fff', border: '1px solid var(--accent-magenta)' },
   }[variant];
-  const cn = `inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-pill px-4 text-[15px] font-[480] transition-opacity hover:opacity-80 active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-40 ${fullWidth ? 'w-full' : ''} ${className}`;
+  // Sizing lives here rather than in a caller's className: this template puts
+  // className last, but Tailwind emits height utilities in scale order, so an
+  // `h-8` passed by a caller loses to `h-10` at equal specificity and silently
+  // does nothing. md matches --control-size; sm is for supplementary inline
+  // actions that should not carry the same weight as a form control.
+  const sizing = {
+    md: 'h-10 px-4 text-[15px]',
+    sm: 'h-8 px-3 text-[13px]',
+  }[size];
+  const cn = `inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-pill font-[480] transition-opacity hover:opacity-80 active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-40 ${sizing} ${fullWidth ? 'w-full' : ''} ${className}`;
   if (href) {
     return <Link href={href} className={cn} style={styles}>{children}</Link>;
   }

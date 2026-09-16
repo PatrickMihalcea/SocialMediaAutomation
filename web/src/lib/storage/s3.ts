@@ -22,6 +22,13 @@ export class S3Storage implements StorageDriver {
         accessKeyId: env.S3_ACCESS_KEY_ID,
         secretAccessKey: env.S3_SECRET_ACCESS_KEY,
       },
+      // Restores the pre-3.729 behaviour of sending a checksum only where the
+      // operation needs one. Newer SDKs add x-amz-checksum-crc32 to every
+      // PutObject, which S3-compatible endpoints — R2 among them — have
+      // rejected outright with a 400 naming a header the caller never set.
+      // Real S3 is unaffected either way: it computes its own integrity check.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
     });
   }
 

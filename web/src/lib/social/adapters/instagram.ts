@@ -23,6 +23,16 @@ import type {
  * Carousels add a third phase — a container per child, then a parent container.
  *
  * INTEGRATION BOUNDARY — needs instagram_content_publish and App Review.
+ *
+ * Scope names below match the app dashboard's own Permissions and features
+ * list (Use cases → Instagram API), which shows each permission's real,
+ * currently-granted status ("Ready for testing") — that page is authoritative.
+ * The dashboard's own "Customize use case" summary page disagrees with it,
+ * displaying this one as instagram_content_publishing; that page's wording
+ * is wrong. instagram_manage_insights is not in the app's granted set at all —
+ * insights live behind a separate optional permission neither page listed as
+ * required, so both analytics methods below degrade to nulls rather than
+ * assume it was granted.
  */
 export class InstagramAdapter extends MetaAdapter {
   readonly platform = Platform.INSTAGRAM;
@@ -30,7 +40,6 @@ export class InstagramAdapter extends MetaAdapter {
   protected readonly scopes = [
     'instagram_basic',
     'instagram_content_publish',
-    'instagram_manage_insights',
     'pages_show_list',
     'pages_read_engagement',
     'business_management',
@@ -61,7 +70,13 @@ export class InstagramAdapter extends MetaAdapter {
         // Instagram publishing authenticates with the *Page* token.
         accessToken: page.access_token,
         scopes: this.scopes,
-        metadata: { pageId: page.id, pageName: page.name },
+        // accountType is what the channels page shows as "Account type"; it
+        // was missing entirely, which read as "Unavailable from platform" on
+        // every real connection. "business" is never a guess here — an
+        // instagram_business_account only exists on a Page at all for a
+        // professional (Business or Creator) account, never a personal one,
+        // so this is true regardless of which of those two Meta considers it.
+        metadata: { pageId: page.id, pageName: page.name, accountType: 'business' },
       };
     });
   }
@@ -247,10 +262,14 @@ export class InstagramAdapter extends MetaAdapter {
   async getPostAnalytics(account: DecryptedAccount, platformPostId: string): Promise<PostMetrics> {
     const token = this.requireToken(account);
     const metrics = 'impressions,reach,likes,comments,saved,shares';
+    // Insights is an optional permission this app does not request by
+    // default (see the scopes comment above) — a connected account that never
+    // granted it gets nulls here, matching getAccountAnalytics below, rather
+    // than a thrown error surfacing as a broken-looking analytics tab.
     const data = await platformJson<{ data?: { name: string; values?: { value?: number }[] }[] }>({
       platform: this.platform,
       url: `${GRAPH}/${platformPostId}/insights?metric=${metrics}&access_token=${encodeURIComponent(token)}`,
-    });
+    }).catch(() => ({ data: [] }));
     const value = (name: string) => data.data?.find((d) => d.name === name)?.values?.[0]?.value ?? null;
     return {
       impressions: value('impressions'),

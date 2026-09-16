@@ -12,6 +12,7 @@ import {
   type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'next/navigation';
 import {
   Background,
   Controls,
@@ -199,6 +200,26 @@ function CanvasInner({
     },
     [setNodes, setEdges],
   );
+
+  /**
+   * Opens the canvas with one step already selected, for `?node=<id>` links.
+   *
+   * A run that failed on one step should be one click away from that step's
+   * settings — otherwise the person reading the failure has to find the node
+   * on the board themselves, which on a wide graph means hunting.
+   *
+   * Runs once per requested id rather than on every render: the rail is a
+   * normal selection afterwards, so re-asserting it would fight the user the
+   * moment they clicked something else.
+   */
+  const focusedNodeId = useSearchParams().get('node');
+  const focusedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusedNodeId || focusedRef.current === focusedNodeId) return;
+    if (!nodes.some((node) => node.id === focusedNodeId)) return;
+    focusedRef.current = focusedNodeId;
+    selectOnly('node', focusedNodeId);
+  }, [focusedNodeId, nodes, selectOnly]);
 
   const nodeLookup = useMemo(() => {
     const lookup = new Map<string, { name: string; type: string }>();

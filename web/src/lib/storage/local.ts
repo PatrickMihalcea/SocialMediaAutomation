@@ -2,7 +2,7 @@ import 'server-only';
 import { createHmac } from 'node:crypto';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { env } from '@/lib/env';
+import { env, publicEnv } from '@/lib/env';
 import type { StorageDriver, StoredObject } from '@/lib/storage/types';
 
 const ROOT = path.join(process.cwd(), 'storage');
@@ -12,8 +12,13 @@ const ROOT = path.join(process.cwd(), 'storage');
  * /api/storage/[...key] with an HMAC-signed, expiring token, so the access
  * pattern matches the signed-URL model S3 uses in production.
  *
- * Not for production: a network that fetches media itself (Instagram, TikTok)
- * cannot reach localhost.
+ * Not for production: the bytes live on one machine's disk, and nothing here
+ * replicates or backs them up.
+ *
+ * It can still serve a network that fetches media itself — Instagram and TikTok
+ * pull from a URL rather than accepting an upload — but only when
+ * NEXT_PUBLIC_APP_URL is an origin they can actually reach. Run `npm run doctor`
+ * to check that end to end before relying on it.
  */
 export class LocalStorage implements StorageDriver {
   readonly name = 'local' as const;
@@ -52,10 +57,19 @@ export class LocalStorage implements StorageDriver {
     }
   }
 
+  /**
+   * Absolute, not relative.
+   *
+   * Instagram and TikTok publish by fetching the media themselves, from their
+   * own servers — so a path like /api/storage/... is not something they can
+   * resolve, and the container request fails with an unhelpful media error. The
+   * browser is happy either way, which is what hid this.
+   */
   async signedUrl(key: string, expiresInSeconds = 3600): Promise<string> {
     const expires = Date.now() + expiresInSeconds * 1000;
     const token = signKey(key, expires);
-    return `${env.NODE_ENV === 'production' ? '' : ''}/api/storage/${key.split('/').map(encodeURIComponent).join('/')}?expires=${expires}&token=${token}`;
+    const path = `/api/storage/${key.split('/').map(encodeURIComponent).join('/')}`;
+    return new URL(`${path}?expires=${expires}&token=${token}`, publicEnv.appUrl).toString();
   }
 }
 

@@ -45,19 +45,40 @@ export async function sendAssistantMessage(input: {
     });
     return { conversationId: conversation.id, message };
   }
-  const previous = await db.aiMessage.findMany({
+  // Newest-first in the query, reversed back to chronological for the model:
+  // ordering ascending and taking 30 keeps the *oldest* 30 messages, so a
+  // conversation past that length stops carrying anything recent.
+  const previous = (await db.aiMessage.findMany({
     where: { conversationId: conversation.id, workspaceId: input.workspaceId },
-    orderBy: { createdAt: 'asc' },
+    orderBy: { createdAt: 'desc' },
     take: 30,
-  });
+  })).reverse();
+  const history = previous
+    .filter((message) => message.role === 'USER' || message.role === 'ASSISTANT')
+    .map((message) => ({
+      role: message.role === 'USER' ? 'user' as const : 'assistant' as const,
+      content: message.proposal
+        ? `${message.content}\n<prior_proposal>${JSON.stringify(message.proposal)}</prior_proposal>`
+        : message.content,
+    }));
   const system = await buildSystemPrompt({
     workspaceId: input.workspaceId,
     extra: [
       'You are a workspace assistant.',
+      // The workspace context below is JSON, and without this the model
+      // answers "explain my workflow" by pasting that JSON straight back —
+      // schema-valid, and useless to read.
+      'The reply field is prose shown directly to a person. Write it as plain sentences. Never paste JSON, uuids, database ids, canvas coordinates, or raw context objects into it. Describe a workflow by what its steps do in order and how they connect, using the step names a person sees on the canvas.',
       'Actions must be proposed using the structured action field. Never claim an action has already happened.',
       'You may propose creating up to ten drafts, scheduling existing posts, assigning a post to an existing campaign, attaching existing ready media, updating existing post copy, repurposing an existing post into a new draft, creating a workflow, editing any part of an existing workflow graph, or running an existing workflow.',
       'Use only entity ids and display names from the workspace context below.',
-      'Campaign creation, inline media generation, deletion, and direct publishing are not available here. A confirmed workflow run may execute its configured steps, including a Publish step, so say that clearly in the proposal.',
+      'Campaign creation, inline media generation, and deletion are not available here.',
+      // Two different things, and collapsing them into one sentence about
+      // "publishing not being available" made the assistant refuse to add a
+      // Publish step at all — the one thing it is actually for.
+      'You cannot publish a post yourself from this conversation. You CAN add or configure a PUBLISH step inside a workflow, which sends the finished video to connected channels when that workflow runs. Treat a request to publish to a channel as a workflow edit, and propose it.',
+      'The channels list in the workspace context holds the connected accounts. Use their ids for a PUBLISH or CREATE_DRAFT step’s socialAccountIds, and name the account in the reply so the user can see which one it will post to.',
+      'A confirmed workflow run executes its configured steps, including any Publish step, so say that plainly in the proposal.',
       'When asked for an unavailable action, say that plainly and direct the user to the relevant workspace page. Never imply an unavailable action will run.',
       workflowAssistantSkill(),
       await assistantWorkspaceContext(input.workspaceId),
@@ -72,6 +93,7 @@ export async function sendAssistantMessage(input: {
       schemaName: 'content_ideas',
       messages: [
         { role: 'system', content: system },
+        ...history,
         { role: 'user', content },
       ],
     });
@@ -98,12 +120,7 @@ export async function sendAssistantMessage(input: {
     schemaName: 'assistant_reply',
     messages: [
       { role: 'system', content: system },
-      ...previous.filter((message) => message.role === 'USER' || message.role === 'ASSISTANT').map((message) => ({
-        role: message.role === 'USER' ? 'user' as const : 'assistant' as const,
-        content: message.proposal
-          ? `${message.content}\n<prior_proposal>${JSON.stringify(message.proposal)}</prior_proposal>`
-          : message.content,
-      })),
+      ...history,
       { role: 'user', content },
     ],
   });
@@ -161,7 +178,9 @@ async function storeReply(input: {
 
 export function assistantCapabilityReply(content: string): string | null {
   if (/\b(publish|delete|remove)\b/i.test(content) && !/\bworkflow\b/i.test(content)) {
-    return 'I cannot publish or delete posts from this assistant. Open the post in Composer, where Bridge88 checks your current permission and asks for the required confirmation.';
+    // Mentions the workflow route as well: refusing outright reads as "this
+    // product cannot publish", when a Publish step is exactly how it does.
+    return 'I cannot publish or delete posts directly from this assistant. To publish once, open the post in Composer, where Bridge88 checks your permission and asks for confirmation. To publish automatically, ask me to add a Publish step to a workflow and pick the channels it should post to.';
   }
   if (
     /\b(generate|create|find|search|make)\b.*\b(image|images|media|asset|video|clips?)\b/i.test(content)
@@ -582,7 +601,19 @@ async function assistantWorkspaceContext(workspaceId: string): Promise<string> {
     campaigns,
     media,
     folders,
-    workflows,
+    // Coordinates are rounded rather than dropped: the model has to supply
+    // positions when it proposes adding a step, and without seeing the
+    // existing ones it stacks new nodes on top of old. It does not need
+    // thirteen decimal places to do that — 594.2363874231033 is pure token
+    // cost on every single turn.
+    workflows: workflows.map((workflow) => ({
+      ...workflow,
+      nodes: workflow.nodes.map((node) => ({
+        ...node,
+        positionX: Math.round(node.positionX),
+        positionY: Math.round(node.positionY),
+      })),
+    })),
     channels,
   })}WORKSPACE_CONTEXT_END`;
 }

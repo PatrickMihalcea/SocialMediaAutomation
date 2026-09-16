@@ -194,7 +194,7 @@ export class YouTubeAdapter extends BaseAdapter {
         description: composeText(ctx.post).slice(0, this.capabilities.maxTextLength),
         tags: ctx.post.hashtags.map((h) => h.replace(/^#/, '')).slice(0, 30),
       },
-      status: { privacyStatus: 'public', selfDeclaredMadeForKids: false },
+      status: { privacyStatus: env.YOUTUBE_PRIVACY_STATUS, selfDeclaredMadeForKids: false },
     };
 
     // Step 1 — open a resumable session.

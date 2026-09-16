@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { audit } from '@/lib/audit';
+import { publicEnv } from '@/lib/env';
 import { getAdapter } from '@/lib/social/registry';
 import {
   consumeOAuthAttempt,
@@ -30,7 +31,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (ctx.user.id !== attempt.userId) {
     return NextResponse.json({ error: 'This connection attempt belongs to another user.' }, { status: 403 });
   }
-  const channelsUrl = new URL(`/w/${ctx.workspace.slug}/channels`, request.url);
+  // publicEnv.appUrl, not request.url — see the identical note in the start
+  // route. Behind a tunnel this is the difference between landing back in the
+  // app and the browser trying to open a URL that doesn't exist.
+  const channelsUrl = new URL(`/w/${ctx.workspace.slug}/channels`, publicEnv.appUrl);
   const limited = await rateLimit(`oauth:callback:${ctx.user.id}`, LIMITS.oauth.limit, LIMITS.oauth.window);
   if (!limited.allowed) {
     channelsUrl.searchParams.set('oauth', 'rate_limited');
@@ -114,7 +118,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       results,
       reconnectAccountId: attempt.reconnectAccountId,
     });
-    return NextResponse.redirect(new URL(`/w/${ctx.workspace.slug}/channels/select?selection=${encodeURIComponent(selection)}`, request.url));
+    return NextResponse.redirect(new URL(`/w/${ctx.workspace.slug}/channels/select?selection=${encodeURIComponent(selection)}`, publicEnv.appUrl));
   } catch (error) {
     console.error(`[oauth] ${platform} callback failed`, error instanceof Error ? error.message : error);
     const appError = toAppError(error);
@@ -130,7 +134,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         error: connectionAuditReason(error, appError.code),
       },
     });
-    const billingUrl = billingLimitRedirect(error, request.url, ctx.workspace.slug);
+    const billingUrl = billingLimitRedirect(error, publicEnv.appUrl, ctx.workspace.slug);
     if (billingUrl) return NextResponse.redirect(billingUrl);
     channelsUrl.searchParams.set('oauth', error instanceof PlatformError ? 'platform_error' : 'failed');
     return NextResponse.redirect(channelsUrl);
