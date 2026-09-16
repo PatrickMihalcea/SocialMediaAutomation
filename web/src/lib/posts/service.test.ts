@@ -265,8 +265,11 @@ describe('savePost', () => {
   });
 
   it('emits post.rescheduled instead of a generic edit when the date changes', async () => {
-    const previous = new Date('2026-09-15T09:00:00.000Z');
-    const next = new Date('2026-09-16T09:00:00.000Z');
+    // Relative to now, not pinned to a calendar date. Scheduling rejects a time
+    // in the past, so fixed dates here passed until the clock reached them and
+    // then failed for a reason that had nothing to do with what is under test.
+    const previous = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const next = new Date(Date.now() + 48 * 60 * 60 * 1000);
     mocks.findFirstPost.mockResolvedValue({
       id: postId,
       status: PostStatus.SCHEDULED,

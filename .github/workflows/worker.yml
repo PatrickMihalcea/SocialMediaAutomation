@@ -22,6 +22,10 @@ on:
     # firing a few minutes late is the honest cost of the free tier; nothing
     # here can promise otherwise.
     - cron: '*/5 * * * *'
+    # Recurrence expansion and analytics refresh, which want hours rather than
+    # minutes. Same job, same secrets — RUN_ONCE_COARSE below turns them on for
+    # these ticks only, so the five-minute pass stays cheap.
+    - cron: '20 */6 * * *'
   # Lets a run be started by hand from the Actions tab, for testing this
   # workflow itself without waiting for the next tick.
   workflow_dispatch: {}
@@ -85,6 +89,7 @@ jobs:
         run: node --import tsx src/worker/run-once.ts
         env:
           RUN_ONCE_BUDGET_MS: '600000'
+          RUN_ONCE_COARSE: ${{ github.event.schedule == '20 */6 * * *' && '1' || '0' }}
           NODE_OPTIONS: '--conditions=react-server'
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}

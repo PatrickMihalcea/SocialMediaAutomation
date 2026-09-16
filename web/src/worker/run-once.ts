@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { scanDuePosts } from '@/lib/publishing/engine';
+import { runCoarseUpkeep } from '@/lib/scheduling/coarse';
 import { scanDueWorkflows } from '@/lib/workflows/schedule';
 import { sweepWorkflowRuns } from '@/lib/workflows/engine';
 import { runJob } from '@/lib/queue/runner';
@@ -42,6 +43,15 @@ async function main() {
   const inFlight = new Set<string>();
 
   console.log(`[run-once] starting, budget ${Math.round(budgetMs / 1000)}s`);
+
+  // Recurrence and analytics ride a much slower schedule of their own, set by
+  // whichever workflow started this pass. Repeating them is safe; repeating
+  // them every five minutes would hammer the platform APIs, which is why they
+  // are opt-in rather than part of every tick.
+  if (process.env.RUN_ONCE_COARSE === '1') {
+    const { expanded, analytics } = await runCoarseUpkeep();
+    console.log(`[run-once] coarse upkeep — recurrences expanded ${expanded}, analytics queued for ${analytics} workspace(s)`);
+  }
 
   await scanDuePosts();
   const { started } = await scanDueWorkflows();
