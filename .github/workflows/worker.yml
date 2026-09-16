@@ -73,7 +73,15 @@ jobs:
 
       - name: Install dependencies
         working-directory: web
-        run: npm ci
+        # npm ci when the lock is exact, npm install when it is not.
+        #
+        # sharp pulls platform-specific optional dependencies, and a lock file
+        # resolved on macOS does not carry the ones Linux needs — npm ci then
+        # refuses outright over a transitive it cannot see. Resolving the lock
+        # for --os=linux helps but still drifts as those transitives publish.
+        # The fallback trades strict reproducibility for a worker that does not
+        # stop running every time an optional dependency shifts underneath it.
+        run: npm ci || npm install
 
       - name: Apply pending migrations
         working-directory: web
