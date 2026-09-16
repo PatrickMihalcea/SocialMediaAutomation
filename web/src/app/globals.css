@@ -23,3 +23,23 @@
   .auth-story-lede{display:none}
   .auth-form{padding:var(--space-lg)}
 }
+
+/*
+  Long-form legal copy. The rest of the app never runs more than a paragraph or
+  two at a time, so nothing in the kit sets reading measure or the rhythm a
+  policy needs between its headings and body.
+*/
+.b88-legal {
+  max-width: 68ch;
+}
+.b88-legal p,
+.b88-legal li {
+  line-height: 1.65;
+}
+.b88-legal ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.b88-legal a {
+  text-decoration-thickness: 1px;
+}

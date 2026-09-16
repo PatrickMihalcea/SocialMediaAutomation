@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { CalendarDays, Check, Layers3, Send, Sparkles } from 'lucide-react';
 import { Badge, Button } from '@/bridge88/components';
 
@@ -69,6 +70,18 @@ export default function MarketingPage() {
           })}
         </div>
       </section>
+
+      {/*
+        Quiet by design. These exist because Google and Meta require a publicly
+        reachable privacy policy and terms page to review an app, so they have
+        to be linked from somewhere findable — but they are not what anyone came
+        to the page for. Caption type, bottom of the page, no heading.
+      */}
+      <footer className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-hairline-soft pt-6">
+        <span className="b88-caption mr-auto">BRIDGE88</span>
+        <Link href="/legal/privacy" className="b88-caption transition-opacity hover:opacity-80">PRIVACY</Link>
+        <Link href="/legal/terms" className="b88-caption transition-opacity hover:opacity-80">TERMS</Link>
+      </footer>
     </main>
   );
 }

@@ -14,7 +14,15 @@ export default auth((req) => {
   const { pathname } = req.nextUrl;
   const signedIn = Boolean(req.auth?.user);
 
-  if (pathname === '/' || pathname.startsWith('/pricing')) return NextResponse.next();
+  // Open to everyone, signed in or not. /legal is in this group rather than
+  // PUBLIC_PREFIXES below because that group bounces signed-in visitors to
+  // their workspace — right for a login form, wrong for a policy page that
+  // has to stay readable to everybody. Google and Meta fetch these during app
+  // review with no session at all, and a policy behind a login reads to them
+  // as no policy.
+  if (pathname === '/' || pathname.startsWith('/pricing') || pathname.startsWith('/legal')) {
+    return NextResponse.next();
+  }
 
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
     if (signedIn && pathname !== '/invite') {
