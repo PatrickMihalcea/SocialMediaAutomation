@@ -9,7 +9,15 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  /// Pooled in production. Serverless functions each open their own
+  /// connections, and a free Postgres tier runs out of them long before it
+  /// runs out of anything else.
   url      = env("DATABASE_URL")
+  /// Unpooled, for migrations only. Prisma takes an advisory lock while
+  /// migrating, which does not survive a transaction pooler — so pointing
+  /// `migrate deploy` at the pooled URL fails or hangs. Locally both are the
+  /// same Postgres and this just points at it twice.
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------- enums
