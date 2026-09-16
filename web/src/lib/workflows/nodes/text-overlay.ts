@@ -16,6 +16,7 @@ import { buildOverlayGraph } from '@/lib/render/graph-builder';
 import { fitFontSize, wrapLabel } from '@/lib/render/fonts';
 import type { BeatSegment } from '@/lib/render/types';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
+import { connectedText } from '@/lib/workflows/connected-text';
 import { renderTextOverlayLabels } from '@/lib/workflows/text-overlay-template';
 
 const run_ = promisify(execFile);
@@ -39,12 +40,8 @@ interface Config {
 export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>> {
   const config = ctx.config as Config;
   const videoId = typeof ctx.inputs.video === 'string' ? ctx.inputs.video : null;
-  const segments = ctx.inputs.segments as BeatSegment[] | undefined;
 
   if (!videoId) throw new PermanentJobError('No video reached this step.');
-  if (!Array.isArray(segments) || segments.length === 0) {
-    throw new PermanentJobError('No cut points reached this step, so there is nowhere to put labels.');
-  }
 
   const caps = await ffmpegCapabilities();
   if (!caps.ffmpeg) {
@@ -58,17 +55,30 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   });
   if (!video) throw new PermanentJobError('That video is no longer in the media library.');
 
+  const segments = cutPointsOf(video.derivationPreset);
+  if (!segments) {
+    throw new PermanentJobError(
+      'This video has no cut points recorded, so there is nowhere to put labels. Connect the video from a Beat slideshow step.',
+    );
+  }
+
   const width = video.width ?? 1080;
   const height = video.height ?? 1920;
-  const labels = renderTextOverlayLabels(config.template, config.firstTemplate, segments);
 
-  // One size for every label, chosen so the longest fits. Sizes that changed per
-  // clip would read as a mistake rather than a design.
-  const longest = labels.reduce((a, b) => (b.length > a.length ? b : a), '');
-  const fontSize =
-    config.fontSize > 0
-      ? config.fontSize
-      : fitFontSize({ text: longest, font: config.font, maxWidth: width });
+  // Either template can be written upstream instead of typed here, so an
+  // opening line can be generated per run. Tokens are still expanded, because
+  // the text is a template wherever it came from.
+  const template = connectedText(ctx.inputs.template) || config.template;
+  const firstTemplate = connectedText(ctx.inputs.firstTemplate) || config.firstTemplate;
+  const labels = renderTextOverlayLabels(template, firstTemplate, segments);
+
+  const fontSizes = overlayFontSizes({
+    labels,
+    hasOpening: Boolean(firstTemplate),
+    configuredSize: config.fontSize,
+    font: config.font,
+    width,
+  });
 
   const dir = await mkdtemp(path.join(tmpdir(), 'b88-overlay-'));
   try {
@@ -77,6 +87,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
 
     const overlayPaths: string[] = [];
     for (const [index, label] of labels.entries()) {
+      const fontSize = fontSizes[index];
       const wrapped = wrapLabel(label, config.font, fontSize, width);
       const png = await renderLabelPng(wrapped, { width, height, fontSize, font: config.font, position: config.position });
       const file = path.join(dir, `overlay-${index}.png`);
@@ -137,10 +148,12 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
         // composer. process-media still runs for the poster frame.
         status: MediaStatus.READY,
         derivedFromId: video.id,
+        // The effective templates, not the typed ones: a connected value is
+        // what actually produced these labels.
         derivationPreset: JSON.stringify({
           kind: 'text-overlay',
-          template: config.template,
-          firstTemplate: config.firstTemplate,
+          template,
+          firstTemplate,
           labels,
         }),
       },
@@ -160,6 +173,72 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   }
 }
 
+
+/**
+ * Reads the cut points a Beat slideshow recorded on the video it produced.
+ *
+ * Null rather than an empty list when there are none, so the step can tell
+ * "this video was not cut into clips" from "it was, into none" — the first is a
+ * miswired graph and worth saying plainly.
+ */
+export function cutPointsOf(derivationPreset: string | null): BeatSegment[] | null {
+  if (!derivationPreset) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(derivationPreset);
+  } catch {
+    return null;
+  }
+  const cutPoints = (parsed as { cutPoints?: unknown } | null)?.cutPoints;
+  if (!Array.isArray(cutPoints) || cutPoints.length === 0) return null;
+  // Frame bounds are what the label graph is built from; a record missing them
+  // is not one this step can use.
+  return cutPoints.every(
+    (point) =>
+      point && typeof point === 'object'
+      && typeof (point as BeatSegment).startFrame === 'number'
+      && typeof (point as BeatSegment).endFrame === 'number',
+  )
+    ? (cutPoints as BeatSegment[])
+    : null;
+}
+
+/**
+ * Font sizes for each rendered cut.
+ *
+ * An opening question and the later choice labels play different visual roles.
+ * Fitting one long opening sentence and then reusing that tiny size for "1",
+ * "2", and "3" made the choices practically invisible. Automatic sizing now
+ * fits the opening on its own and gives all later labels one consistent size.
+ * An explicit size still means exactly one size everywhere.
+ */
+export function overlayFontSizes(input: {
+  labels: string[];
+  hasOpening: boolean;
+  configuredSize: number;
+  font: string;
+  width: number;
+}): number[] {
+  if (input.labels.length === 0) return [];
+  if (input.configuredSize > 0) {
+    return input.labels.map(() => input.configuredSize);
+  }
+
+  const fit = (labels: string[]) => {
+    const longest = labels.reduce((current, label) =>
+      label.length > current.length ? label : current, '');
+    return fitFontSize({ text: longest, font: input.font, maxWidth: input.width });
+  };
+
+  if (!input.hasOpening || input.labels.length === 1) {
+    const size = fit(input.labels);
+    return input.labels.map(() => size);
+  }
+
+  const openingSize = fit([input.labels[0]]);
+  const choiceSize = fit(input.labels.slice(1));
+  return [openingSize, ...input.labels.slice(1).map(() => choiceSize)];
+}
 
 async function renderLabelPng(
   text: string,

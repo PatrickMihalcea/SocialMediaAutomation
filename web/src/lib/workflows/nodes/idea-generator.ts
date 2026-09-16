@@ -10,6 +10,52 @@ interface Config {
   theme: string;
   count: number;
   styleSuffix: string;
+  titleGuidance: string;
+  captionGuidance: string;
+  hashtagsGuidance: string;
+  additionalOutputs: { id: string; label: string }[];
+}
+
+/** Appends the user's direction for one field, if they gave any. */
+const directed = (base: string, guidance: string) => {
+  const trimmed = guidance.trim();
+  return trimmed ? `${base} Follow this direction: ${trimmed}` : base;
+};
+
+/**
+ * The reply contract for one run.
+ *
+ * The post's title, caption and tags are always asked for and always returned,
+ * because they come back in the same call as the prompts and so cost nothing
+ * extra; an output nothing is connected to is simply ignored. What the settings
+ * change is how each one is written, not whether it is.
+ *
+ * Exported for testing — the assembly of these lines is the whole behaviour of
+ * the guidance settings, and it is otherwise only observable by mocking the
+ * model.
+ */
+export function buildIdeaInstruction(config: Config): string {
+  return [
+    'Reply as {"postTitle":string,"caption":string,"hashtags":string[],"additionalOutputs":Record<string,string>,"prompts":[{"title":string,"prompt":string}]}.',
+    `Produce exactly ${config.count} entries.`,
+    directed(
+      'postTitle is a concise, compelling title for the finished social post. It must describe the whole set, not just one image.',
+      config.titleGuidance,
+    ),
+    directed(
+      'caption is the post copy itself, written for a social feed and describing the whole set.',
+      config.captionGuidance,
+    ),
+    directed(
+      'hashtags are 3 to 8 relevant tags, lowercase, without the # sign.',
+      config.hashtagsGuidance,
+    ),
+    ...(config.additionalOutputs.length
+      ? [`Also create these named text fields, each consistent with the same overall concept: ${config.additionalOutputs.map((field) => `${field.id} (${field.label})`).join(', ')}.`]
+      : []),
+    'title is two or three words, suitable for burning onto a video as a label.',
+    'prompt is the full description.',
+  ].join(' ');
 }
 
 /**
@@ -49,14 +95,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
         role: 'user',
         content: `Write ${config.count} ${config.mode} prompts about: ${theme}`,
       },
-      {
-        role: 'system',
-        content:
-          'Reply as {"prompts":[{"title":string,"prompt":string}]}. ' +
-          `Produce exactly ${config.count} entries. ` +
-          'title is two or three words, suitable for burning onto a video as a label. ' +
-          'prompt is the full description.',
-      },
+      { role: 'system', content: buildIdeaInstruction(config) },
     ],
   });
 
@@ -65,7 +104,21 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     .slice(0, config.count)
     .map((p) => (suffix ? `${p.prompt.trim()} ${suffix}` : p.prompt.trim()));
 
+  const additionalOutputs = Object.fromEntries(config.additionalOutputs.map((field) => [
+    field.id,
+    object.additionalOutputs?.[field.id]?.trim() || object.postTitle.trim(),
+  ]));
   return {
+    postTitle: object.postTitle.trim(),
+    caption: (object.caption ?? '').trim(),
+    // One space-separated string rather than a list, because that is what the
+    // publish steps' Hashtags input takes and what a person would type there.
+    hashtags: (object.hashtags ?? [])
+      .map((tag) => tag.trim().replace(/^#+/, ''))
+      .filter(Boolean)
+      .map((tag) => `#${tag}`)
+      .join(' '),
+    ...additionalOutputs,
     prompts,
     // Titles ride along so a downstream overlay can label each clip by name.
     titles: object.prompts.slice(0, config.count).map((p) => p.title),

@@ -133,6 +133,9 @@ export function workflowAssistantSkill(): string {
     'Worked example — appending a Publish step to an existing workflow and wiring it to the step that currently produces the finished video: {"kind":"update_workflow","summary":"Add a Publish step posting to the connected YouTube channel","workflowId":"<the workflow uuid from WORKSPACE_CONTEXT>","workflowName":"Treehouses","nodeUpdates":[],"graphEdits":[{"operation":"add_node","key":"publish","type":"PUBLISH","name":"Publish to YouTube","positionX":1900,"positionY":-150,"config":{"socialAccountIds":["<a channel id from WORKSPACE_CONTEXT channels>"],"caption":"","mode":"queue","requireApproval":true}},{"operation":"connect","sourceNodeRef":"<uuid of the step whose video output feeds it>","sourcePort":"video","targetNodeRef":"publish","targetPort":"video"}]}.',
     'In a connect edit, sourceNodeRef and targetNodeRef are either the uuid of an existing step or the local key of a step added earlier in the same graphEdits array.',
     'run_workflow action: {"kind":"run_workflow","summary":string,"workflowId":uuid,"workflowName":string}.',
+    'CREATE_DRAFT and PUBLISH take title, caption, hashtags and firstComment as inputs as well as settings, and a connected input overrides the setting. Wire an IDEA_GENERATOR output into them when the user wants the copy written per run; leave the setting as typed text when the same wording should go out every time. Their mentions and link settings have no inputs and are typed only.',
+    'IDEA_GENERATOR always outputs postTitle, caption and hashtags alongside prompts and titles, so connect those rather than adding additionalOutputs for them. To control how that copy reads, set its titleGuidance, captionGuidance or hashtagsGuidance settings — one instruction each, such as "two sentences, no emoji" — and leave them empty to let the model choose.',
+    'IMAGE_GENERATOR and ANIMATE_IMAGE support useMockGeneration:true. Use it when the user is testing workflow structure or asks to avoid generation cost; leave it false for final creative output.',
     'Catalogue:',
     ...lines,
   ].join('\n');
@@ -211,7 +214,10 @@ export function weeklyReelTemplate(theme: string): {
         name: 'Leave a draft',
         positionX: 1420,
         positionY: 140,
-        config: { title: trimmed, caption: trimmed, campaignId: null, socialAccountIds: [] },
+        // Left empty on purpose: the copy is wired in from the idea step
+        // below, so every run gets its own title, caption and tags rather than
+        // the theme repeated verbatim.
+        config: { title: '', caption: '', hashtags: '', campaignId: null, socialAccountIds: [] },
       },
     ],
     edges: [
@@ -222,8 +228,10 @@ export function weeklyReelTemplate(theme: string): {
       { sourceKey: 'library', sourcePort: 'audio', targetKey: 'track', targetPort: 'items' },
       { sourceKey: 'track', sourcePort: 'item', targetKey: 'slideshow', targetPort: 'audio' },
       { sourceKey: 'slideshow', sourcePort: 'video', targetKey: 'overlay', targetPort: 'video' },
-      { sourceKey: 'slideshow', sourcePort: 'segments', targetKey: 'overlay', targetPort: 'segments' },
       { sourceKey: 'overlay', sourcePort: 'video', targetKey: 'draft', targetPort: 'video' },
+      { sourceKey: 'idea', sourcePort: 'postTitle', targetKey: 'draft', targetPort: 'title' },
+      { sourceKey: 'idea', sourcePort: 'caption', targetKey: 'draft', targetPort: 'caption' },
+      { sourceKey: 'idea', sourcePort: 'hashtags', targetKey: 'draft', targetPort: 'hashtags' },
     ],
   };
 }

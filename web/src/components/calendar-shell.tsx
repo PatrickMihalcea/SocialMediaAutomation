@@ -82,6 +82,12 @@ function isMovable(status: string) {
   return status !== 'PUBLISHED' && status !== 'PUBLISHING';
 }
 
+/** How long a publish has been running, read at a glance rather than to the second. */
+function formatElapsed(seconds: number) {
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
+}
+
 function publishedMoveHint(status: string) {
   return status === 'PUBLISHING'
     ? 'This post is publishing right now. Wait for it to finish before changing its date.'
@@ -123,9 +129,20 @@ export function CalendarShell({
   const [publishConfirmation, setPublishConfirmation] = useState<{ postId: string; retry: boolean } | null>(null);
   const [cancelConfirmation, setCancelConfirmation] = useState<string | null>(null);
   const [publishingPostId, setPublishingPostId] = useState<string | null>(null);
-  const [outcomes, setOutcomes] = useState<PostPublishOutcome[]>([]);
+  /**
+   * The channel results on screen, tagged with the post they belong to.
+   *
+   * A publish refreshes the calendar every 800ms, and each refresh hands this
+   * panel a new post object and re-reads the outcomes. Flagging that read as
+   * loading blinked a message in and out once a second; keeping the last answer
+   * up and swapping it when the next one lands leaves the section still. The
+   * post id is what keeps the previous post's channels from showing under a
+   * newly opened one.
+   */
+  const [outcomes, setOutcomes] = useState<{ postId: string; items: PostPublishOutcome[] } | null>(null);
   const [outcomeError, setOutcomeError] = useState('');
-  const [outcomesLoading, setOutcomesLoading] = useState(false);
+  /** Seconds since this publish started, for the only part that should move. */
+  const [publishSeconds, setPublishSeconds] = useState(0);
   const [moveLocal, setMoveLocal] = useState('');
   const [focusedDayKey, setFocusedDayKey] = useState('');
   const dayRefs = useMemo(() => new Map<string, HTMLDivElement>(), []);
@@ -136,22 +153,18 @@ export function CalendarShell({
 
   useEffect(() => {
     if (!selectedPost) {
-      setOutcomes([]);
+      setOutcomes(null);
       setOutcomeError('');
       return;
     }
     let active = true;
-    setOutcomesLoading(true);
     setOutcomeError('');
     void getPostPublishOutcomesAction(slug, selectedPost.id)
       .then((result) => {
-        if (active) setOutcomes(result);
+        if (active) setOutcomes({ postId: selectedPost.id, items: result });
       })
       .catch(() => {
         if (active) setOutcomeError('Channel results could not be loaded. Close this panel and try again.');
-      })
-      .finally(() => {
-        if (active) setOutcomesLoading(false);
       });
     return () => { active = false; };
   }, [selectedPost, slug]);
@@ -168,6 +181,32 @@ export function CalendarShell({
     }
   }, [publishingPostId, selectedPost]);
 
+  /**
+   * Runs the clock while the open post is publishing.
+   *
+   * Every dependency is a primitive: the post object is replaced on each
+   * refresh, and depending on it would restart the count once a second.
+   */
+  const publishingSelected = Boolean(
+    selectedPost && (publishingPostId === selectedPost.id || selectedPost.status === 'PUBLISHING'),
+  );
+  const selectedDueAt = selectedPost?.scheduledAt ?? null;
+  useEffect(() => {
+    if (!publishingSelected) {
+      setPublishSeconds(0);
+      return;
+    }
+    // A post that was already publishing when this opened has been at it since
+    // it came due, which is worth seeing when a run is wedged. One started from
+    // here, or one pushed out ahead of its slot, counts from now.
+    const dueAt = selectedDueAt ? DateTime.fromISO(selectedDueAt).toMillis() : Date.now();
+    const startedAt = Math.min(dueAt, Date.now());
+    const read = () => setPublishSeconds(Math.round((Date.now() - startedAt) / 1000));
+    read();
+    const tick = window.setInterval(read, 1000);
+    return () => window.clearInterval(tick);
+  }, [publishingSelected, selectedDueAt]);
+
   useEffect(() => {
     if (!publishingPostId || selectedPost?.id !== publishingPostId) return;
     if (selectedPost.status === 'PUBLISHED') {
@@ -183,6 +222,10 @@ export function CalendarShell({
     const refreshTimer = window.setTimeout(() => router.refresh(), 800);
     return () => window.clearTimeout(refreshTimer);
   }, [publishingPostId, router, selectedPost]);
+
+  /** Null until this post's channels have been read at least once. */
+  const shownOutcomes =
+    selectedPost && outcomes?.postId === selectedPost.id ? outcomes.items : null;
 
   const anchorDate = DateTime.fromISO(anchor, { zone: timezone }).startOf('day');
   const visibleDays = useMemo(() => {
@@ -548,15 +591,21 @@ export function CalendarShell({
                 </div>
               </section>
             )}
-            <section className="mt-6 border-t border-hairline pt-6" aria-busy={outcomesLoading}>
-              <p className="b88-eyebrow">Channel results</p>
-              {outcomesLoading && <p className="mt-3 text-sm">Loading channel results.</p>}
+            <section className="mt-6 border-t border-hairline pt-6">
+              <div className="flex flex-wrap items-baseline justify-between gap-3">
+                <p className="b88-eyebrow">Channel results</p>
+                {publishingSelected && (
+                  <p className="b88-caption" role="status">
+                    Publishing · {formatElapsed(publishSeconds)}
+                  </p>
+                )}
+              </div>
               {outcomeError && <StatusMessage tone="error" className="mt-3">{outcomeError}</StatusMessage>}
-              {!outcomesLoading && !outcomeError && outcomes.length === 0 && (
+              {!outcomeError && shownOutcomes?.length === 0 && (
                 <p className="mt-3 text-sm">No publishing channels are attached to this post.</p>
               )}
               <div className="mt-3 space-y-3">
-                {outcomes.map((outcome) => (
+                {(shownOutcomes ?? []).map((outcome) => (
                   <div key={`${outcome.platformLabel}-${outcome.accountName}`} className="b88-tile">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="font-[540]">{outcome.platformLabel} · {outcome.accountName}</p>

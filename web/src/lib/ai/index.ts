@@ -5,17 +5,40 @@ import { db } from '@/lib/db';
 import { env } from '@/lib/env';
 import { OpenAiProvider } from '@/lib/ai/providers/openai';
 import { MockAiProvider } from '@/lib/ai/providers/mock';
+import { resolveImageProviderName } from '@/lib/ai/provider-selection';
 import type { AiImageResult, AiMessage, AiObjectResult, AiProvider } from '@/lib/ai/types';
 import type { ImageSize } from '@/lib/ai/image-sizes';
 import { assertWithinLimit, currentMonthUsage, incrementUsage } from '@/lib/billing/limits';
 
 let providerInstance: AiProvider | null = null;
+let imageProviderInstance: AiProvider | null = null;
 
 export function aiProvider(): AiProvider {
   if (!providerInstance) {
     providerInstance = env.AI_PROVIDER === 'openai' ? new OpenAiProvider() : new MockAiProvider();
   }
   return providerInstance;
+}
+
+/**
+ * Image generation can be mocked independently from text generation.
+ *
+ * Workflow testing benefits from real structured text — prompts, captions, and
+ * graph decisions — but does not need to wait minutes or pay for pixels merely
+ * to verify ordering, rendering, overlays, and publishing. "inherit" keeps the
+ * previous behavior for every environment that does not opt in.
+ */
+export function imageProvider(forceMock = false): AiProvider {
+  const selected = forceMock
+    ? 'mock'
+    : resolveImageProviderName(env.AI_PROVIDER, env.AI_IMAGE_PROVIDER);
+  if (selected === env.AI_PROVIDER) return aiProvider();
+  if (!imageProviderInstance) {
+    imageProviderInstance = selected === 'openai'
+      ? new OpenAiProvider()
+      : new MockAiProvider();
+  }
+  return imageProviderInstance;
 }
 
 export async function generateObject<T>(input: {
@@ -71,10 +94,12 @@ export async function generateImage(input: {
   userId: string;
   prompt: string;
   size?: ImageSize;
+  /** Per-workflow-step override used for inexpensive end-to-end testing. */
+  forceMock?: boolean;
 }): Promise<AiImageResult & { generationId: string }> {
   const used = await currentMonthUsage(input.workspaceId, 'ai_generations');
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);
-  const provider = aiProvider();
+  const provider = imageProvider(input.forceMock);
   try {
     const result = await provider.generateImage({ prompt: input.prompt, size: input.size });
     const generation = await recordGeneration({

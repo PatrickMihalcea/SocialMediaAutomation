@@ -4,6 +4,7 @@ import {
   NODE_TYPES,
   PUBLISH_CHANNEL_REQUIRED,
   getDefinition,
+  getNodePorts,
   isCreatableNodeType,
   nodeRunConfigIssue,
   nodeSaveConfigIssue,
@@ -89,10 +90,27 @@ describe('node catalogue', () => {
     expect(isCreatableNodeType('MEDIA_LIBRARY')).toBe(true);
   });
 
+  // The extra outputs are user-named, so nothing stops someone typing a name
+  // that a built-in output already uses. A duplicate port id would give the
+  // step two ports answering to one name, and an edge no way to say which.
+  it('does not let an extra Idea generator output shadow a built-in one', () => {
+    const ports = getNodePorts(
+      'IDEA_GENERATOR',
+      { additionalOutputs: [{ id: 'caption', label: 'Caption' }, { id: 'cta', label: 'Call to action' }] },
+      'outputs',
+    );
+    const ids = ports.map((port) => port.id);
+
+    expect(ids.filter((id) => id === 'caption')).toHaveLength(1);
+    expect(ids).toContain('cta');
+    expect(ports.find((port) => port.id === 'caption')!.label).toBe('Caption');
+  });
+
   it('keeps legacy and mixed-media pipeline contracts compatible', () => {
     const path: [string, string, string, string][] = [
       ['IDEA_GENERATOR', 'prompts', 'IMAGE_GENERATOR', 'prompts'],
       ['IDEA_GENERATOR', 'titles', 'IMAGE_GENERATOR', 'titles'],
+      ['IDEA_GENERATOR', 'postTitle', 'PUBLISH', 'title'],
       ['IMAGE_GENERATOR', 'images', 'COMBINE_MEDIA', 'media1'],
       ['IMAGE_GENERATOR', 'titles', 'COMBINE_MEDIA', 'titles1'],
       ['MEDIA_LIBRARY', 'videos', 'COMBINE_MEDIA', 'media2'],
@@ -100,9 +118,18 @@ describe('node catalogue', () => {
       ['COMBINE_MEDIA', 'titles', 'BEAT_SLIDESHOW', 'titles'],
       ['MUSIC_SELECTOR', 'audio', 'BEAT_SLIDESHOW', 'audio'],
       ['BEAT_SLIDESHOW', 'video', 'TEXT_OVERLAY', 'video'],
-      ['BEAT_SLIDESHOW', 'segments', 'TEXT_OVERLAY', 'segments'],
       ['TEXT_OVERLAY', 'video', 'CREATE_DRAFT', 'video'],
       ['TEXT_OVERLAY', 'video', 'PUBLISH', 'video'],
+      // The written parts of a post can come from the brief rather than being
+      // typed into the publish step.
+      ['IDEA_GENERATOR', 'caption', 'CREATE_DRAFT', 'caption'],
+      ['IDEA_GENERATOR', 'caption', 'PUBLISH', 'caption'],
+      ['IDEA_GENERATOR', 'hashtags', 'CREATE_DRAFT', 'hashtags'],
+      ['IDEA_GENERATOR', 'hashtags', 'PUBLISH', 'hashtags'],
+      ['IDEA_GENERATOR', 'postTitle', 'CREATE_DRAFT', 'title'],
+      // The overlay's wording can be generated too, not just typed.
+      ['IDEA_GENERATOR', 'postTitle', 'TEXT_OVERLAY', 'firstTemplate'],
+      ['IDEA_GENERATOR', 'postTitle', 'TEXT_OVERLAY', 'template'],
     ];
 
     for (const [fromType, fromPort, toType, toPort] of path) {
@@ -149,9 +176,16 @@ describe('node catalogue', () => {
 
   it('does not apply video export presets to image generation size', () => {
     expect(parseConfig('IMAGE_GENERATOR', {})).toEqual(
-      expect.objectContaining({ size: '1024x1536' }),
+      expect.objectContaining({ size: '1024x1536', useMockGeneration: false }),
     );
     expect(() => parseConfig('IMAGE_GENERATOR', { size: '1080x1920' })).toThrow();
+  });
+
+  it('allows expensive media generators to be mocked per step', () => {
+    expect(parseConfig('IMAGE_GENERATOR', { useMockGeneration: true }))
+      .toEqual(expect.objectContaining({ useMockGeneration: true }));
+    expect(parseConfig('ANIMATE_IMAGE', { useMockGeneration: true }))
+      .toEqual(expect.objectContaining({ useMockGeneration: true }));
   });
 
   it('accepts every image size the provider supports', () => {

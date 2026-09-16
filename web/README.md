@@ -28,6 +28,8 @@ The default `.env` runs without third-party credentials:
 Switch boundaries independently:
 
 - `AI_PROVIDER=openai` plus `OPENAI_API_KEY`
+- `AI_IMAGE_PROVIDER=mock` to keep that real text provider while using fast,
+  deterministic local images for workflow QA (`inherit` is the default)
 - `STORAGE_DRIVER=s3` plus the `S3_*` / Cloudflare R2 variables
 - `QUEUE_DRIVER=bullmq` plus `REDIS_URL`
 - add platform OAuth credentials listed in `.env.example`

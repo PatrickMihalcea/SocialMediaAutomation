@@ -3,11 +3,16 @@ import { PostStatus } from '@prisma/client';
 import { db } from '@/lib/db';
 import { savePost } from '@/lib/posts/service';
 import { PermanentJobError } from '@/lib/queue/runner';
+import { postText, postTitle } from '@/lib/workflows/nodes/post-text';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
 
 interface Config {
   title: string;
   caption: string;
+  hashtags: string;
+  mentions: string;
+  firstComment: string;
+  link: string;
   campaignId: string | null;
   socialAccountIds: string[];
 }
@@ -35,7 +40,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     ctx.workspaceId,
     ctx.userId ?? accounts[0].workspaceOwnerId,
     {
-      title: config.title || ctx.nodeName,
+      title: postTitle(ctx, config.title),
       campaignId: config.campaignId,
       timezone: workspace.timezone,
       status: PostStatus.DRAFT,
@@ -43,9 +48,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       platforms: accounts.map((account) => ({
         socialAccountId: account.id,
         platform: account.platform,
-        text: config.caption,
-        hashtags: [],
-        mentions: [],
+        ...postText(ctx, config),
         media: [{ mediaAssetId: videoId }],
       })),
     },

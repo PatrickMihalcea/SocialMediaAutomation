@@ -39,7 +39,9 @@ import {
   type WorkflowMediaAssetOption,
   type WorkflowMediaCounts,
   type WorkflowMediaFolderOption,
+  findPort,
   getDefinition,
+  getNodePorts,
 } from '@/lib/workflows/definitions';
 import {
   mediaLibraryOutputCounts,
@@ -55,7 +57,10 @@ import {
   disconnectAction,
   saveNodePositionsAction,
 } from '@/app/actions/workflows';
-import { NodeConfigPanel } from '@/components/workflow-config-panel';
+import {
+  NodeConfigPanel,
+  type NodeInputConnection,
+} from '@/components/workflow-config-panel';
 import { ConnectionConfigPanel } from '@/components/workflow-connection-panel';
 
 export interface CanvasNode {
@@ -78,6 +83,7 @@ export interface CanvasEdge {
 type StepData = {
   label: string;
   type: string;
+  config: unknown;
   outputCounts?: MediaLibraryOutputCounts;
 };
 
@@ -97,7 +103,16 @@ const ConnectingContext = createContext<{
   active: boolean;
   accepts: (nodeId: string, portId: string, kind: PortKind) => boolean;
   isOutputConnected: (nodeId: string, portId: string) => boolean;
-}>({ active: false, accepts: () => false, isOutputConnected: () => false });
+  isInputConnected: (nodeId: string, portId: string) => boolean;
+}>({
+  active: false,
+  accepts: () => false,
+  isOutputConnected: () => false,
+  isInputConnected: () => false,
+});
+
+/** True when this deployment mocks media generation whatever a step asks for. */
+const MockedProviderContext = createContext(false);
 
 const EDGE_HIT_WIDTH = 24;
 
@@ -122,6 +137,7 @@ export function WorkflowCanvas(props: {
   mediaAssets: WorkflowMediaAssetOption[];
   mediaFolders: WorkflowMediaFolderOption[];
   mediaCounts: WorkflowMediaCounts;
+  mediaProviderMocked: boolean;
   canEdit: boolean;
 }) {
   return (
@@ -141,6 +157,7 @@ function CanvasInner({
   mediaAssets,
   mediaFolders,
   mediaCounts,
+  mediaProviderMocked,
   canEdit,
 }: {
   slug: string;
@@ -152,6 +169,7 @@ function CanvasInner({
   mediaAssets: WorkflowMediaAssetOption[];
   mediaFolders: WorkflowMediaFolderOption[];
   mediaCounts: WorkflowMediaCounts;
+  mediaProviderMocked: boolean;
   canEdit: boolean;
 }) {
   const [error, setError] = useState('');
@@ -261,8 +279,8 @@ function CanvasInner({
       const source = configs.current.get(sourceId);
       const target = configs.current.get(targetId);
       if (!source || !target) return false;
-      const output = getDefinition(source.type)?.outputs.find((port) => port.id === sourcePort);
-      const input = getDefinition(target.type)?.inputs.find((port) => port.id === targetPort);
+      const output = getNodePorts(source.type, source.config, 'outputs').find((port) => port.id === sourcePort);
+      const input = getNodePorts(target.type, target.config, 'inputs').find((port) => port.id === targetPort);
       if (!output || !input) return false;
       if (edges.some((edge) => edge.target === targetId && edge.targetHandle === targetPort)) return false;
       const graphEdges = edges.map(flowEdgeToCanvas);
@@ -271,6 +289,7 @@ function CanvasInner({
         id,
         type: config.type,
         name: config.name,
+        config: config.config,
       }));
       return !checkAddedEdge(
         { nodes: graphNodes, edges: graphEdges },
@@ -306,11 +325,10 @@ function CanvasInner({
     if (!connectStart) return { active: false, accepts: () => false };
 
     const originNode = configs.current.get(connectStart.nodeId);
-    const originDefinition = originNode ? getDefinition(originNode.type) : null;
     const fromSource = connectStart.handleType === 'source';
     const originPort = fromSource
-      ? originDefinition?.outputs.find((port) => port.id === connectStart.handleId)
-      : originDefinition?.inputs.find((port) => port.id === connectStart.handleId);
+      ? (originNode ? getNodePorts(originNode.type, originNode.config, 'outputs') : []).find((port) => port.id === connectStart.handleId)
+      : (originNode ? getNodePorts(originNode.type, originNode.config, 'inputs') : []).find((port) => port.id === connectStart.handleId);
 
     return {
       active: true,
@@ -319,8 +337,8 @@ function CanvasInner({
         // A drag that started on an output can only land on an input.
         if (kind === connectStart.handleType) return false;
 
-        const definition = getDefinition(configs.current.get(nodeId)?.type ?? '');
-        const port = (kind === 'target' ? definition?.inputs : definition?.outputs)?.find(
+        const candidateNode = configs.current.get(nodeId);
+        const port = (candidateNode ? getNodePorts(candidateNode.type, candidateNode.config, kind === 'target' ? 'inputs' : 'outputs') : []).find(
           (candidate) => candidate.id === portId,
         );
         if (!port) return false;
@@ -337,6 +355,8 @@ function CanvasInner({
       ...connecting,
       isOutputConnected: (nodeId: string, portId: string) =>
         edges.some((edge) => edge.source === nodeId && edge.sourceHandle === portId),
+      isInputConnected: (nodeId: string, portId: string) =>
+        edges.some((edge) => edge.target === nodeId && edge.targetHandle === portId),
     }),
     [connecting, edges],
   );
@@ -504,6 +524,25 @@ function CanvasInner({
   }, []);
 
   const selectedNode = selectedNodeId ? configs.current.get(selectedNodeId) : null;
+
+  /**
+   * What feeds the selected step's inputs, so its settings panel can say which
+   * of them a run fills in rather than leaving the typed value looking live.
+   */
+  const selectedConnections = useMemo<NodeInputConnection[]>(() => {
+    if (!selectedNodeId) return [];
+    return edges
+      .filter((edge) => edge.target === selectedNodeId && edge.targetHandle)
+      .map((edge) => {
+        const { source } = describeConnection(flowEdgeToCanvas(edge), nodeLookup);
+        const port = findPort(source.nodeType, source.portId, 'outputs');
+        return {
+          portId: edge.targetHandle as string,
+          edgeId: edge.id,
+          sourceLabel: `${source.nodeName} · ${port?.label ?? source.portId}`,
+        };
+      });
+  }, [edges, selectedNodeId, nodeLookup]);
   // The settings rail only exists once there is something to configure, so the
   // canvas keeps that width the rest of the time.
   const inspector = selectedCanvasEdge && selectedConnectionDescription
@@ -572,6 +611,7 @@ function CanvasInner({
           }
         >
           <ConnectingContext.Provider value={connectionUi}>
+          <MockedProviderContext.Provider value={mediaProviderMocked}>
           <ReactFlow
             nodes={nodes}
             edges={flowEdges}
@@ -610,6 +650,37 @@ function CanvasInner({
             onPaneClick={() => setContextMenu(null)}
             onPaneContextMenu={() => setContextMenu(null)}
             onMoveStart={() => setContextMenu(null)}
+            /*
+              Dragging a step must not open its settings.
+
+              selectNodesOnDrag is the prop that does it: left at its default,
+              XYDrag selects the node the moment a drag begins, so picking a
+              step up to move it swung the settings rail open and reflowed the
+              canvas mid-drag. Turned off, React Flow selects from the DOM
+              click handler instead — and a drag never produces a click.
+
+              The two distances then split gestures cleanly in two. d3 emits a
+              click only when the pointer travelled no further than
+              nodeClickDistance, and a drag begins only once it travels further
+              than nodeDragThreshold. Equal values make those complementary
+              rather than merely similar: every gesture is exactly one of the
+              two, with no dead zone and nothing that both moves and selects.
+              3px absorbs the hand jitter in a trackpad click.
+            */
+            selectNodesOnDrag={false}
+            nodeClickDistance={3}
+            nodeDragThreshold={3}
+            /*
+              One step at a time. React Flow ships with two multi-select
+              gestures — hold Cmd/Ctrl and click, or hold Shift and drag a
+              marquee — and this canvas has nowhere to put the result: the
+              settings rail edits exactly one element and renders nothing for a
+              multi-selection, so every one of those gestures ends in a blank
+              panel and no way to tell why. Nulling both key codes removes the
+              gestures rather than leaving them to be discovered by accident.
+            */
+            multiSelectionKeyCode={null}
+            selectionKeyCode={null}
             onBeforeDelete={onBeforeDelete}
             deleteKeyCode={canEdit ? ['Backspace', 'Delete'] : null}
             elementsSelectable
@@ -621,6 +692,12 @@ function CanvasInner({
             ariaLabelConfig={{
               'edge.a11yDescription.default': EDGE_A11Y_HINT,
             }}
+            // React Flow defaults to a 0.5 minimum. At that scale a normal
+            // nine-step workflow is wider than this canvas, so Fit View leaves
+            // its first and last nodes outside the viewport. Larger workflows
+            // need to be able to zoom farther out before the user chooses
+            // where to focus.
+            minZoom={0.2}
             fitView
             fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
             proOptions={{ hideAttribution: true }}
@@ -628,6 +705,7 @@ function CanvasInner({
             <Background gap={24} size={1} color="var(--hairline)" />
             <Controls showInteractive={false} />
           </ReactFlow>
+          </MockedProviderContext.Provider>
           </ConnectingContext.Provider>
         </div>
       </div>
@@ -652,30 +730,34 @@ function CanvasInner({
             audioAssets={audioAssets}
             mediaAssets={mediaAssets}
             mediaFolders={mediaFolders}
+            connections={selectedConnections}
             canEdit={canEdit}
+            onDisconnect={removeConnection}
             onSaved={(updated) => {
               configs.current.set(updated.id, updated);
+              // Rebuilt through toFlowNode rather than patched field by field.
+              // Patching label and outputCounts left data.config holding the
+              // pre-save values, and the ports a step draws are derived from
+              // that config — so adding an Idea generator output, or repointing
+              // a Media library, only showed up after a page reload. Position
+              // and selection stay as React Flow currently has them.
               setNodes((current) =>
                 current.map((node) =>
                   node.id === updated.id
                     ? {
                         ...node,
-                        data: {
-                          ...node.data,
-                          label: updated.name,
-                          outputCounts:
-                            updated.type === 'MEDIA_LIBRARY'
-                              ? mediaLibraryOutputCounts(
-                                  updated.config,
-                                  mediaFolders,
-                                  mediaCounts,
-                                  mediaAssets,
-                                )
-                              : undefined,
-                        },
+                        data: toFlowNode(updated, mediaFolders, mediaCounts, mediaAssets).data,
                       }
                     : node,
                 ),
+              );
+              // Edge descriptions name their endpoints and ports, so a rename
+              // or a re-typed port leaves them stale too.
+              setEdges((current) =>
+                current.map((edge) => ({
+                  ...edge,
+                  ...toFlowEdge(flowEdgeToCanvas(edge), configs.current, canEdit),
+                })),
               );
             }}
             onDelete={() => removeStep(selectedNode.id)}
@@ -797,10 +879,33 @@ function CanvasContextMenu({
   );
 }
 
+/** The steps that carry a switch to swap the paid model for stand-in media. */
+const MOCKABLE_STEPS = new Set(['IMAGE_GENERATOR', 'ANIMATE_IMAGE']);
+
+/**
+ * The text a step will use for an input it has no connection for.
+ *
+ * Inputs that can be answered from the settings share the port's id with the
+ * setting's key — title, caption, template — so a non-empty string under that
+ * key is the fixed value this run will send.
+ */
+function typedInput(config: unknown, portId: string): string | null {
+  if (typeof config !== 'object' || config === null) return null;
+  const value = (config as Record<string, unknown>)[portId];
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  return value.trim();
+}
+
+const mockConfigured = (config: unknown) =>
+  typeof config === 'object' &&
+  config !== null &&
+  (config as { useMockGeneration?: unknown }).useMockGeneration === true;
+
 /** A step on the canvas: a stroked card with a labelled port down each side. */
 function StepNode({ id, data, selected }: NodeProps<Node<StepData>>) {
   const definition = getDefinition(data.type);
   const connecting = useContext(ConnectingContext);
+  const providerMocked = useContext(MockedProviderContext);
 
   /** During a drag, mark each port as a candidate or not so CSS can show it. */
   const compatibility = (portId: string, kind: PortKind) =>
@@ -814,19 +919,38 @@ function StepNode({ id, data, selected }: NodeProps<Node<StepData>>) {
     );
   }
 
+  const mocked =
+    MOCKABLE_STEPS.has(data.type) && (providerMocked || mockConfigured(data.config));
+  const nodeOutputs = getNodePorts(data.type, data.config, 'outputs');
+  const nodeInputs = getNodePorts(data.type, data.config, 'inputs');
   const outputs = data.type === 'MEDIA_LIBRARY' && data.outputCounts
-    ? definition.outputs.filter((port) => {
+    ? nodeOutputs.filter((port) => {
         const count = data.outputCounts?.[port.id as keyof MediaLibraryOutputCounts] ?? 0;
         return count > 0 || connecting.isOutputConnected(id, port.id);
       })
-    : definition.outputs;
+    : nodeOutputs;
 
   return (
     <div
       className="min-w-56 rounded-lg bg-canvas p-4"
       style={{ border: selected ? '1px solid var(--ink)' : '1px solid var(--hairline)' }}
     >
-      <p className="b88-caption">{CATEGORY_LABEL[definition.category]}</p>
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="b88-caption">{CATEGORY_LABEL[definition.category]}</p>
+        {mocked && (
+          <Badge tone="lilac">
+            <span
+              title={
+                providerMocked
+                  ? 'This deployment has media generation mocked, so this step produces stand-ins.'
+                  : 'This step produces stand-in media instead of calling the paid model.'
+              }
+            >
+              Mock
+            </span>
+          </Badge>
+        )}
+      </div>
       <p className="mt-1 text-base font-medium">{data.label}</p>
 
       {/* Each port dot lives inside its own label row, so it is centred on that
@@ -836,7 +960,13 @@ function StepNode({ id, data, selected }: NodeProps<Node<StepData>>) {
           the dot on the card edge. */}
       <div className="mt-3 flex justify-between gap-6">
         <ul className="list-none space-y-1.5 p-0">
-          {definition.inputs.map((port) => (
+          {nodeInputs.map((port) => {
+            // An input with no wire and a value typed into the matching setting
+            // is answered from the settings every run. Saying so here is the
+            // difference between a step that looks unfinished and one that is
+            // deliberately fixed.
+            const typed = !connecting.isInputConnected(id, port.id) && typedInput(data.config, port.id);
+            return (
             <li key={port.id} className="b88-caption relative">
               <Handle
                 id={port.id}
@@ -844,12 +974,19 @@ function StepNode({ id, data, selected }: NodeProps<Node<StepData>>) {
                 position={Position.Left}
                 style={{ left: -16 }}
                 data-compatible={compatibility(port.id, 'target')}
-                aria-label={`${port.label}${port.required ? ', required' : ''} input`}
+                aria-label={
+                  `${port.label}${port.required ? ', required' : ''} input` +
+                  (typed ? `, set in settings to ${typed}` : '')
+                }
               />
               {port.label}
               {port.required ? ' *' : ''}
+              {typed && (
+                <span title={`Set in settings: ${typed}`} style={{ opacity: 0.6 }}> · typed</span>
+              )}
             </li>
-          ))}
+            );
+          })}
         </ul>
         <ul className="list-none space-y-1.5 p-0 text-right">
           {outputs.map((port) => {
@@ -889,6 +1026,7 @@ const toFlowNode = (
   data: {
     label: node.name,
     type: node.type,
+    config: node.config,
     outputCounts:
       node.type === 'MEDIA_LIBRARY'
         ? mediaLibraryOutputCounts(node.config, mediaFolders, mediaCounts, mediaAssets)

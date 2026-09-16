@@ -365,7 +365,7 @@ async function seedBedroomWorkflow(workspaceId: string, userId: string) {
     fontSize: 0,
   });
   const draft = await node('CREATE_DRAFT', 'Leave a draft', 1420, 140, {
-    title: 'Which bedroom are you choosing?',
+    title: '',
     caption: 'Which bedroom are you choosing?',
     campaignId: null,
     socialAccountIds: [],
@@ -394,8 +394,8 @@ async function seedBedroomWorkflow(workspaceId: string, userId: string) {
   await edge(library.id, 'audio', track.id, 'items');
   await edge(track.id, 'item', slideshow.id, 'audio');
   await edge(slideshow.id, 'video', overlay.id, 'video');
-  await edge(slideshow.id, 'segments', overlay.id, 'segments');
   await edge(overlay.id, 'video', draft.id, 'video');
+  await edge(idea.id, 'postTitle', draft.id, 'title');
 
   console.log('Seeded the "Bedroom picker" workflow');
   return {

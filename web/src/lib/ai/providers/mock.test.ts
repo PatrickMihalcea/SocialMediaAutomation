@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import sharp from 'sharp';
 import { z } from 'zod';
 import { MockAiProvider } from '@/lib/ai/providers/mock';
-import { assistantReplySchema } from '@/lib/ai/schemas';
+import { assistantReplySchema, imagePromptsSchema } from '@/lib/ai/schemas';
 
 describe('mock AI structured output', () => {
   it('returns schema-validated deterministic content', async () => {
@@ -16,6 +17,39 @@ describe('mock AI structured output', () => {
     const second = await provider.completeObject(input);
     expect(first.object).toEqual(second.object);
     expect(schema.safeParse(first.object).success).toBe(true);
+  });
+
+  it('generates deterministic local PNGs at the requested dimensions', async () => {
+    const provider = new MockAiProvider();
+    const input = { prompt: 'A glass treehouse in a pine forest', size: '1024x1536' };
+    const first = await provider.generateImage(input);
+    const second = await provider.generateImage(input);
+    const metadata = await sharp(first.data).metadata();
+
+    expect(first.mimeType).toBe('image/png');
+    expect(first.model).toBe('mock-image-1');
+    expect(first.data.equals(second.data)).toBe(true);
+    expect(metadata).toMatchObject({ width: 1024, height: 1536, format: 'png' });
+  });
+
+  // The Idea generator runs this sample in demo mode, and the provider throws
+  // rather than degrading when a sample misses a required field — so an
+  // incomplete sample takes the whole step down.
+  it('returns an idea sample complete enough to satisfy the real schema', async () => {
+    const provider = new MockAiProvider();
+    const { object } = await provider.completeObject({
+      messages: [{ role: 'user' as const, content: 'Write 4 image prompts about: coastal rooms' }],
+      schema: imagePromptsSchema,
+      schemaName: 'image_prompts',
+    });
+    const idea = imagePromptsSchema.parse(object);
+
+    expect(idea.prompts).toHaveLength(4);
+    expect(idea.postTitle.length).toBeGreaterThan(0);
+    expect(idea.caption.length).toBeGreaterThan(0);
+    expect(idea.hashtags.length).toBeGreaterThan(0);
+    // Bare tags, matching what the step asks the model for.
+    expect(idea.hashtags.every((tag) => !tag.startsWith('#'))).toBe(true);
   });
 
   it.each([

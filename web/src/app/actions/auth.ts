@@ -20,6 +20,7 @@ import { audit } from '@/lib/audit';
 import { hashSecret, issueSecret } from '@/lib/crypto/tokens';
 import { env, publicEnv } from '@/lib/env';
 import { storage } from '@/lib/storage';
+import { ownedProfileImageKey } from '@/lib/users/profile-image';
 import {
   actionError,
   actionSuccess,
@@ -128,7 +129,7 @@ export async function deleteAccountAction() {
   const user = await requireUser();
   const owned = await db.workspaceMember.count({ where: { userId: user.id, role: 'OWNER' } });
   if (owned) redirect('/account?error=owned-workspaces');
-  const profileKey = managedProfileKey(user.image, user.id);
+  const profileKey = ownedProfileImageKey(user.image, user.id);
   await db.user.delete({ where: { id: user.id } });
   if (profileKey) await storage().delete(profileKey).catch(() => undefined);
   await signOut({ redirectTo: '/' });
@@ -144,7 +145,6 @@ export async function updateProfileAction(
     const user = await requireUser();
     const input = profileSchema.parse(Object.fromEntries(formData));
     const image = formData.get('image');
-    let imageUrl: string | undefined;
 
     if (image instanceof File && image.size) {
       const allowed = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -157,24 +157,31 @@ export async function updateProfileAction(
       const ext = image.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
       uploadedKey = `users/${user.id}/profile/${randomUUID()}.${ext}`;
       await storage().put(uploadedKey, Buffer.from(await image.arrayBuffer()), image.type);
-      imageUrl = await storage().signedUrl(uploadedKey, 365 * 24 * 60 * 60);
     }
 
+    // The key, not a signed URL. Signing here used to ask for a year of
+    // validity, which S3 and R2 reject outright — SigV4 allows at most seven
+    // days — so every upload to a real bucket failed at this line and the
+    // catch below quietly deleted the image that had just been uploaded.
+    // Avatars are signed per render instead, by profileImageSrc.
     await db.user.update({
       where: { id: user.id },
-      data: { name: input.name, ...(imageUrl ? { image: imageUrl } : {}) },
+      data: { name: input.name, ...(uploadedKey ? { image: uploadedKey } : {}) },
     });
-    const previousKey = imageUrl ? managedProfileKey(user.image, user.id) : null;
+    const previousKey = uploadedKey ? ownedProfileImageKey(user.image, user.id) : null;
     if (previousKey) await storage().delete(previousKey).catch(() => undefined);
     await audit({
       userId: user.id,
       action: 'user.profile_updated',
       entityType: 'user',
       entityId: user.id,
-      metadata: { imageUpdated: Boolean(imageUrl) },
+      metadata: { imageUpdated: Boolean(uploadedKey) },
     });
     revalidatePath('/account');
-    return actionSuccess(imageUrl ? 'Profile and image updated.' : 'Profile updated.');
+    // The header avatar lives in the workspace layout, not on /account, so it
+    // would otherwise keep showing the old picture until a hard reload.
+    revalidatePath('/', 'layout');
+    return actionSuccess(uploadedKey ? 'Profile and image updated.' : 'Profile updated.');
   } catch (error) {
     if (uploadedKey) await storage().delete(uploadedKey).catch(() => undefined);
     return actionError(error, 'The profile could not be updated.');
@@ -318,14 +325,3 @@ export async function passwordResetTokenIsValid(tokenValue: string): Promise<boo
   );
 }
 
-function managedProfileKey(imageUrl: string | null, userId: string): string | null {
-  if (!imageUrl) return null;
-  try {
-    const path = decodeURIComponent(new URL(imageUrl, publicEnv.appUrl).pathname);
-    const prefix = `users/${userId}/profile/`;
-    const start = path.indexOf(prefix);
-    return start >= 0 ? path.slice(start) : null;
-  } catch {
-    return null;
-  }
-}

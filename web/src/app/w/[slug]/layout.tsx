@@ -7,6 +7,7 @@ import { Avatar } from '@/bridge88/components';
 import { listMyWorkspaces, requireWorkspace } from '@/lib/auth/guard';
 import { unreadCount } from '@/lib/notifications/service';
 import { AppError } from '@/lib/errors';
+import { profileImageSrc } from '@/lib/users/profile-image-src';
 
 function NotificationLink({
   slug,
@@ -87,7 +88,7 @@ export default async function WorkspaceLayout({
             title="Profile settings"
             className="b88-icon-button flex h-10 items-center gap-2 rounded-pill px-1 pr-3 text-sm font-[480] transition-opacity hover:opacity-80"
           >
-            <Avatar name={ctx.user.name ?? ctx.user.email} src={ctx.user.image} size={32} />
+            <Avatar name={ctx.user.name ?? ctx.user.email} src={await profileImageSrc(ctx.user.image)} size={32} />
             <span>Profile</span>
           </Link>
         </div>

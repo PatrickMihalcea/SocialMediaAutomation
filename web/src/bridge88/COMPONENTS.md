@@ -866,6 +866,7 @@ One-line: one asset in the media library grid.
 
 - Selection is a 1px ink outline plus a soft fill — never a colour tint or a checkbox overlay.
 - Every tile uses a square 1:1 media frame so mixed source dimensions form a uniform grid; assets use `object-fit: contain`.
+- `src` is always drawn as a still, including for `type="video"` — pass the poster or thumbnail, never the video file. `type` only sets the badge and the empty-state placeholder.
 
 ```ts
 import * as React from 'react';

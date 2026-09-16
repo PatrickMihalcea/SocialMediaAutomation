@@ -126,6 +126,7 @@ function selectClass(variant: 'field' | 'pill' | 'filter', className?: string) {
 
 export function Field({
   label,
+  labelHidden,
   hint,
   error,
   variant = 'field',
@@ -136,6 +137,12 @@ export function Field({
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & {
   label: string;
+  /**
+   * Keeps the label for assistive tech but takes it off screen, for rows of
+   * like inputs that already sit under one group heading. Still required, so
+   * hiding it cannot turn into omitting it.
+   */
+  labelHidden?: boolean;
   hint?: string;
   error?: string;
   containerClassName?: string;
@@ -146,7 +153,7 @@ export function Field({
   const messageId = `${inputId}-message`;
   return (
     <div className={containerClassName ? `block ${containerClassName}` : 'block'}>
-      <label className="b88-label" htmlFor={inputId}>{label}</label>
+      <label className={labelHidden ? 'sr-only' : 'b88-label'} htmlFor={inputId}>{label}</label>
       <input
         id={inputId}
         className={variant === 'filter' ? selectClass('filter', className) : inputClass(className)}
@@ -798,8 +805,11 @@ export function AssetTile({
         border: 'none',
       }}
     >
+      {/* A tile never plays, so src is treated as a still even for video: the
+          thumbnail callers pass is a .webp, and a video element renders that as
+          an empty black frame. type still drives the badge and the placeholder. */}
       <MediaFrame
-        type={type}
+        type={src ? 'image' : type}
         ratio="1:1"
         src={src}
         tone={tone}

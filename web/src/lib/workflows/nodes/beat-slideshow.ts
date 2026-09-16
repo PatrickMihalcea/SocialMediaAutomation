@@ -131,6 +131,28 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   const key = mediaKey(ctx.workspaceId, filename, 'derived');
   await storage().put(key, result.data, result.mimeType);
 
+  /**
+   * Where each clip begins and ends in the finished video, and what it was
+   * titled.
+   *
+   * Stored on the asset rather than handed downstream on a port of its own:
+   * these belong to this particular video, and a later step that is given the
+   * video needs them to label its cuts. Passing them separately meant two
+   * connections that had to be kept pointing at the same step, and nothing
+   * stopped them diverging.
+   */
+  const cutPoints: BeatSegment[] = plan.cutFrames.slice(0, -1).map((startFrame, index) => ({
+    index,
+    mediaAssetId: used[index].id,
+    mediaKind: used[index].type as 'IMAGE' | 'VIDEO',
+    ...(used[index].type === MediaType.IMAGE ? { imageAssetId: used[index].id } : {}),
+    startFrame,
+    endFrame: plan.cutFrames[index + 1],
+    startSeconds: startFrame / config.fps,
+    endSeconds: plan.cutFrames[index + 1] / config.fps,
+    title: titles[index] ?? null,
+  }));
+
   const asset = await db.mediaAsset.create({
     data: {
       workspaceId: ctx.workspaceId,
@@ -160,6 +182,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
         beatAnalyzer: grid.analyzer,
         mediaAssetIds: used.map((item) => item.id),
         imageAssetIds: used.filter((item) => item.type === MediaType.IMAGE).map((item) => item.id),
+        cutPoints,
       }),
     },
     select: { id: true },
@@ -172,21 +195,8 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     { workspaceId: ctx.workspaceId, dedupeKey: `process-media:${asset.id}` },
   );
 
-  const segments: BeatSegment[] = plan.cutFrames.slice(0, -1).map((startFrame, index) => ({
-    index,
-    mediaAssetId: used[index].id,
-    mediaKind: used[index].type as 'IMAGE' | 'VIDEO',
-    ...(used[index].type === MediaType.IMAGE ? { imageAssetId: used[index].id } : {}),
-    startFrame,
-    endFrame: plan.cutFrames[index + 1],
-    startSeconds: startFrame / config.fps,
-    endSeconds: plan.cutFrames[index + 1] / config.fps,
-    title: titles[index] ?? null,
-  }));
-
   return {
     video: asset.id,
-    segments,
     // Surfaced so the run view can explain a video that came out shorter.
     adjustment: plan.adjustment,
   };

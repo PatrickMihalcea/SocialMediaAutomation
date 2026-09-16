@@ -1,5 +1,6 @@
 import type { Platform, PostStatus } from '@prisma/client';
 import type { PostPlatformInput } from '@/lib/posts/schemas';
+import { parseTagList } from '@/lib/posts/tags';
 
 export type ComposerAccount = {
   id: string;
@@ -150,27 +151,14 @@ export function buildInitialDraft(
   };
 }
 
-function parseList(value: string, prefix?: '@' | '#') {
-  return value
-    .split(/[,\s]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((item) => {
-      if (!prefix) return item;
-      const stripped = item.replace(new RegExp(`^${prefix}`), '');
-      return stripped ? `${prefix}${stripped}` : '';
-    })
-    .filter(Boolean);
-}
-
 function mapVersion(version: PlatformVersionState): PostPlatformInput {
   return {
     socialAccountId: version.socialAccountId,
     platform: version.platform,
     text: version.text,
     firstComment: version.firstComment.trim() ? version.firstComment : null,
-    hashtags: parseList(version.hashtags, '#').map((tag) => tag.replace(/^#/, '')),
-    mentions: parseList(version.mentions, '@').map((mention) => mention.replace(/^@/, '')),
+    hashtags: parseTagList(version.hashtags, '#'),
+    mentions: parseTagList(version.mentions, '@'),
     link: version.link.trim() || null,
     media: version.media.map((item) => ({
       mediaAssetId: item.mediaAssetId,

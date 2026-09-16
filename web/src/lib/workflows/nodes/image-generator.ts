@@ -10,6 +10,7 @@ import type { NodeRunContext } from '@/lib/workflows/node-context';
 interface Config {
   size: ImageSize;
   maxImages: number;
+  useMockGeneration: boolean;
 }
 
 /**
@@ -47,6 +48,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       userId: ctx.userId,
       prompt,
       size: config.size,
+      forceMock: config.useMockGeneration,
     });
 
     const extension = result.mimeType === 'image/svg+xml' ? 'svg' : 'png';

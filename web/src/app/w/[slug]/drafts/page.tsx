@@ -8,6 +8,9 @@ import { PLATFORM_LABELS } from '@/lib/social/registry';
 import { formatInZone } from '@/lib/scheduling/time';
 import type { Prisma } from '@prisma/client';
 import { POST_STATUS_LABELS } from '@/lib/posts/labels';
+import { isPostActionLegal } from '@/lib/posts/lifecycle';
+import { postCommandAction } from '@/app/actions/posts';
+import { ConfirmationButton } from '@/components/action-ui';
 
 const PAGE_SIZE = 30;
 
@@ -47,6 +50,7 @@ export default async function DraftsPage({
     }),
     db.post.count({ where }),
   ]);
+  const canDelete = ctx.can('post:delete');
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   if (page > pageCount) redirect(`/w/${slug}/drafts?page=${pageCount}`);
 
@@ -101,6 +105,31 @@ export default async function DraftsPage({
                 <Badge tone={post.status === 'PENDING_APPROVAL' ? 'cream' : post.status === 'APPROVED' ? 'mint' : 'outline'}>
                   {POST_STATUS_LABELS[post.status]}
                 </Badge>
+                {/*
+                  Clearing out drafts had meant opening each one and deleting it
+                  from its own page. The lifecycle check is not decoration: it
+                  is the same table the action enforces, so the button is never
+                  offered for a post the server would refuse to delete.
+                */}
+                {canDelete && isPostActionLegal(post.status, 'delete') && (
+                  <form
+                    action={async () => {
+                      'use server';
+                      await postCommandAction(slug, post.id, 'delete', undefined, `/w/${slug}/drafts`);
+                    }}
+                    className="shrink-0"
+                  >
+                    <ConfirmationButton
+                      type="submit"
+                      variant="tertiary"
+                      confirmMessage={`Delete "${preview}" permanently?`}
+                      pendingLabel="Deleting"
+                      aria-label={`Delete ${preview}`}
+                    >
+                      Delete
+                    </ConfirmationButton>
+                  </form>
+                )}
               </article>
             );
           })}

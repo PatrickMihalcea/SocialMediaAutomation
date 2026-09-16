@@ -57,6 +57,16 @@ const MIN_BAR = 4;
 /** Columns stretch to fill, then scroll once there are too many to read. */
 const COLUMN = 'min-w-[18px] max-w-[42px] flex-1 shrink-0';
 
+/**
+ * Columns a date label needs to itself.
+ *
+ * A label reads about 55px and a column is at most 42px, so a label printed on
+ * every column overlaps its neighbour — which is exactly what four runs on
+ * consecutive days produced: "15 SEPT15 SEPT15 SEPT16 SEPT". Three columns
+ * clears the widest label even at the narrowest column width.
+ */
+const LABEL_COLUMNS = 3;
+
 const RUN_FILL: Record<WorkflowRunStatus, string> = {
   SUCCEEDED: 'var(--block-lime)',
   FAILED: 'var(--block-coral)',
@@ -93,9 +103,38 @@ export function WorkflowRunsChart({
 
   const { max, ticks } = useMemo(() => scaleFor(runs.map((r) => r.durationMs ?? 0)), [runs]);
 
-  // A label on every column collides into noise; roughly six across the axis
-  // reads as a timeline and still lands on real runs.
-  const labelStride = Math.max(1, Math.ceil(runs.length / 6));
+  /*
+    Which columns get a date under them.
+
+    Two rules, because a fixed stride satisfied neither. A date is only worth
+    printing where the day actually changes — a stride of one on four runs from
+    two days printed "15 SEPT" three times — and two labels still need room not
+    to collide, which stride alone never checked.
+
+    Chosen newest-first so the most recent run, the one the page opens on, is
+    always the labelled one; dropping a label for spacing then costs an older
+    date rather than today's.
+  */
+  const labelledColumns = useMemo(() => {
+    const dayChanges: number[] = [];
+    let previousDay: string | null = null;
+    runs.forEach((run, index) => {
+      if (!run.startedAt) return;
+      const day = dayLabel(run.startedAt, timezone);
+      if (day !== previousDay) dayChanges.push(index);
+      previousDay = day;
+    });
+
+    const kept = new Set<number>();
+    let lastKept = Number.POSITIVE_INFINITY;
+    for (let i = dayChanges.length - 1; i >= 0; i -= 1) {
+      if (lastKept - dayChanges[i] < LABEL_COLUMNS) continue;
+      kept.add(dayChanges[i]);
+      lastKept = dayChanges[i];
+    }
+    return kept;
+  }, [runs, timezone]);
+
   const active = runs.find((run) => run.id === selected) ?? null;
   const lanesHeight = lanes.length * LANE_HEIGHT + Math.max(0, lanes.length - 1) * LANE_GAP;
 
@@ -111,7 +150,10 @@ export function WorkflowRunsChart({
       <div className="mt-6 flex gap-5">
         {/* Gutter. Every block here mirrors a block in the scroll area, so the
             two columns stay row-aligned without measuring each other. */}
-        <div className="w-32 shrink-0 sm:w-40">
+        {/* Step names run long — "Generate five treehouse options" is normal —
+            so the gutter is wide enough for a real one and grows with the
+            viewport. At the old w-40 most names lost their first few letters. */}
+        <div className="w-36 shrink-0 sm:w-48 lg:w-60">
           <div className="relative" style={{ height: CHART_HEIGHT }}>
             {ticks.map((tick) => (
               <span
@@ -131,11 +173,19 @@ export function WorkflowRunsChart({
             {lanes.map((lane, index) => (
               <div
                 key={lane.id}
-                className="flex items-center justify-end truncate text-right text-xs"
+                className="flex items-center justify-end text-xs"
                 style={{ height: LANE_HEIGHT, marginTop: index === 0 ? 0 : LANE_GAP }}
                 title={lane.name}
               >
-                {lane.name}
+                {/*
+                  Truncated on the inner span, not the row. Right-aligned text
+                  that overflows is clipped at its start and shows no ellipsis,
+                  so a long step name silently lost its opening letters and read
+                  as a different step — "Generate five treehouse options" became
+                  "nerate five treehouse options". Letting the span shrink means
+                  the ellipsis lands at the end, where it is legible as one.
+                */}
+                <span className="min-w-0 truncate">{lane.name}</span>
               </div>
             ))}
           </div>
@@ -193,8 +243,20 @@ export function WorkflowRunsChart({
             <div className="relative flex" style={{ height: RAIL }}>
               {runs.map((run, index) => (
                 <span key={run.id} className={`${COLUMN} relative`}>
-                  {index % labelStride === 0 && run.startedAt && (
-                    <span className="b88-caption absolute left-0 top-2 whitespace-nowrap">
+                  {labelledColumns.has(index) && run.startedAt && (
+                    /*
+                      Anchored right once there is no room to its right, so the
+                      last label grows back into the chart instead of off the
+                      end of the scroll area. The newest run is always labelled
+                      and is always the rightmost column, so without this the
+                      most important date on the axis is the one that gets
+                      clipped — "14 SEPT" rendered as "14 SE".
+                    */
+                    <span
+                      className={`b88-caption absolute top-2 whitespace-nowrap ${
+                        runs.length - index < LABEL_COLUMNS ? 'right-0' : 'left-0'
+                      }`}
+                    >
                       {dayLabel(run.startedAt, timezone)}
                     </span>
                   )}

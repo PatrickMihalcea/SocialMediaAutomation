@@ -89,12 +89,14 @@ async function checkAppUrl(appUrl, local) {
 
 async function checkOpenAi() {
   const provider = e('AI_PROVIDER', 'mock');
+  const imageSetting = e('AI_IMAGE_PROVIDER', 'inherit');
+  const imageProvider = imageSetting === 'inherit' ? provider : imageSetting;
   const key = e('OPENAI_API_KEY');
-  if (provider !== 'openai') {
-    return add(warn('OpenAI', `AI_PROVIDER=${provider} — every generation is a canned fixture.`,
-      'Set AI_PROVIDER="openai" to generate for real'));
+  if (provider !== 'openai' && imageProvider !== 'openai') {
+    return add(warn('OpenAI', `text=${provider}, images=${imageProvider} — every generation is a fixture.`,
+      'Set AI_PROVIDER="openai", or AI_IMAGE_PROVIDER="openai", to generate for real'));
   }
-  if (!key) return add(fail('OpenAI', 'AI_PROVIDER=openai but OPENAI_API_KEY is empty.', 'Add OPENAI_API_KEY to .env'));
+  if (!key) return add(fail('OpenAI', 'An OpenAI provider is selected but OPENAI_API_KEY is empty.', 'Add OPENAI_API_KEY to .env'));
 
   try {
     const response = await fetch('https://api.openai.com/v1/models', {
@@ -109,11 +111,17 @@ async function checkOpenAi() {
     const models = new Set((body.data ?? []).map((m) => m.id));
     const text = e('OPENAI_TEXT_MODEL', 'gpt-4o-mini');
     const image = e('OPENAI_IMAGE_MODEL', 'gpt-image-1');
-    const missing = [text, image].filter((model) => !models.has(model));
+    const selectedModels = [
+      ...(provider === 'openai' ? [text] : []),
+      ...(imageProvider === 'openai' ? [image] : []),
+    ];
+    const missing = selectedModels.filter((model) => !models.has(model));
     add(missing.length
       ? warn('OpenAI', `key works, but this account cannot see ${missing.join(' and ')}.`,
-        'Image models need a verified organisation; check platform.openai.com/settings')
-      : ok('OpenAI', `key works · ${text} · ${image}`));
+        imageProvider === 'openai'
+          ? 'Image models need a verified organisation; check platform.openai.com/settings'
+          : undefined)
+      : ok('OpenAI', `key works · text=${provider === 'openai' ? text : provider} · images=${imageProvider === 'openai' ? image : imageProvider}`));
   } catch (error) {
     add(fail('OpenAI', shorten(error)));
   }
@@ -316,7 +324,12 @@ async function checkProductionShape() {
       'Use STORAGE_DRIVER="s3" with an R2 or S3 bucket'));
   }
   if (e('AI_PROVIDER', 'mock') === 'mock') {
-    add(prod('AI provider', 'AI_PROVIDER=mock — every generation returns a fixture.', 'Set AI_PROVIDER="openai"'));
+    add(prod('AI provider', 'AI_PROVIDER=mock — text generations return fixtures.', 'Set AI_PROVIDER="openai"'));
+  }
+  const imageSetting = e('AI_IMAGE_PROVIDER', 'inherit');
+  const imageProvider = imageSetting === 'inherit' ? e('AI_PROVIDER', 'mock') : imageSetting;
+  if (imageProvider === 'mock') {
+    add(prod('Image provider', 'AI image generation is mocked.', 'Set AI_IMAGE_PROVIDER="openai" or "inherit" with AI_PROVIDER="openai"'));
   }
   if (isTrue('MOCK_MODE', true)) {
     add(prod('Mock mode', 'MOCK_MODE=true — sign-ups skip email verification.', 'Set MOCK_MODE="false"'));

@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import Link from 'next/link';
-import { Avatar, Badge, Button, EmptyState, Field, Select, StatusMessage } from '@/bridge88/components';
+import { Avatar, Badge, Button, EmptyState, Field, MediaFrame, Select, StatusMessage } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import {
@@ -16,6 +16,8 @@ import { WORKSPACE_ROLE_LABELS } from '@/lib/workspaces/labels';
 import { approvalOutcome, approvalOutcomeShort, describeOrigin, postOriginInclude } from '@/lib/posts/origin';
 import { PLATFORM_LABELS } from '@/lib/social/registry';
 import { formatInZone } from '@/lib/scheduling/time';
+import { storage } from '@/lib/storage';
+import { profileImageSrc } from '@/lib/users/profile-image-src';
 
 export const metadata = { title: 'Team' };
 
@@ -71,6 +73,11 @@ async function TeamData({
             text: true,
             platform: true,
             socialAccount: { select: { accountName: true, accountHandle: true } },
+            media: {
+              orderBy: { position: 'asc' },
+              take: 1,
+              select: { mediaAsset: { select: { type: true, storageKey: true, thumbnailKey: true, filename: true } } },
+            },
           },
         },
         ...postOriginInclude,
@@ -78,6 +85,20 @@ async function TeamData({
       orderBy: { updatedAt: 'asc' },
     }),
   ]);
+  // Resolved up front: an avatar is a freshly signed URL now, not a stored one,
+  // and JSX cannot await inside the map below.
+  const memberAvatars = new Map(await Promise.all(members.map(
+    async (member) => [member.id, await profileImageSrc(member.user.image)] as const,
+  )));
+  const reviewPreviews = new Map(await Promise.all(reviews.map(async (post) => {
+    const asset = post.platforms[0]?.media[0]?.mediaAsset;
+    if (!asset) return [post.id, null] as const;
+    const [src, poster] = await Promise.all([
+      storage().signedUrl(asset.storageKey),
+      asset.thumbnailKey ? storage().signedUrl(asset.thumbnailKey) : Promise.resolve(null),
+    ]);
+    return [post.id, { src, poster }] as const;
+  })));
   return (
     <div className="mt-8 min-h-[620px]">
       {query.ownershipTransferred === '1' && (
@@ -91,7 +112,7 @@ async function TeamData({
           <div className="mt-5">
             {members.map((member) => (
               <div key={member.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-t border-hairline-soft py-4 first:border-0">
-                <Avatar name={member.user.name ?? member.user.email} src={member.user.image}/>
+                <Avatar name={member.user.name ?? member.user.email} src={memberAvatars.get(member.id)}/>
                 <div className="min-w-0 flex-1"><p className="truncate font-[480]">{member.user.name ?? member.user.email}</p><p className="text-sm">{member.user.email}</p></div>
                 {member.role === 'OWNER' || !ctx.can('member:update_role') ? (
                   <Badge tone={member.role === 'OWNER' ? 'ink' : 'outline'}>{WORKSPACE_ROLE_LABELS[member.role]}</Badge>
@@ -141,9 +162,39 @@ async function TeamData({
               <div className="min-w-0">
                 <Button href={`/w/${slug}/posts/${post.id}`} variant="tertiary" className="-ml-4 font-[540]">{post.title ?? 'Untitled post'}</Button>
                 <p className="mt-2 max-w-2xl whitespace-pre-wrap text-sm">{post.platforms[0]?.text}</p>
+                {/*
+                  Two different places to go, and conflating them was the
+                  problem: the title opens the read-only record for judging the
+                  post, while this opens the draft itself for changing it.
+                  Only the record was reachable before, so "let me just fix the
+                  caption" had nowhere to start.
+                */}
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                  <Link href={`/w/${slug}/posts/${post.id}`} className="b88-body-sm underline underline-offset-4">
+                    Full post record
+                  </Link>
+                  {ctx.can('post:update') && (
+                    <Link href={`/w/${slug}/compose/${post.id}`} className="b88-body-sm underline underline-offset-4">
+                      Open the draft
+                    </Link>
+                  )}
+                </div>
               </div>
               <Badge tone="cream">In review</Badge>
             </div>
+
+            {post.platforms[0]?.media[0]?.mediaAsset && (
+              <div className="mt-4 max-w-sm">
+                <MediaFrame
+                  src={reviewPreviews.get(post.id)?.src}
+                  type={post.platforms[0].media[0].mediaAsset.type === 'VIDEO' ? 'video' : 'image'}
+                  poster={reviewPreviews.get(post.id)?.poster ?? undefined}
+                  ratio="16:9"
+                  alt={post.platforms[0].media[0].mediaAsset.filename}
+                  label="Post preview"
+                />
+              </div>
+            )}
 
             {/*
               The four questions a reviewer has to answer before they can
@@ -187,7 +238,8 @@ async function TeamData({
             {ctx.can('post:approve') && <form className="mt-4">
               <Field name="body" label="Review note" placeholder="Optional context for the author" containerClassName="max-w-md" />
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button formAction={approvalAction.bind(null, slug, post.id, 'APPROVED')} type="submit">Approve</Button>
+                <Button formAction={approvalAction.bind(null, slug, post.id, 'APPROVED')} name="releaseMode" value="now" type="submit">Approve & publish now</Button>
+                <Button formAction={approvalAction.bind(null, slug, post.id, 'APPROVED')} name="releaseMode" value="queue" type="submit" variant="secondary">Approve & schedule</Button>
                 <Button formAction={approvalAction.bind(null, slug, post.id, 'CHANGES_REQUESTED')} type="submit" variant="secondary">Request changes</Button>
                 <Button formAction={approvalAction.bind(null, slug, post.id, 'REJECTED')} type="submit" variant="tertiary">Reject</Button>
               </div>

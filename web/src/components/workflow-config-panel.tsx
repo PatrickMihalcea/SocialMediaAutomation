@@ -1,16 +1,18 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useMemo, useState, useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
-import { CircleHelp } from 'lucide-react';
+import { CircleHelp, X } from 'lucide-react';
 import { z } from 'zod';
 import {
+  Badge,
   Button,
   Checkbox,
   Dropdown,
   Field,
   IconButton,
   StatusMessage,
+  TextArea,
   type DropdownOption,
 } from '@/bridge88/components';
 import {
@@ -177,14 +179,65 @@ function beatSlideshowSizeOptions(config: Record<string, unknown>): Array<{ id: 
   ];
 }
 
+/** An edge arriving at one of this step's inputs. */
+export interface NodeInputConnection {
+  /** The input port, which is also the settings key the connection stands in for. */
+  portId: string;
+  edgeId: string;
+  /** Where the value comes from, e.g. "Idea generator · Post title". */
+  sourceLabel: string;
+}
+
+/**
+ * A setting whose value arrives on a connection.
+ *
+ * The control stays editable: typing is how someone takes the value back, and
+ * the frame says what that costs before they save rather than after.
+ */
+function ConnectedSetting({
+  connection,
+  overridden,
+  ignoredText,
+  children,
+}: {
+  connection: NodeInputConnection;
+  overridden: boolean;
+  /** Text left in the control that the connection is currently talking over. */
+  ignoredText: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="rounded-md p-3"
+      style={{ border: `1px solid ${overridden ? 'var(--ink)' : 'var(--hairline)'}` }}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={overridden ? 'coral' : 'mint'}>
+          {overridden ? 'Replacing connection' : 'Connected'}
+        </Badge>
+        <span className="b88-caption">{connection.sourceLabel}</span>
+      </div>
+      <div className="mt-3">{children}</div>
+      <p className="b88-body-sm mt-2">
+        {overridden
+          ? `Saving disconnects ${connection.sourceLabel} and sends what you typed instead.`
+          : ignoredText
+            ? 'Each run fills this in, so the text above is not used. Edit it to go back to a fixed value.'
+            : 'Each run fills this in. Type here to use a fixed value instead.'}
+      </p>
+    </div>
+  );
+}
+
 interface FieldSpec {
   key: string;
   label: string;
-  kind: 'text' | 'number' | 'boolean' | 'enum';
+  kind: 'text' | 'number' | 'boolean' | 'enum' | 'namedOutputs';
   options?: string[];
   optionLabels?: Record<string, string>;
   description?: string;
   presets?: Array<{ label: string; value: string | number }>;
+  multiline?: boolean;
 }
 
 /**
@@ -201,8 +254,10 @@ export function NodeConfigPanel({
   audioAssets,
   mediaAssets,
   mediaFolders,
+  connections,
   canEdit,
   onSaved,
+  onDisconnect,
   onDelete,
 }: {
   slug: string;
@@ -211,13 +266,19 @@ export function NodeConfigPanel({
   audioAssets: WorkflowAudioOption[];
   mediaAssets: WorkflowMediaAssetOption[];
   mediaFolders: WorkflowMediaFolderOption[];
+  connections: NodeInputConnection[];
   canEdit: boolean;
   onSaved: (node: CanvasNode) => void;
+  onDisconnect: (edgeId: string) => Promise<boolean>;
   onDelete: () => void;
 }) {
   const definition = getDefinition(node.type);
   const [name, setName] = useState(node.name);
   const [config, setConfig] = useState<Record<string, unknown>>(() =>
+    normalizeNodeConfig(node.type, node.config),
+  );
+  /** What the settings held when the panel opened, to spot a deliberate override. */
+  const [openedWith] = useState<Record<string, unknown>>(() =>
     normalizeNodeConfig(node.type, node.config),
   );
   const [error, setError] = useState('');
@@ -236,6 +297,7 @@ export function NodeConfigPanel({
             ...field,
             label: metadata.label,
             description: metadata.description,
+            multiline: metadata.multiline,
             optionLabels: metadata.optionLabels,
             presets: metadata.presets,
           }
@@ -291,7 +353,10 @@ export function NodeConfigPanel({
   const selectedChannelIds = Array.isArray(config.socialAccountIds)
     ? (config.socialAccountIds as string[])
     : [];
-
+  const additionalOutputs = Array.isArray(config.additionalOutputs)
+    ? config.additionalOutputs.filter((field): field is { id: string; label: string } =>
+      Boolean(field) && typeof field === 'object' && typeof (field as { id?: unknown }).id === 'string' && typeof (field as { label?: unknown }).label === 'string')
+    : [];
   function toggleChannel(accountId: string, checked: boolean) {
     setConfig((current) => {
       const ids = Array.isArray(current.socialAccountIds)
@@ -301,6 +366,18 @@ export function NodeConfigPanel({
       return { ...current, socialAccountIds: next };
     });
   }
+
+  /**
+   * Connections the user has just typed over.
+   *
+   * A value already sitting in a connected setting is not an override — it is
+   * the text the connection took over from, and dropping the edge for it would
+   * undo a wiring nobody touched. Only a change made in this panel counts.
+   */
+  const overriddenConnections = connections.filter((connection) => {
+    const typed = config[connection.portId];
+    return typeof typed === 'string' && typed.trim() !== '' && typed !== openedWith[connection.portId];
+  });
 
   function save() {
     setError('');
@@ -317,6 +394,15 @@ export function NodeConfigPanel({
 
     startTransition(async () => {
       try {
+        // The connection wins at run time, so a typed value only takes effect
+        // once its edge is gone. Dropped first: a save that left both in place
+        // would show the typed text in the panel and keep running the wire.
+        for (const connection of overriddenConnections) {
+          if (!(await onDisconnect(connection.edgeId))) {
+            setError(`The connection from ${connection.sourceLabel} could not be removed.`);
+            return;
+          }
+        }
         const updated = await updateNodeAction(slug, node.id, { name, config: payload });
         onSaved(updated as unknown as CanvasNode);
         setSavedSnapshot(snapshot);
@@ -357,6 +443,270 @@ export function NodeConfigPanel({
     if (node.type === 'PICK' && field.key === 'index') return config.mode === 'index';
     return true;
   });
+  /** One settings control, chosen by the field's shape and its node type. */
+  function renderField(field: FieldSpec) {
+    const value = config[field.key];
+
+    if (node.type === 'MUSIC_SELECTOR' && field.key === 'mediaAssetId') {
+      return (
+        <ChoiceField
+          key={field.key}
+          label={field.label}
+          hint={showHelp ? field.description : undefined}
+          value={String(value ?? '')}
+          disabled={!canEdit}
+          options={[
+            { value: '', label: 'Choose a track' },
+            ...audioAssets.map((asset) => ({
+              value: asset.id,
+              label: [
+                asset.filename,
+                asset.bpm ? `${Math.round(asset.bpm)} BPM` : null,
+                asset.hasBeatGrid ? 'beats ready' : null,
+              ].filter(Boolean).join(' · '),
+            })),
+          ]}
+          onChange={(chosen) =>
+            setConfig((current) => ({ ...current, mediaAssetId: chosen || null }))
+          }
+        />
+      );
+    }
+    if (node.type === 'MUSIC_SELECTOR' && field.key === 'folderId') {
+      return (
+        <ChoiceField
+          key={field.key}
+          label={field.label}
+          hint={showHelp ? field.description : undefined}
+          value={String(value ?? '')}
+          disabled={!canEdit}
+          options={[
+            { value: '', label: 'Entire music library' },
+            ...mediaFolders.map((folder) => ({ value: folder.id, label: folder.name })),
+          ]}
+          onChange={(chosen) =>
+            setConfig((current) => ({ ...current, folderId: chosen || null }))
+          }
+        />
+      );
+    }
+    if (node.type === 'MEDIA_LIBRARY' && field.key === 'folderId') {
+      const selectedAssetId =
+        typeof config.assetId === 'string' ? config.assetId : null;
+      const selectedFolderId =
+        typeof config.folderId === 'string' ? config.folderId : null;
+      return (
+        <ChoiceField
+          key={field.key}
+          label={field.label}
+          hint={showHelp ? field.description : undefined}
+          value={
+            selectedAssetId
+              ? `asset:${selectedAssetId}`
+              : selectedFolderId
+                ? `folder:${selectedFolderId}`
+                : ''
+          }
+          disabled={!canEdit}
+          options={[
+            { value: '', label: 'Entire media library' },
+            ...mediaFolders.map((folder) => ({
+              value: `folder:${folder.id}`,
+              label: `Folder · ${folder.name}`,
+            })),
+            ...mediaAssets.map((asset) => ({
+              value: `asset:${asset.id}`,
+              label: `${mediaTypeLabel(asset.type)} · ${asset.filename}`,
+            })),
+          ]}
+          onChange={(chosen) => setConfig((current) => ({
+            ...current,
+            folderId: chosen.startsWith('folder:') ? chosen.slice(7) : null,
+            assetId: chosen.startsWith('asset:') ? chosen.slice(6) : null,
+          }))}
+        />
+      );
+    }
+    // A list-valued setting, so it gets a list editor rather than an input.
+    // It sits in schema order with the other settings: as its own section
+    // under the form it read as an unrelated panel bolted to the bottom.
+    if (field.kind === 'namedOutputs') {
+      return (
+        <div key={field.key}>
+          <p className="b88-label">{field.label}</p>
+          {showHelp && field.description && (
+            <p className="b88-body-sm mt-1.5">{field.description}</p>
+          )}
+          {additionalOutputs.map((output, index) => (
+            <div
+              key={`${output.id}-${index}`}
+              className="mt-2 flex items-center gap-2"
+            >
+              <Field
+                label={`Extra output ${index + 1} name`}
+                labelHidden
+                containerClassName="flex-1"
+                value={output.label}
+                disabled={!canEdit}
+                onChange={(event) => setConfig((current) => ({
+                  ...current,
+                  additionalOutputs: additionalOutputs.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, label: event.target.value } : item),
+                }))}
+              />
+              <IconButton
+                icon={X}
+                label={`Remove ${output.label || `output ${index + 1}`}`}
+                disabled={!canEdit}
+                onClick={() => setConfig((current) => ({
+                  ...current,
+                  additionalOutputs: additionalOutputs.filter((_, i) => i !== index),
+                }))}
+              />
+            </div>
+          ))}
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="mt-2"
+            disabled={!canEdit || additionalOutputs.length >= 10}
+            onClick={() => setConfig((current) => ({
+              ...current,
+              additionalOutputs: [
+                ...additionalOutputs,
+                { id: nextOutputId(additionalOutputs), label: 'New output' },
+              ],
+            }))}
+          >
+            Add an output
+          </Button>
+        </div>
+      );
+    }
+    if (node.type === 'TEXT_OVERLAY' && field.key === 'template') {
+      return (
+        <PresetField
+          key={field.key}
+          label={field.label}
+          hint={showHelp ? field.description : undefined}
+          presets={TEXT_OVERLAY_PRESETS.map((option) => ({
+            label: option.label,
+            value: option.value,
+          }))}
+          value={String(value ?? '')}
+          kind="text"
+          disabled={!canEdit}
+          // The only setting whose effect is not obvious from its value.
+          preview={(current) => `Shows ${previewOverlay(String(current ?? ''))}`}
+          onChange={(next) => setConfig((current) => ({ ...current, template: next ?? '' }))}
+        />
+      );
+    }
+    if (field.kind === 'boolean') {
+      return (
+        <div key={field.key}>
+          <Checkbox
+            label={field.label}
+            checked={Boolean(value)}
+            disabled={!canEdit}
+            onChange={(event) => setConfig((c) => ({ ...c, [field.key]: event.target.checked }))}
+          />
+          {showHelp && field.description && (
+            <p className="ml-8 mt-1 text-sm">{field.description}</p>
+          )}
+        </div>
+      );
+    }
+    if (field.kind === 'enum') {
+      const isBeatSize = node.type === 'BEAT_SLIDESHOW' && field.key === 'size';
+      const sizeOptions = isBeatSize ? beatSlideshowSizeOptions(config) : null;
+      const enumValue = isBeatSize
+        ? beatSlideshowSizeValue(config)
+        : String(value ?? '');
+
+      const fitNote = showHelp && node.type === 'IMAGE_GENERATOR' && field.key === 'size'
+        ? imageSizeFitNote(enumValue)
+        : null;
+
+      return (
+        <ChoiceField
+          key={field.key}
+          label={field.label}
+          hint={[fitNote, showHelp ? field.description : null].filter(Boolean).join(' ') || undefined}
+          value={enumValue}
+          disabled={!canEdit}
+          options={(sizeOptions ?? (field.options ?? []).map((option) => ({
+            id: option,
+            label: field.optionLabels?.[option] ?? option,
+          }))).map((option) => ({ value: option.id, label: option.label }))}
+          onChange={(chosen) =>
+            setConfig((c) => {
+              const next = { ...c };
+              if (isBeatSize) {
+                if (chosen === CUSTOM_VIDEO_SIZE) return c;
+                next.size = chosen;
+                delete next.width;
+                delete next.height;
+                return next;
+              }
+              next[field.key] = chosen;
+              return next;
+            })
+          }
+        />
+      );
+    }
+    if (field.presets?.length) {
+      return (
+        <PresetField
+          key={field.key}
+          label={field.label}
+          hint={showHelp ? field.description : undefined}
+          presets={field.presets}
+          value={value as string | number | null}
+          kind={field.kind === 'number' ? 'number' : 'text'}
+          disabled={!canEdit}
+          onChange={(next) => setConfig((c) => ({ ...c, [field.key]: next }))}
+        />
+      );
+    }
+    if (field.multiline) {
+      return (
+        <TextArea
+          key={field.key}
+          label={field.label}
+          hint={showHelp ? field.description : undefined}
+          rows={3}
+          value={value == null ? '' : String(value)}
+          disabled={!canEdit}
+          onChange={(event) => setConfig((c) => ({ ...c, [field.key]: event.target.value }))}
+        />
+      );
+    }
+    return (
+      <Field
+        key={field.key}
+        label={field.label}
+        hint={showHelp ? field.description : undefined}
+        type={field.kind === 'number' ? 'number' : 'text'}
+        value={value == null ? '' : String(value)}
+        disabled={!canEdit}
+        onChange={(event) =>
+          setConfig((c) => ({
+            ...c,
+            [field.key]:
+              field.kind === 'number'
+                ? event.target.value === ''
+                  ? null
+                  : Number(event.target.value)
+                : event.target.value,
+          }))
+        }
+      />
+    );
+  }
+
   return (
     <div className="space-y-4 rounded-lg border border-hairline p-6">
       <div>
@@ -417,199 +767,21 @@ export function NodeConfigPanel({
       )}
 
       {shownFields.map((field) => {
-        const value = config[field.key];
-        if (node.type === 'MUSIC_SELECTOR' && field.key === 'mediaAssetId') {
-          return (
-            <ChoiceField
-              key={field.key}
-              label={field.label}
-              hint={showHelp ? field.description : undefined}
-              value={String(value ?? '')}
-              disabled={!canEdit}
-              options={[
-                { value: '', label: 'Choose a track' },
-                ...audioAssets.map((asset) => ({
-                  value: asset.id,
-                  label: [
-                    asset.filename,
-                    asset.bpm ? `${Math.round(asset.bpm)} BPM` : null,
-                    asset.hasBeatGrid ? 'beats ready' : null,
-                  ].filter(Boolean).join(' · '),
-                })),
-              ]}
-              onChange={(chosen) =>
-                setConfig((current) => ({ ...current, mediaAssetId: chosen || null }))
-              }
-            />
-          );
-        }
-        if (node.type === 'MUSIC_SELECTOR' && field.key === 'folderId') {
-          return (
-            <ChoiceField
-              key={field.key}
-              label={field.label}
-              hint={showHelp ? field.description : undefined}
-              value={String(value ?? '')}
-              disabled={!canEdit}
-              options={[
-                { value: '', label: 'Entire music library' },
-                ...mediaFolders.map((folder) => ({ value: folder.id, label: folder.name })),
-              ]}
-              onChange={(chosen) =>
-                setConfig((current) => ({ ...current, folderId: chosen || null }))
-              }
-            />
-          );
-        }
-        if (node.type === 'MEDIA_LIBRARY' && field.key === 'folderId') {
-          const selectedAssetId =
-            typeof config.assetId === 'string' ? config.assetId : null;
-          const selectedFolderId =
-            typeof config.folderId === 'string' ? config.folderId : null;
-          return (
-            <ChoiceField
-              key={field.key}
-              label={field.label}
-              hint={showHelp ? field.description : undefined}
-              value={
-                selectedAssetId
-                  ? `asset:${selectedAssetId}`
-                  : selectedFolderId
-                    ? `folder:${selectedFolderId}`
-                    : ''
-              }
-              disabled={!canEdit}
-              options={[
-                { value: '', label: 'Entire media library' },
-                ...mediaFolders.map((folder) => ({
-                  value: `folder:${folder.id}`,
-                  label: `Folder · ${folder.name}`,
-                })),
-                ...mediaAssets.map((asset) => ({
-                  value: `asset:${asset.id}`,
-                  label: `${mediaTypeLabel(asset.type)} · ${asset.filename}`,
-                })),
-              ]}
-              onChange={(chosen) => setConfig((current) => ({
-                ...current,
-                folderId: chosen.startsWith('folder:') ? chosen.slice(7) : null,
-                assetId: chosen.startsWith('asset:') ? chosen.slice(6) : null,
-              }))}
-            />
-          );
-        }
-        if (node.type === 'TEXT_OVERLAY' && field.key === 'template') {
-          return (
-            <PresetField
-              key={field.key}
-              label={field.label}
-              hint={showHelp ? field.description : undefined}
-              presets={TEXT_OVERLAY_PRESETS.map((option) => ({
-                label: option.label,
-                value: option.value,
-              }))}
-              value={String(value ?? '')}
-              kind="text"
-              disabled={!canEdit}
-              // The only setting whose effect is not obvious from its value.
-              preview={(current) => `Shows ${previewOverlay(String(current ?? ''))}`}
-              onChange={(next) => setConfig((current) => ({ ...current, template: next ?? '' }))}
-            />
-          );
-        }
-        if (field.kind === 'boolean') {
-          return (
-            <div key={field.key}>
-              <Checkbox
-                label={field.label}
-                checked={Boolean(value)}
-                disabled={!canEdit}
-                onChange={(event) => setConfig((c) => ({ ...c, [field.key]: event.target.checked }))}
-              />
-              {showHelp && field.description && (
-                <p className="ml-8 mt-1 text-sm">{field.description}</p>
-              )}
-            </div>
-          );
-        }
-        if (field.kind === 'enum') {
-          const isBeatSize = node.type === 'BEAT_SLIDESHOW' && field.key === 'size';
-          const sizeOptions = isBeatSize ? beatSlideshowSizeOptions(config) : null;
-          const enumValue = isBeatSize
-            ? beatSlideshowSizeValue(config)
-            : String(value ?? '');
-
-          // The crop is a consequence of the choice, not documentation, so it
-          // stays visible: the shapes the model offers are not the shapes the
-          // video formats need, and silence there is how that surprises people.
-          const fitNote = node.type === 'IMAGE_GENERATOR' && field.key === 'size'
-            ? imageSizeFitNote(enumValue)
-            : null;
-
-          return (
-            <ChoiceField
-              key={field.key}
-              label={field.label}
-              hint={[fitNote, showHelp ? field.description : null].filter(Boolean).join(' ') || undefined}
-              value={enumValue}
-              disabled={!canEdit}
-              options={(sizeOptions ?? (field.options ?? []).map((option) => ({
-                id: option,
-                label: field.optionLabels?.[option] ?? option,
-              }))).map((option) => ({ value: option.id, label: option.label }))}
-              onChange={(chosen) =>
-                setConfig((c) => {
-                  const next = { ...c };
-                  if (isBeatSize) {
-                    if (chosen === CUSTOM_VIDEO_SIZE) return c;
-                    next.size = chosen;
-                    delete next.width;
-                    delete next.height;
-                    return next;
-                  }
-                  next[field.key] = chosen;
-                  return next;
-                })
-              }
-            />
-          );
-        }
-        if (field.presets?.length) {
-          return (
-            <PresetField
-              key={field.key}
-              label={field.label}
-              hint={showHelp ? field.description : undefined}
-              presets={field.presets}
-              value={value as string | number | null}
-              kind={field.kind === 'number' ? 'number' : 'text'}
-              disabled={!canEdit}
-              onChange={(next) => setConfig((c) => ({ ...c, [field.key]: next }))}
-            />
-          );
-        }
+        const connection = connections.find((item) => item.portId === field.key);
+        const control = renderField(field);
+        if (!connection) return <div key={field.key}>{control}</div>;
         return (
-          <Field
+          <ConnectedSetting
             key={field.key}
-            label={field.label}
-            hint={showHelp ? field.description : undefined}
-            type={field.kind === 'number' ? 'number' : 'text'}
-            value={value == null ? '' : String(value)}
-            disabled={!canEdit}
-            onChange={(event) =>
-              setConfig((c) => ({
-                ...c,
-                [field.key]:
-                  field.kind === 'number'
-                    ? event.target.value === ''
-                      ? null
-                      : Number(event.target.value)
-                    : event.target.value,
-              }))
-            }
-          />
+            connection={connection}
+            overridden={overriddenConnections.includes(connection)}
+            ignoredText={typeof config[field.key] === 'string' && config[field.key] !== ''}
+          >
+            {control}
+          </ConnectedSetting>
         );
       })}
+
 
       {nodeUsesChannelPicker(node.type) && (
         <div>
@@ -683,6 +855,12 @@ function describeSchema(schema: z.ZodTypeAny): FieldSpec[] {
       return [{ key, label, kind: 'enum', options: inner.options as string[] }];
     }
     if (inner instanceof z.ZodString) return [{ key, label, kind: 'text' }];
+    // The one list-valued setting with an editor of its own. It has to come
+    // through here rather than be appended by the renderer, or it loses its
+    // place among the other settings and reads as a panel bolted to the bottom.
+    if (inner instanceof z.ZodArray && key === 'additionalOutputs') {
+      return [{ key, label, kind: 'namedOutputs' }];
+    }
     return [];
   });
 }
@@ -730,6 +908,15 @@ function mediaTypeLabel(type: WorkflowMediaAssetOption['type']): string {
   if (type === 'IMAGE') return 'Image';
   if (type === 'VIDEO') return 'Video';
   return 'Audio';
+}
+
+function nextOutputId(outputs: { id: string }[]): string {
+  const used = new Set(outputs.map((output) => output.id));
+  for (let number = 1; number <= 10; number++) {
+    const candidate = `additionalOutput${number}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `additionalOutput${outputs.length + 1}`;
 }
 
 /** Key order is not meaningful here, so it must not decide whether a form is dirty. */

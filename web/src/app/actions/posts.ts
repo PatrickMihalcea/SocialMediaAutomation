@@ -189,6 +189,18 @@ export async function postCommandAction(
   postId: string,
   command: 'cancel' | 'delete' | 'duplicate' | 'publish' | 'retry' | 'reschedule' | 'restore',
   formData?: FormData,
+  /**
+   * Where the command was issued from, for deletes done out of a list.
+   *
+   * Deleting normally lands on the calendar, which is right when the post
+   * detail page has just been deleted out from under you and wrong when you
+   * are working down a list — the row should simply disappear and leave you
+   * where you were. Given a path, this revalidates it and does not redirect.
+   *
+   * Callers are server components passing a literal, never user input, and the
+   * workspace prefix below keeps it that way.
+   */
+  returnTo?: string,
 ): Promise<PostCommandState> {
   try {
     const clientManaged = formData?.get('clientManaged') === '1';
@@ -211,6 +223,14 @@ export async function postCommandAction(
     if (command === 'delete') {
       await deletePost(ctx.workspace.id, post.id);
       revalidatePath(`/w/${slug}/calendar`);
+      // Stay put when the delete came from a list: revalidating is enough to
+      // drop the row, and a redirect would throw the reader somewhere else
+      // mid-task.
+      const stayOn = returnTo?.startsWith(`/w/${slug}/`) ? returnTo : null;
+      if (stayOn) {
+        revalidatePath(stayOn);
+        return { status: 'success', success: 'Post deleted.' };
+      }
       if (clientManaged) {
         return {
           status: 'success',

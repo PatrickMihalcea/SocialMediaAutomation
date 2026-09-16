@@ -6,11 +6,17 @@ import { releasePost } from '@/lib/posts/release';
 import { PermanentJobError } from '@/lib/queue/runner';
 import { notifyRoles } from '@/lib/notifications/service';
 import { resolveAccounts } from '@/lib/workflows/nodes/create-draft';
+import { postText, postTitle } from '@/lib/workflows/nodes/post-text';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
 
 interface Config {
   socialAccountIds: string[];
+  title: string;
   caption: string;
+  hashtags: string;
+  mentions: string;
+  firstComment: string;
+  link: string;
   mode: 'now' | 'queue';
   requireApproval: boolean;
 }
@@ -41,16 +47,14 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     ctx.workspaceId,
     ctx.userId ?? accounts[0].workspaceOwnerId,
     {
-      title: ctx.nodeName,
+      title: postTitle(ctx, config.title),
       timezone: workspace.timezone,
       status,
       scheduledAt: null,
       platforms: accounts.map((account) => ({
         socialAccountId: account.id,
         platform: account.platform,
-        text: config.caption,
-        hashtags: [],
-        mentions: [],
+        ...postText(ctx, config),
         media: [{ mediaAssetId: videoId }],
       })),
     },

@@ -10,6 +10,7 @@ import { audit } from '@/lib/audit';
 import { conflict, invalid, notFound } from '@/lib/errors';
 import {
   getDefinition,
+  getNodePorts,
   isCreatableNodeType,
   nodeSaveConfigIssue,
   parseConfig,
@@ -623,8 +624,8 @@ export async function connectNodesAction(
       const target = nodes.find((n) => n.id === input.targetNodeId);
       if (!source || !target) throw notFound('One of those steps no longer exists.');
 
-      const outPort = getDefinition(source.type)?.outputs.find((p) => p.id === input.sourcePort);
-      const inPort = getDefinition(target.type)?.inputs.find((p) => p.id === input.targetPort);
+      const outPort = getNodePorts(source.type, source.config, 'outputs').find((p) => p.id === input.sourcePort);
+      const inPort = getNodePorts(target.type, target.config, 'inputs').find((p) => p.id === input.targetPort);
       if (!outPort || !inPort) throw invalid('That connection point no longer exists.');
 
       const edges = await tx.workflowEdge.findMany({

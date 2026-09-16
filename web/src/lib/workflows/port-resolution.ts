@@ -1,4 +1,4 @@
-import { getDefinition } from '@/lib/workflows/definitions';
+import { getDefinition, getNodePorts } from '@/lib/workflows/definitions';
 import {
   checkCompatible,
   describePortType,
@@ -24,6 +24,7 @@ import {
 export interface ResolutionNode {
   id: string;
   type: string;
+  config?: unknown;
   /** Used in messages only. */
   name?: string;
 }
@@ -64,11 +65,11 @@ function resolve(
   visiting: Set<string>,
 ): PortResolution {
   const node = graph.nodes.find((candidate) => candidate.id === nodeId);
-  const port = node ? getDefinition(node.type)?.outputs.find((p) => p.id === portId) : undefined;
+  const port = node ? getNodePorts(node.type, node.config, 'outputs').find((p) => p.id === portId) : undefined;
   if (!node || !port) return { state: 'missing' };
   if (!port.followsInput) return { state: 'type', type: port.type };
 
-  const followed = getDefinition(node.type)!.inputs.find((p) => p.id === port.followsInput);
+  const followed = getNodePorts(node.type, node.config, 'inputs').find((p) => p.id === port.followsInput);
   if (!followed) return { state: 'missing' };
 
   const awaiting: PortResolution = {
@@ -98,7 +99,7 @@ function resolve(
 export function checkEdge(graph: ResolutionGraph, edge: ResolutionEdge): Incompatibility | null {
   const target = graph.nodes.find((node) => node.id === edge.targetNodeId);
   const input = target
-    ? getDefinition(target.type)?.inputs.find((p) => p.id === edge.targetPort)
+    ? getNodePorts(target.type, target.config, 'inputs').find((p) => p.id === edge.targetPort)
     : undefined;
   if (!target || !input) return { reason: 'That connection point no longer exists.' };
 

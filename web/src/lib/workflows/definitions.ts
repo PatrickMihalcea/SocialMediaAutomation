@@ -1,6 +1,6 @@
 import { MediaType } from '@prisma/client';
 import { z } from 'zod';
-import { json, media, post, text, type PortDefinition } from '@/lib/workflows/ports';
+import { media, post, text, type PortDefinition } from '@/lib/workflows/ports';
 // Leaf module with no server imports, so the canvas can still be rendered.
 import { DEFAULT_IMAGE_SIZE, IMAGE_SIZE_VALUES } from '@/lib/ai/image-sizes';
 import {
@@ -46,6 +46,35 @@ export interface NodeDefinition {
 const IMAGES = [MediaType.IMAGE] as const;
 const VIDEOS = [MediaType.VIDEO] as const;
 const AUDIO = [MediaType.AUDIO] as const;
+
+/**
+ * The written parts of a post that are worth generating, as ports.
+ *
+ * Copy is what a brief is best placed to write, so each of these can come from
+ * upstream or be typed into the step. Mentions and links are deliberately not
+ * here: both have to name a specific real account or URL, which a generated
+ * brief cannot be trusted to invent, so they stay typed-only settings.
+ */
+const POST_TEXT_INPUTS: PortDefinition[] = [
+  { id: 'title', label: 'Post title', type: text(), description: 'Overrides the title set below.' },
+  { id: 'caption', label: 'Caption', type: text(), description: 'Overrides the caption set below.' },
+  { id: 'hashtags', label: 'Hashtags', type: text(), description: 'Separate with spaces or commas. Overrides the tags set below.' },
+  { id: 'firstComment', label: 'First comment', type: text(), description: 'Posted as the first comment where the channel supports it.' },
+];
+
+const POST_TEXT_CONFIG = {
+  /**
+   * The post's own title, which is not the step's name. The step name is the
+   * user's label for a box on the canvas; letting it stand in for the title
+   * meant published posts were called things like "Publish to YouTube".
+   */
+  title: z.string().max(200).default(''),
+  caption: z.string().max(5000).default(''),
+  hashtags: z.string().max(500).default(''),
+  mentions: z.string().max(500).default(''),
+  firstComment: z.string().max(5000).default(''),
+  link: z.string().max(2000).default(''),
+};
 
 const trimmerConfigSchema = z.preprocess(
   (value) => {
@@ -148,6 +177,24 @@ export const NODE_DEFINITIONS = {
         type: text(true),
         description: 'Short titles that can be shown by a text overlay.',
       },
+      {
+        id: 'postTitle',
+        label: 'Post title',
+        type: text(),
+        description: 'One overall title for the finished post.',
+      },
+      {
+        id: 'caption',
+        label: 'Caption',
+        type: text(),
+        description: 'Caption for the finished post. Connect it to a Publish or Save draft step.',
+      },
+      {
+        id: 'hashtags',
+        label: 'Hashtags',
+        type: text(),
+        description: 'Tags for the finished post, written from the same theme.',
+      },
     ],
     configSchema: z.object({
       /** What the prompts are written to produce — the wording differs a lot. */
@@ -156,6 +203,19 @@ export const NODE_DEFINITIONS = {
       count: z.number().int().min(1).max(20).default(8),
       /** Appended to every prompt; the old pipeline hardcoded a 4k-realism suffix. */
       styleSuffix: z.string().max(500).default(''),
+      /**
+       * Per-field direction for the copy this step writes. Empty means the
+       * model decides, which is why these are separate from `theme`: the theme
+       * says what the post is about, these say how each piece should read.
+       */
+      titleGuidance: z.string().max(500).default(''),
+      captionGuidance: z.string().max(500).default(''),
+      hashtagsGuidance: z.string().max(500).default(''),
+      /** Extra, named text fields created as ports on this particular step. */
+      additionalOutputs: z.array(z.object({
+        id: z.string().regex(/^[a-z][a-zA-Z0-9]*$/, 'Use letters and numbers, starting with a letter.').max(40),
+        label: z.string().trim().min(1).max(60),
+      })).max(10).default([]),
     }),
   },
 
@@ -177,6 +237,8 @@ export const NODE_DEFINITIONS = {
       size: z.enum(IMAGE_SIZE_VALUES).default(DEFAULT_IMAGE_SIZE),
       /** Stops a runaway prompt list from spending the whole month's quota. */
       maxImages: z.number().int().min(1).max(20).default(8),
+      /** Per-step escape hatch for workflow QA: no paid image API call. */
+      useMockGeneration: z.boolean().default(false),
     }),
     longRunning: true,
   },
@@ -192,6 +254,8 @@ export const NODE_DEFINITIONS = {
     configSchema: z.object({
       prompt: z.string().max(1000).default('Slow cinematic push in, subject stays centred.'),
       maxClips: z.number().int().min(1).max(12).default(8),
+      /** Produces deterministic local clips instead of calling a video model. */
+      useMockGeneration: z.boolean().default(false),
     }),
     longRunning: true,
   },
@@ -281,15 +345,9 @@ export const NODE_DEFINITIONS = {
         description: 'Optional labels carried into each cut for a text overlay.',
       },
     ],
-    outputs: [
-      { id: 'video', label: 'Video', type: media([...VIDEOS]) },
-      {
-        id: 'segments',
-        label: 'Segments',
-        type: json('beat-segments'),
-        description: 'Cut boundaries, so an overlay can change text on the beat.',
-      },
-    ],
+    // The cut points travel with the video rather than on a port of their own:
+    // they describe this video, and a step given the video can read them back.
+    outputs: [{ id: 'video', label: 'Video', type: media([...VIDEOS]) }],
     configSchema: beatSlideshowConfigSchema,
     longRunning: true,
   },
@@ -331,7 +389,18 @@ export const NODE_DEFINITIONS = {
     icon: 'type',
     inputs: [
       { id: 'video', label: 'Video', type: media([...VIDEOS]), required: true },
-      { id: 'segments', label: 'Segments', type: json('beat-segments'), required: true },
+      {
+        id: 'firstTemplate',
+        label: 'Opening text',
+        type: text(),
+        description: 'Overrides the opening text set below, so it can be written per run.',
+      },
+      {
+        id: 'template',
+        label: 'Text on each cut',
+        type: text(),
+        description: 'Overrides the per-cut text set below. Tokens still apply.',
+      },
     ],
     outputs: [{ id: 'video', label: 'Video', type: media([...VIDEOS]) }],
     configSchema: z.object({
@@ -408,11 +477,13 @@ export const NODE_DEFINITIONS = {
     description: 'Puts the finished video into a draft post you can review.',
     category: 'publish',
     icon: 'file-pen-line',
-    inputs: [{ id: 'video', label: 'Video', type: media([...VIDEOS]), required: true }],
+    inputs: [
+      { id: 'video', label: 'Video', type: media([...VIDEOS]), required: true },
+      ...POST_TEXT_INPUTS,
+    ],
     outputs: [{ id: 'post', label: 'Post', type: post() }],
     configSchema: z.object({
-      title: z.string().max(200).default(''),
-      caption: z.string().max(5000).default(''),
+      ...POST_TEXT_CONFIG,
       campaignId: z.string().uuid().nullable().default(null),
       socialAccountIds: z.array(z.string().uuid()).default([]),
     }),
@@ -424,12 +495,15 @@ export const NODE_DEFINITIONS = {
     description: 'Sends the finished video to the channels you choose.',
     category: 'publish',
     icon: 'send',
-    inputs: [{ id: 'video', label: 'Video', type: media([...VIDEOS]), required: true }],
+    inputs: [
+      { id: 'video', label: 'Video', type: media([...VIDEOS]), required: true },
+      ...POST_TEXT_INPUTS,
+    ],
     outputs: [{ id: 'post', label: 'Post', type: post() }],
     configSchema: z.object({
       /** Validated on save and at run time — empty is allowed on a newly added step. */
       socialAccountIds: z.array(z.string().uuid()).default([]),
-      caption: z.string().max(5000).default(''),
+      ...POST_TEXT_CONFIG,
       /** queue takes the next open slot from the workspace's posting times. */
       mode: z.enum(['now', 'queue']).default('queue'),
       /** An unattended run publishing straight to a real account is opt-in. */
@@ -459,7 +533,7 @@ export function findPort(
   portId: string,
   direction: 'inputs' | 'outputs',
 ): PortDefinition | null {
-  return getDefinition(type)?.[direction].find((p) => p.id === portId) ?? null;
+  return getNodePorts(type, undefined, direction).find((p) => p.id === portId) ?? null;
 }
 
 /** Config parsed through the node's schema, with defaults filled in. */
@@ -467,6 +541,27 @@ export function parseConfig(type: string, raw: unknown) {
   const definition = getDefinition(type);
   if (!definition) throw new Error(`Unknown node type "${type}"`);
   return definition.configSchema.parse(raw ?? {});
+}
+
+/** Ports normally belong to a step type. Idea Generator additionally exposes
+ * named text outputs saved in its own config, so a single coordinated brief can
+ * feed several later steps without adding bespoke node types. */
+export function getNodePorts(
+  type: string,
+  rawConfig: unknown,
+  direction: 'inputs' | 'outputs',
+): PortDefinition[] {
+  const definition = getDefinition(type);
+  if (!definition) return [];
+  if (type !== 'IDEA_GENERATOR' || direction !== 'outputs') return definition[direction];
+  const config = parseConfig(type, rawConfig) as { additionalOutputs: { id: string; label: string }[] };
+  const existing = new Set(definition.outputs.map((port) => port.id));
+  return [
+    ...definition.outputs,
+    ...config.additionalOutputs
+      .filter((field) => !existing.has(field.id))
+      .map((field) => ({ id: field.id, label: field.label, type: text(), description: 'Generated with the rest of the idea.' })),
+  ];
 }
 
 /** Minimal channel row passed from the workflow page into the config panel. */

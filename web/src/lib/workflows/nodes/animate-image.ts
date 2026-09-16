@@ -5,6 +5,7 @@ import type { NodeRunContext } from '@/lib/workflows/node-context';
 interface Config {
   prompt: string;
   maxClips: number;
+  useMockGeneration: boolean;
 }
 
 /**
@@ -43,6 +44,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       kind: 'VIDEO_ANIMATE',
       prompt: config.prompt,
       inputAssetIds: [images[index]],
+      forceMock: config.useMockGeneration,
     });
     await runAiMediaJob(job.id);
 

@@ -139,6 +139,10 @@ export async function approvalAction(
   const ctx = await requireWorkspace(slug, 'post:approve');
   const post = await db.post.findFirst({ where: { id: postId, workspaceId: ctx.workspace.id } });
   if (!post) throw invalid('That post is no longer available in this workspace.');
+  const requestedRelease = String(formData.get('releaseMode') || '');
+  if (requestedRelease && !isReleaseMode(requestedRelease)) {
+    throw invalid('Choose whether approval should publish now or add the post to the queue.');
+  }
   const providedComment = String(formData.get('body') || '').trim();
   const body = providedComment || APPROVAL_DECISION_LABELS[decision];
   const [comment] = await db.$transaction([
@@ -185,16 +189,21 @@ export async function approvalAction(
   // from the post itself, not a reason to lose their approval.
   let released: Date | null = null;
   let releaseError: string | null = null;
-  if (decision === 'APPROVED' && isReleaseMode(post.releaseOnApproval)) {
+  const releaseMode = isReleaseMode(requestedRelease)
+    ? requestedRelease
+    : isReleaseMode(post.releaseOnApproval)
+      ? post.releaseOnApproval
+      : null;
+  if (decision === 'APPROVED' && releaseMode) {
     try {
-      released = await releasePost(ctx.workspace.id, postId, post.releaseOnApproval);
+      released = await releasePost(ctx.workspace.id, postId, releaseMode);
       await audit({
         workspaceId: ctx.workspace.id,
         userId: ctx.user.id,
         action: 'approval.released',
         entityType: 'post',
         entityId: postId,
-        metadata: { mode: post.releaseOnApproval, scheduledAt: released.toISOString() },
+        metadata: { mode: releaseMode, scheduledAt: released.toISOString() },
       });
     } catch (error) {
       releaseError = error instanceof Error ? error.message : 'It could not be scheduled.';

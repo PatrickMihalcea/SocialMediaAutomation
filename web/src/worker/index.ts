@@ -27,10 +27,13 @@ async function main() {
   // Announce the drivers in force. A worker silently falling back to a mock
   // provider or a missing encoder is otherwise only discovered when a run fails.
   const { env } = await import('@/lib/env');
+  const { resolveImageProviderName } = await import('@/lib/ai/provider-selection');
   const { renderer } = await import('@/lib/render');
   const { audioAnalyzer } = await import('@/lib/audio');
+  const imageProvider = resolveImageProviderName(env.AI_PROVIDER, env.AI_IMAGE_PROVIDER);
   console.log(
-    `[worker] started with queue=${queue().name} storage=${env.STORAGE_DRIVER} ai=${env.AI_PROVIDER} ` +
+    `[worker] started with queue=${queue().name} storage=${env.STORAGE_DRIVER} ` +
+      `ai=${env.AI_PROVIDER} images=${imageProvider} ` +
       `render=${renderer().name}(${(await renderer().isAvailable()) ? 'ready' : 'unavailable'}) ` +
       `audio=${audioAnalyzer().name}(${(await audioAnalyzer().isAvailable()) ? 'ready' : 'unavailable'})`,
   );

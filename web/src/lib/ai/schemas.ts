@@ -195,6 +195,15 @@ export type AssistantReply = z.infer<typeof assistantReplySchema>;
  * not a restatement of the prompt.
  */
 export const imagePromptsSchema = z.object({
+  postTitle: z.string().min(1).max(200),
+  /**
+   * Copy for the post itself, kept optional so a model that answers with only
+   * prompts still produces a usable step — the publish step falls back to
+   * whatever caption was typed into it.
+   */
+  caption: z.string().max(5000).default(''),
+  hashtags: z.array(z.string().max(100)).max(30).default([]),
+  additionalOutputs: z.record(z.string().max(200)).default({}),
   prompts: z
     .array(
       z.object({

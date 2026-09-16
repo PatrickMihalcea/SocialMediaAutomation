@@ -93,6 +93,9 @@ function build(schemaName: string, prompt: string, messages: AiMessage[]): unkno
       // distinct rooms rather than eight copies of one sentence.
       const count = requestedCount(prompt, 'image') ?? 8;
       return {
+        postTitle: `${topic} — a set of ${count}`,
+        caption: draftFor(topic),
+        hashtags: hashtagsFor(topic).map((tag) => tag.replace(/^#/, '')),
         prompts: Array.from({ length: count }, (_, i) => ({
           title: `${IMAGE_STYLES[i % IMAGE_STYLES.length].title}`,
           prompt:

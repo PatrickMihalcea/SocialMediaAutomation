@@ -6,6 +6,7 @@ import { ConfirmationButton, PendingButton } from '@/components/action-ui';
 import { ThemePreferenceControl } from '@/components/theme-preference-control';
 import { db } from '@/lib/db';
 import { PasswordForm, ProfileForm } from './account-forms';
+import { profileImageSrc } from '@/lib/users/profile-image-src';
 
 export const metadata = { title: 'Account' };
 
@@ -49,7 +50,7 @@ export default async function AccountPage({
           </div>
         </section>
       )}
-      <ProfileForm name={user.name ?? ''} image={user.image} />
+      <ProfileForm name={user.name ?? ''} image={await profileImageSrc(user.image) ?? null} />
       <section className="b88-card mt-8 space-y-3">
         <h2 className="b88-heading">Sign-in email</h2>
         <Field label="Email" type="email" value={user.email} readOnly />

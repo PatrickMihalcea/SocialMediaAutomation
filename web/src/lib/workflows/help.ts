@@ -5,6 +5,8 @@ export interface WorkflowFieldHelp {
   description: string;
   optionLabels?: Record<string, string>;
   presets?: Array<{ label: string; value: string | number }>;
+  /** Long-form prose. Renders as a text area rather than a one-line input. */
+  multiline?: boolean;
 }
 
 export const TEXT_OVERLAY_PRESETS = [
@@ -29,6 +31,34 @@ export const TEXT_OVERLAY_TOKENS = [
   },
 ] as const;
 
+/**
+ * Settings both publish steps share. Hashtags and the first comment have
+ * matching input ports and say so; mentions and links are typed here only.
+ */
+const POST_TEXT_HELP: Record<string, WorkflowFieldHelp> = {
+  title: {
+    label: 'Post title',
+    description: 'The title of the post itself, not the name of this step — Name above is only your label for it on the canvas. Connecting the Post title input overrides this. Left empty, the post is listed by its opening copy.',
+  },
+  hashtags: {
+    label: 'Hashtags',
+    description: 'Separated by spaces or commas; the # is optional. Connecting the Hashtags input overrides this.',
+  },
+  firstComment: {
+    label: 'First comment',
+    description: 'Posted as the first comment on channels that support it, which is where tags usually go. Connecting the First comment input overrides this.',
+    multiline: true,
+  },
+  mentions: {
+    label: 'Mentions',
+    description: 'Accounts to tag, separated by spaces or commas. Set here rather than generated, since each has to match a real account.',
+  },
+  link: {
+    label: 'Link',
+    description: 'A URL to attach where the channel supports one. The same link goes out on every run.',
+  },
+};
+
 const COMMON_OPTIONS: Record<string, string> = {
   image: 'Image prompts',
   text: 'Content ideas',
@@ -52,21 +82,62 @@ export const WORKFLOW_FIELD_HELP: Partial<
 > = {
   IDEA_GENERATOR: {
     mode: {
-      label: 'What to create',
-      description: 'Changes how Bridge88 writes each prompt. Choose the output your next step expects.',
-      optionLabels: COMMON_OPTIONS,
+      label: 'Ideas for',
+      description: 'A prompt for an image reads nothing like a prompt for video or a written post, so this decides how each one is written. Match it to the step you connect Prompts to.',
+      // Deliberately not COMMON_OPTIONS: "Image prompts / Content ideas /
+      // Video prompts" described three different things in three different
+      // grammars, when the only choice being made is what gets made.
+      optionLabels: {
+        image: 'Images',
+        video: 'Video clips',
+        text: 'Written posts',
+      },
     },
     theme: {
       label: 'Theme',
-      description: 'The subject shared by every generated idea. A connected Theme input overrides this.',
+      description: 'The subject every idea varies. Connecting the Theme input overrides whatever is typed here.',
+      multiline: true,
     },
     count: {
-      label: 'Number of ideas',
-      description: 'How many prompt-and-title pairs to produce. More items use more downstream generation.',
+      label: 'How many ideas',
+      description: 'Each idea becomes one prompt and one title, and each prompt costs a generation in the step you feed.',
     },
     styleSuffix: {
-      label: 'Instructions for every prompt',
-      description: 'Optional shared direction such as palette, lens, setting, or exclusions.',
+      label: 'Add to every prompt',
+      description: 'Shared direction appended to all of them — palette, lens, mood, or things to avoid. Leave empty if the theme says enough.',
+      multiline: true,
+    },
+    titleGuidance: {
+      label: 'How to write the post title',
+      description: 'Direction for the Post title output — length, tone, a formula to follow. Leave empty to let the model decide from the theme.',
+      multiline: true,
+      presets: [
+        { label: 'Short and plain', value: 'Under 60 characters, plain language, no hype words.' },
+        { label: 'Ask a question', value: 'Phrase it as a question the viewer would want answered.' },
+      ],
+    },
+    captionGuidance: {
+      label: 'How to write the caption',
+      description: 'Direction for the Caption output — length, tone, whether to end on a question or a call to action. Leave empty to let the model decide.',
+      multiline: true,
+      presets: [
+        { label: 'Two sentences, no emoji', value: 'Two sentences at most. No emoji and no hashtags in the caption itself.' },
+        { label: 'End on a question', value: 'Two or three sentences, ending on a question that invites replies.' },
+        { label: 'Call to action', value: 'Three sentences, ending on a clear call to action.' },
+      ],
+    },
+    hashtagsGuidance: {
+      label: 'How to pick hashtags',
+      description: 'Direction for the Hashtags output — how many, how broad, tags to always include or avoid. Leave empty for 3 to 8 tags chosen from the theme.',
+      multiline: true,
+      presets: [
+        { label: 'Few and specific', value: 'Three tags at most, specific to the subject rather than broad reach tags.' },
+        { label: 'Mix broad and niche', value: 'Six to eight tags, mixing broad reach tags with niche ones.' },
+      ],
+    },
+    additionalOutputs: {
+      label: 'Extra outputs',
+      description: 'Any other copy you want written from the same brief — a hook, a call to action, a first comment. Each one becomes a connection point on this step. The title, caption and hashtags are already outputs, so they do not need adding here.',
     },
   },
   IMAGE_GENERATOR: {
@@ -77,6 +148,10 @@ export const WORKFLOW_FIELD_HELP: Partial<
     maxImages: {
       label: 'Maximum images',
       description: 'A cost guard. Extra incoming prompts are ignored after this number.',
+    },
+    useMockGeneration: {
+      label: 'Use mock generation',
+      description: 'Creates deterministic local placeholders instead of calling the paid image provider. Use this to test the workflow; turn it off for final content.',
     },
   },
   ANIMATE_IMAGE: {
@@ -92,6 +167,10 @@ export const WORKFLOW_FIELD_HELP: Partial<
     maxClips: {
       label: 'Maximum clips',
       description: 'A cost guard. Extra incoming images are ignored after this number.',
+    },
+    useMockGeneration: {
+      label: 'Use mock generation',
+      description: 'Creates deterministic local test clips instead of calling a video model. The rest of the workflow runs normally.',
     },
   },
   MEDIA_LIBRARY: {
@@ -199,11 +278,11 @@ export const WORKFLOW_FIELD_HELP: Partial<
   TEXT_OVERLAY: {
     template: {
       label: 'Text on each cut',
-      description: 'Choose a preset or combine fixed words with Number and Title.',
+      description: 'Choose a preset or combine fixed words with Number and Title. Connecting the Text on each cut input overrides this, and tokens still apply.',
     },
     firstTemplate: {
       label: 'Opening text',
-      description: 'Optional text shown only on the first cut. Later cuts use Text on each cut.',
+      description: 'Optional text shown only on the first cut. Later cuts use Text on each cut. Connecting the Opening text input overrides this, so an Idea generator can write the opening line per run.',
     },
     font: {
       label: 'Typeface',
@@ -250,15 +329,24 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
   },
   CREATE_DRAFT: {
-    title: { label: 'Draft title', description: 'Internal name used in Bridge88.' },
-    caption: { label: 'Caption', description: 'Starting caption for every selected channel.' },
+    caption: {
+      label: 'Caption',
+      description: 'Starting caption for every selected channel. Connecting the Caption input overrides it, so an Idea generator can write it instead.',
+      multiline: true,
+    },
+    ...POST_TEXT_HELP,
     campaignId: {
       label: 'Campaign',
       description: 'Optional campaign for the new draft.',
     },
   },
   PUBLISH: {
-    caption: { label: 'Caption', description: 'Caption sent to every selected channel.' },
+    caption: {
+      label: 'Caption',
+      description: 'Caption sent to every selected channel. Connecting the Caption input overrides it, so an Idea generator can write it instead.',
+      multiline: true,
+    },
+    ...POST_TEXT_HELP,
     mode: {
       label: 'When approved',
       description: 'Publish immediately or use the next available queue slot.',

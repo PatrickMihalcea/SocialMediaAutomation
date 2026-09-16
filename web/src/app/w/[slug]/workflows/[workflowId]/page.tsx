@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { Badge, Button, EmptyState } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
+import { env } from '@/lib/env';
+import { resolveImageProviderName } from '@/lib/ai/provider-selection';
 import { notFound } from '@/lib/errors';
 import { formatInZone, timezoneLabel, WEEKDAY_SHORT } from '@/lib/scheduling/time';
 import { toGraph } from '@/lib/workflows/snapshot';
@@ -210,6 +212,11 @@ async function WorkflowDetail({
               slug={slug}
               workflowId={workflow.id}
               canEdit={ctx.can('workflow:edit') && !workflow.archivedAt}
+              // A mocked image provider overrides the per-step switch, so the
+              // canvas has to know about it or its Mock badges would lie.
+              mediaProviderMocked={
+                resolveImageProviderName(env.AI_PROVIDER, env.AI_IMAGE_PROVIDER) === 'mock'
+              }
               accounts={socialAccounts}
               audioAssets={audioAssets.map((asset) => ({
                 id: asset.id,

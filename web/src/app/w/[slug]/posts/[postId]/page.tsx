@@ -11,9 +11,25 @@ import { formatInZone, timezoneLabel } from '@/lib/scheduling/time';
 import { storage } from '@/lib/storage';
 import { notFound } from 'next/navigation';
 import type { PostStatus } from '@prisma/client';
+import { legalPostActions, type PostLifecycleAction } from '@/lib/posts/lifecycle';
 import { replyToApprovalCommentAction } from '@/app/actions/team';
 import { APPROVAL_DECISION_LABELS, POST_PLATFORM_STATUS_LABELS, POST_STATUS_LABELS } from '@/lib/posts/labels';
 import { approvalOutcome, describeOrigin, postOriginInclude } from '@/lib/posts/origin';
+
+/**
+ * The list each status is reachable from, for the back link.
+ *
+ * Only scheduled and published posts sit on the calendar; everything else is
+ * found through drafts or the approval queue, and that is where leaving the
+ * post should return you.
+ */
+const BACK_TO: Partial<Record<PostStatus, { href: string; label: string }>> = {
+  DRAFT: { href: '/drafts', label: 'drafts' },
+  REJECTED: { href: '/drafts', label: 'drafts' },
+  PENDING_APPROVAL: { href: '/team', label: 'approvals' },
+  APPROVED: { href: '/drafts', label: 'drafts' },
+  CANCELLED: { href: '/drafts', label: 'drafts' },
+};
 
 const statusTone = {
   DRAFT: 'outline',
@@ -79,16 +95,31 @@ export default async function PostDetailPage({
 
   const channels = await Promise.all(post.platforms.map(async (channel) => ({
     ...channel,
-    media: await Promise.all(channel.media.map(async (item) => ({
-      ...item,
-      url: await storage().signedUrl(item.mediaAsset.thumbnailKey ?? item.mediaAsset.storageKey),
-    }))),
+    media: await Promise.all(channel.media.map(async (item) => {
+      const asset = item.mediaAsset;
+      // A video element cannot decode the .webp still, so it gets the file
+      // itself and wears the thumbnail as its poster. Stills stay on the
+      // thumbnail, which is all this frame is ever large enough to show.
+      const video = asset.type === 'VIDEO';
+      return {
+        ...item,
+        url: await storage().signedUrl(video ? asset.storageKey : asset.thumbnailKey ?? asset.storageKey),
+        posterUrl: asset.thumbnailKey ? await storage().signedUrl(asset.thumbnailKey) : undefined,
+      };
+    })),
   })));
   const title = post.title?.trim() || post.platforms[0]?.text.trim().slice(0, 70) || 'Untitled post';
+  const backTo = BACK_TO[post.status] ?? { href: '/calendar', label: 'calendar' };
 
   return (
     <>
-      <Link href={`/w/${slug}/calendar`} className="font-[480]">Back to calendar</Link>
+      {/*
+        Back to where this post actually lives. A post awaiting review or still
+        a draft has no scheduled time, so it is not on the calendar at all —
+        sending a reviewer there stranded them somewhere the post they had just
+        been reading did not appear.
+      */}
+      <Link href={`/w/${slug}${backTo.href}`} className="font-[480]">Back to {backTo.label}</Link>
       <div className="mt-8 flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
           <p className="b88-eyebrow">Post detail</p>
@@ -130,7 +161,7 @@ export default async function PostDetailPage({
       )}
       {post.status === 'CANCELLED' && (
         <StatusMessage tone="neutral" className="mt-6">
-          This post is cancelled. Edit it to save it as a draft, choose a new time, or publish it now.
+          This post is cancelled. Restore it to a draft to work on it again, or publish it now.
         </StatusMessage>
       )}
       {post.status === 'REJECTED' && (
@@ -212,6 +243,7 @@ export default async function PostDetailPage({
                   <div key={item.id}>
                     <MediaFrame
                       src={item.url}
+                      poster={item.posterUrl}
                       type={item.mediaAsset.type === 'VIDEO' ? 'video' : 'image'}
                       ratio="1:1"
                       alt={item.altText ?? humanizeMachineValue(item.mediaAsset.filename)}
@@ -318,13 +350,25 @@ function PostActions({
   canSchedule: boolean;
   archived: boolean;
 }) {
-  const editStatuses: PostStatus[] = ['DRAFT', 'REJECTED', 'APPROVED', 'SCHEDULED', 'PUBLISHED', 'FAILED', 'CANCELLED'];
-  const duplicateStatuses: PostStatus[] = ['DRAFT', 'REJECTED', 'APPROVED', 'SCHEDULED', 'PUBLISHED', 'FAILED', 'CANCELLED'];
-  const deletableStatuses: PostStatus[] = ['DRAFT', 'REJECTED', 'APPROVED', 'SCHEDULED', 'PUBLISHED', 'FAILED', 'CANCELLED'];
-  const publishStatuses: PostStatus[] = ['DRAFT', 'REJECTED', 'APPROVED', 'FAILED', 'CANCELLED'];
+  /*
+    Which buttons appear comes from the lifecycle table, which is also what
+    postCommandAction checks before doing anything. It used to come from four
+    status lists written out by hand here, and they had drifted from that table
+    in both directions: a post waiting for approval was offered no Edit button
+    even though editing one is legal — so arriving here from the approval queue
+    was a dead end with no way through to the draft — while a cancelled post
+    was offered Edit, which the server refuses.
+  */
+  const actions = legalPostActions(status);
+  const can = (action: PostLifecycleAction) => actions.includes(action);
+  // FAILED allows retry rather than publish; every other publishable state is
+  // the other way round.
+  const publishCommand = can('retry') ? 'retry' : 'publish';
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {/* Archiving sits outside the lifecycle table: it files a post away
+          without changing what state it is in. */}
       {canUpdate && (archived || ['DRAFT', 'REJECTED', 'PUBLISHED', 'FAILED', 'CANCELLED'].includes(status)) && (
         <form action={setPostArchivedAction.bind(null, slug, postId, !archived)}>
           <PendingButton type="submit" variant="tertiary" pendingLabel={archived ? 'Restoring' : 'Archiving'}>
@@ -332,34 +376,45 @@ function PostActions({
           </PendingButton>
         </form>
       )}
-      {canUpdate && editStatuses.includes(status) && <Button href={`/w/${slug}/compose/${postId}`}>Edit post</Button>}
-      {canSchedule && ['DRAFT', 'APPROVED', 'CANCELLED'].includes(status) && (
+      {canUpdate && can('edit') && (
+        <Button href={`/w/${slug}/compose/${postId}`}>
+          {status === 'PENDING_APPROVAL' ? 'Open the draft' : 'Edit post'}
+        </Button>
+      )}
+      {canSchedule && can('schedule') && (
         <Button href={`/w/${slug}/compose/${postId}`} variant="secondary">Schedule</Button>
       )}
-      {canPublish && publishStatuses.includes(status) && (
-        <form action={async () => { 'use server'; await postCommandAction(slug, postId, status === 'FAILED' ? 'retry' : 'publish'); }}>
-          <PendingButton type="submit" variant="secondary" pendingLabel={status === 'FAILED' ? 'Retrying' : 'Publishing'}>
-            {status === 'FAILED' ? 'Retry publish' : 'Publish now'}
+      {canPublish && (can('publish') || can('retry')) && (
+        <form action={async () => { 'use server'; await postCommandAction(slug, postId, publishCommand); }}>
+          <PendingButton type="submit" variant="secondary" pendingLabel={publishCommand === 'retry' ? 'Retrying' : 'Publishing'}>
+            {publishCommand === 'retry' ? 'Retry publish' : 'Publish now'}
           </PendingButton>
         </form>
       )}
-      {canSchedule && ['SCHEDULED', 'FAILED'].includes(status) && (
+      {canSchedule && can('reschedule') && (
         <form action={async (formData: FormData) => { 'use server'; await postCommandAction(slug, postId, 'reschedule', formData); }} className="flex flex-wrap items-center gap-2">
           <input type="datetime-local" name="scheduledAt" className="b88-filter-control h-10 w-auto" aria-label={`New publishing time (${timezoneLabel(timezone)})`} required />
           <PendingButton type="submit" variant="secondary" pendingLabel="Rescheduling">Reschedule</PendingButton>
         </form>
       )}
-      {status === 'SCHEDULED' && canUpdate && (
+      {canUpdate && can('cancel') && (
         <form action={async () => { 'use server'; await postCommandAction(slug, postId, 'cancel'); }}>
-          <PendingButton type="submit" variant="tertiary" pendingLabel="Cancelling">Cancel schedule</PendingButton>
+          <PendingButton type="submit" variant="tertiary" pendingLabel="Cancelling">
+            {status === 'SCHEDULED' ? 'Cancel schedule' : 'Cancel post'}
+          </PendingButton>
         </form>
       )}
-      {duplicateStatuses.includes(status) && (
+      {canUpdate && can('restore') && (
+        <form action={async () => { 'use server'; await postCommandAction(slug, postId, 'restore'); }}>
+          <PendingButton type="submit" pendingLabel="Restoring">Restore to draft</PendingButton>
+        </form>
+      )}
+      {can('duplicate') && (
         <form action={async () => { 'use server'; await postCommandAction(slug, postId, 'duplicate'); }}>
           <PendingButton type="submit" variant="secondary" pendingLabel="Duplicating">Duplicate</PendingButton>
         </form>
       )}
-      {canDelete && deletableStatuses.includes(status) && (
+      {canDelete && can('delete') && (
         <form action={async () => { 'use server'; await postCommandAction(slug, postId, 'delete'); }}>
           <ConfirmationButton type="submit" variant="tertiary" confirmMessage="Delete this post permanently?" pendingLabel="Deleting">Delete</ConfirmationButton>
         </form>

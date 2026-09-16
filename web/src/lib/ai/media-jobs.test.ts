@@ -8,8 +8,8 @@ const dbMock = vi.hoisted(() => ({
 const storageMock = vi.hoisted(() => ({ put: vi.fn(), get: vi.fn() }));
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
-vi.mock('@/lib/env', () => ({ env: { AI_PROVIDER: 'mock' } }));
-vi.mock('@/lib/ai', () => ({ aiProvider: vi.fn() }));
+vi.mock('@/lib/env', () => ({ env: { AI_PROVIDER: 'mock', AI_IMAGE_PROVIDER: 'inherit' } }));
+vi.mock('@/lib/ai', () => ({ imageProvider: vi.fn() }));
 vi.mock('@/lib/billing/limits', () => ({ incrementUsage: vi.fn() }));
 vi.mock('@/lib/notifications/service', () => ({ notify: vi.fn() }));
 vi.mock('@/lib/storage', () => ({
@@ -17,7 +17,7 @@ vi.mock('@/lib/storage', () => ({
   mediaKey: () => 'workspaces/workspace-1/original/generated.wav',
 }));
 
-import { runAiMediaJob } from '@/lib/ai/media-jobs';
+import { mediaProviderDescriptor, runAiMediaJob } from '@/lib/ai/media-jobs';
 
 describe('AI media worker', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -84,5 +84,14 @@ describe('AI media worker', () => {
     expect(storageMock.put).not.toHaveBeenCalled();
     expect(dbMock.mediaAsset.create).not.toHaveBeenCalled();
     expect(dbMock.aiGeneration.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('mediaProviderDescriptor', () => {
+  it('allows a workflow step to force a mock media provider', () => {
+    expect(mediaProviderDescriptor('VIDEO_ANIMATE', true)).toEqual({
+      provider: 'mock',
+      model: 'mock-video-1',
+    });
   });
 });

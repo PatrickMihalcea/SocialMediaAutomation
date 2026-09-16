@@ -134,27 +134,28 @@ describe('reaches', () => {
 });
 
 describe('parallel edges between the same pair of nodes', () => {
-  // The shape the bedroom pipeline actually has: the slideshow hands the overlay
-  // both the video and the cut points, as two edges. Counting those as two
-  // dependencies would leave the overlay waiting forever on a second completion
-  // that can never happen, and the graph would read as cyclic.
+  // The shape a generated pipeline actually has: the idea step writes the
+  // draft's caption and its hashtags, so it feeds one step through several
+  // ports at once. Counting those as separate dependencies would leave the
+  // draft waiting forever on completions that can never come, and the graph
+  // would read as cyclic.
   const twoEdges: Graph = {
-    nodes: ['slideshow', 'overlay'].map((id) => ({ id, type: id })),
+    nodes: ['idea', 'draft'].map((id) => ({ id, type: id })),
     edges: [
-      { sourceNodeId: 'slideshow', sourcePort: 'video', targetNodeId: 'overlay', targetPort: 'video' },
-      { sourceNodeId: 'slideshow', sourcePort: 'segments', targetNodeId: 'overlay', targetPort: 'segments' },
+      { sourceNodeId: 'idea', sourcePort: 'caption', targetNodeId: 'draft', targetPort: 'caption' },
+      { sourceNodeId: 'idea', sourcePort: 'hashtags', targetNodeId: 'draft', targetPort: 'hashtags' },
     ],
   };
 
   it('counts one dependency, not two', () => {
-    expect(indegrees(twoEdges).get('overlay')).toBe(1);
+    expect(indegrees(twoEdges).get('draft')).toBe(1);
   });
 
   it('orders without reporting a false cycle', () => {
-    expect(topoOrder(twoEdges)).toEqual(['slideshow', 'overlay']);
+    expect(topoOrder(twoEdges)).toEqual(['idea', 'draft']);
   });
 
   it('still reports the target as a descendant exactly once', () => {
-    expect(descendantsOf(twoEdges, 'slideshow')).toEqual(['overlay']);
+    expect(descendantsOf(twoEdges, 'idea')).toEqual(['draft']);
   });
 });

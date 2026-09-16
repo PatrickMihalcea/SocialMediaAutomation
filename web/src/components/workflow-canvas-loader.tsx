@@ -43,6 +43,7 @@ export function WorkflowCanvasLoader(props: {
   mediaAssets: WorkflowMediaAssetOption[];
   mediaFolders: WorkflowMediaFolderOption[];
   mediaCounts: WorkflowMediaCounts;
+  mediaProviderMocked: boolean;
   canEdit: boolean;
 }) {
   return <Canvas {...props} />;

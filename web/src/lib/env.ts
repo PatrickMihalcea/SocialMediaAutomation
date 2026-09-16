@@ -61,6 +61,10 @@ const schema = z.object({
   QUEUE_IN_WEB_SERVER: boolish(false),
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   AI_PROVIDER: z.enum(['mock', 'openai']).default('mock'),
+  // Allows workflow QA to keep real text reasoning while replacing the slow,
+  // paid image call with deterministic local placeholders. "inherit" preserves
+  // the old one-provider behavior.
+  AI_IMAGE_PROVIDER: z.enum(['inherit', 'mock', 'openai']).default('inherit'),
 
   // --- rendering and audio analysis ---
   // Both default to off, so a fresh checkout with neither ffmpeg nor Python

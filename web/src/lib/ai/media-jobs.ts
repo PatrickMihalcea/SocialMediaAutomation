@@ -2,7 +2,8 @@ import 'server-only';
 import { AiMediaJobKind, JobStatus, MediaType } from '@prisma/client';
 import { db } from '@/lib/db';
 import { PermanentJobError } from '@/lib/queue/runner';
-import { aiProvider } from '@/lib/ai';
+import { imageProvider } from '@/lib/ai';
+import { resolveImageProviderName } from '@/lib/ai/provider-selection';
 import { mediaKey, storage } from '@/lib/storage';
 import {
   MockAudioProvider,
@@ -20,8 +21,13 @@ import { assertWithinLimit, currentMonthUsage, incrementUsage } from '@/lib/bill
 import { notify } from '@/lib/notifications/service';
 import { enqueue } from '@/lib/queue';
 
-export function mediaProviderDescriptor(kind: AiMediaJobKind) {
-  const external = env.AI_PROVIDER === 'openai';
+export function mediaProviderDescriptor(kind: AiMediaJobKind, forceMock = false) {
+  const provider = forceMock
+    ? 'mock'
+    : kind.startsWith('IMAGE')
+      ? resolveImageProviderName(env.AI_PROVIDER, env.AI_IMAGE_PROVIDER)
+      : env.AI_PROVIDER;
+  const external = provider === 'openai';
   if (kind.startsWith('VIDEO')) return { provider: external ? 'openai' : 'mock', model: external ? 'external-video' : 'mock-video-1' };
   if (kind.startsWith('AUDIO')) return { provider: external ? 'openai' : 'mock', model: external ? 'external-audio' : 'mock-audio-1' };
   return { provider: external ? 'openai' : 'mock', model: external ? env.OPENAI_IMAGE_MODEL : 'mock-image-edit-1' };
@@ -39,11 +45,13 @@ export async function createAiMediaJob(input: {
   kind: AiMediaJobKind;
   prompt: string;
   inputAssetIds?: string[];
+  /** Per-step override for inexpensive workflow testing. */
+  forceMock?: boolean;
 }): Promise<{ id: string; kind: AiMediaJobKind; status: JobStatus }> {
   const used = await currentMonthUsage(input.workspaceId, 'ai_generations');
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);
 
-  const descriptor = mediaProviderDescriptor(input.kind);
+  const descriptor = mediaProviderDescriptor(input.kind, input.forceMock);
   const job = await db.aiMediaJob.create({
     data: {
       workspaceId: input.workspaceId,
@@ -76,7 +84,7 @@ export async function runAiMediaJob(aiMediaJobId: string): Promise<void> {
   let generationRecorded = false;
   try {
     const inputs = await loadInputs(job.workspaceId, job.inputAssetIds);
-    const result = await produce(job.kind, job.prompt, inputs);
+    const result = await produce(job.kind, job.prompt, inputs, job.provider === 'openai');
     const latest = await db.aiMediaJob.findUnique({ where: { id: job.id }, select: { status: true } });
     // Cancellation is durable and server-side. A provider request that was already
     // in flight may finish, but its bytes must not become a new library asset.
@@ -175,14 +183,14 @@ async function produce(
   kind: AiMediaJobKind,
   prompt: string,
   inputs: Awaited<ReturnType<typeof loadInputs>>,
+  external: boolean,
 ): Promise<AiMediaResult> {
   const image = inputs[0];
-  const external = env.AI_PROVIDER === 'openai';
   const editor = external ? new OpenAiImageEditingProvider() : new MockImageEditingProvider();
   const video = external ? new OpenAiVideoGenerationProvider() : new MockVideoGenerationProvider();
   const audio = external ? new OpenAiAudioProvider() : new MockAudioProvider();
   if (kind === 'IMAGE_GENERATE') {
-    const result = await aiProvider().generateImage({ prompt });
+    const result = await imageProvider(!external).generateImage({ prompt });
     return { ...result, extension: result.mimeType === 'image/svg+xml' ? 'svg' : 'png' };
   }
   if (kind === 'IMAGE_EDIT') return editor.editImage({ prompt, ...requiredInput(image, kind) });
