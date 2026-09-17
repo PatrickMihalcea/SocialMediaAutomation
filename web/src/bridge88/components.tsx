@@ -100,6 +100,52 @@ export function Badge({
   );
 }
 
+/**
+ * Mono uppercase inverse label for icon-only controls and truncated values.
+ *
+ * Ported from the design system's feedback/Tooltip. Per its contract this
+ * carries one short phrase — anything a person must read to proceed belongs in
+ * a hint or a Dialog, not in something that vanishes when the pointer moves.
+ * Opens on focus as well as hover so it is reachable from the keyboard.
+ */
+export function Tooltip({
+  content,
+  side = 'top',
+  children,
+}: {
+  content: string;
+  side?: 'top' | 'bottom' | 'left' | 'right';
+  children: ReactNode;
+}) {
+  const [show, setShow] = useState(false);
+  const position = {
+    top: 'bottom-full left-1/2 -translate-x-1/2 -translate-y-2',
+    bottom: 'top-full left-1/2 -translate-x-1/2 translate-y-2',
+    left: 'right-full top-1/2 -translate-x-2 -translate-y-1/2',
+    right: 'left-full top-1/2 translate-x-2 -translate-y-1/2',
+  }[side];
+  return (
+    <span
+      className="relative inline-flex"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+      onFocus={() => setShow(true)}
+      onBlur={() => setShow(false)}
+    >
+      {children}
+      {show && (
+        <span
+          role="tooltip"
+          className={`b88-caption pointer-events-none absolute z-40 max-w-64 whitespace-normal rounded-sm px-2.5 py-1.5 text-left ${position}`}
+          style={{ background: 'var(--canvas-inverse)', color: 'var(--ink-inverse)' }}
+        >
+          {content}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function Avatar({ name, src, size = 36 }: { name: string; src?: string | null; size?: number }) {
   const initials = name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
   return (

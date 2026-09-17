@@ -31,6 +31,11 @@ export default async function StudioPage({
         prompt: true,
         outputAssetId: true,
         createdAt: true,
+        // Both drive the progress tracker: startedAt is the only evidence a
+        // worker actually picked the job up, and provider is what tells a
+        // person a result is a demo fixture rather than model output.
+        startedAt: true,
+        provider: true,
       },
     }),
     db.mediaAsset.findMany({
@@ -78,7 +83,11 @@ export default async function StudioPage({
       <AiStudio
         slug={slug}
         initialAssets={withUrls}
-        initialJobs={jobs.map((job) => ({ ...job, createdAt: job.createdAt.toISOString() }))}
+        initialJobs={jobs.map((job) => ({
+          ...job,
+          createdAt: job.createdAt.toISOString(),
+          startedAt: job.startedAt?.toISOString() ?? null,
+        }))}
         initialSourceAssetId={validatedSource}
         simulated={env.AI_PROVIDER !== 'openai'}
         imageSource={resolveImageProviderName(env.AI_PROVIDER, env.AI_IMAGE_PROVIDER)}

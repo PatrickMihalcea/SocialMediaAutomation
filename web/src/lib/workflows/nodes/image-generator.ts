@@ -5,6 +5,7 @@ import { generateImage } from '@/lib/ai';
 import type { ImageSize } from '@/lib/ai/image-sizes';
 import type { ImageProviderName } from '@/lib/ai/provider-selection';
 import { mediaKey, storage } from '@/lib/storage';
+import { filenameFromPrompt } from '@/lib/media/filename-from-prompt';
 import { PermanentJobError } from '@/lib/queue/runner';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
 
@@ -66,7 +67,10 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     });
 
     const extension = result.mimeType === 'image/svg+xml' ? 'svg' : 'png';
-    const filename = `${slug(titles[index] ?? `image-${index + 1}`)}.${extension}`;
+    const title = titles[index];
+    const filename = title
+      ? `${slug(title)}.${extension}`
+      : filenameFromPrompt(prompt, extension, `image-${index + 1}`);
     const key = mediaKey(ctx.workspaceId, filename);
     await storage().put(key, result.data, result.mimeType);
 

@@ -21,6 +21,7 @@ import { AiCredentialError, type AiMediaResult } from '@/lib/ai/types';
 import { IMAGE_SIZE_VALUES, type ImageSize } from '@/lib/ai/image-sizes';
 import { assertWithinLimit, currentMonthUsage, incrementUsage } from '@/lib/billing/limits';
 import { notify } from '@/lib/notifications/service';
+import { filenameFromPrompt } from '@/lib/media/filename-from-prompt';
 import { enqueue } from '@/lib/queue';
 
 export function mediaProviderDescriptor(kind: AiMediaJobKind, override?: ImageProviderName) {
@@ -68,7 +69,7 @@ export async function createAiMediaJob(input: {
    * made when it was queued rather than whatever the environment says later.
    */
   provider?: ImageProviderName;
-}): Promise<{ id: string; kind: AiMediaJobKind; status: JobStatus }> {
+}): Promise<{ id: string; kind: AiMediaJobKind; status: JobStatus; provider: string }> {
   const used = await currentMonthUsage(input.workspaceId, 'ai_generations');
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);
 
@@ -85,7 +86,10 @@ export async function createAiMediaJob(input: {
       inputAssetIds: input.inputAssetIds ?? [],
       metadata: input.size ? { size: input.size } : {},
     },
-    select: { id: true, kind: true, status: true },
+    // provider comes back so the caller can say which source is running this
+    // before the worker has touched it — a demo fixture should be labelled the
+    // moment it is queued, not once the picture arrives.
+    select: { id: true, kind: true, status: true, provider: true },
   });
   await enqueue('ai-media-job', { aiMediaJobId: job.id }, {
     workspaceId: input.workspaceId,
@@ -111,7 +115,13 @@ export async function runAiMediaJob(aiMediaJobId: string): Promise<void> {
     // Cancellation is durable and server-side. A provider request that was already
     // in flight may finish, but its bytes must not become a new library asset.
     if (latest?.status === JobStatus.CANCELLED) return;
-    const filename = `ai-${job.kind.toLowerCase().replaceAll('_', '-')}.${result.extension}`;
+    // The kind still names the fallback, so an empty brief cannot produce a
+    // file called ".png".
+    const filename = filenameFromPrompt(
+      job.prompt,
+      result.extension,
+      job.kind.toLowerCase().replaceAll('_', '-'),
+    );
     const key = mediaKey(job.workspaceId, filename);
     await storage().put(key, result.data, result.mimeType);
     const source = inputs[0]?.asset;

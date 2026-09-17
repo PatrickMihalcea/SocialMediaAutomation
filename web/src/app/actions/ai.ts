@@ -10,6 +10,7 @@ import type { ImageProviderName } from '@/lib/ai/provider-selection';
 import { db } from '@/lib/db';
 import { mediaKey, storage } from '@/lib/storage';
 import { invalid } from '@/lib/errors';
+import { filenameFromPrompt } from '@/lib/media/filename-from-prompt';
 import { createAiMediaJob } from '@/lib/ai/media-jobs';
 
 export async function sendAssistantMessageAction(slug: string, conversationId: string | undefined, content: string) {
@@ -65,7 +66,7 @@ export async function generateStudioImageAction(
       inputAssetIds: input.sourceAssetId ? [input.sourceAssetId] : [],
     });
     revalidatePath(`/w/${slug}/studio`);
-    return { queued: true as const, job: { id: job.id, kind: job.kind, status: job.status } };
+    return { queued: true as const, job: { id: job.id, kind: job.kind, status: job.status, provider: job.provider } };
   }
 
   const result = await generateImage({
@@ -75,7 +76,7 @@ export async function generateStudioImageAction(
     size: input.size,
     provider,
   });
-  const filename = `ai-image-${Date.now()}.${result.mimeType === 'image/svg+xml' ? 'svg' : 'png'}`;
+  const filename = filenameFromPrompt(prompt, result.mimeType === 'image/svg+xml' ? 'svg' : 'png');
   const key = mediaKey(ctx.workspace.id, filename);
   await storage().put(key, result.data, result.mimeType);
   const source = input.sourceAssetId
@@ -127,7 +128,7 @@ export async function createAiMediaJobAction(
     inputAssetIds: ids,
   });
   revalidatePath(`/w/${slug}/studio`);
-  return { id: job.id, kind: job.kind, status: job.status };
+  return { id: job.id, kind: job.kind, status: job.status, provider: job.provider };
 }
 
 export async function cancelAiMediaJobAction(slug: string, jobId: string) {

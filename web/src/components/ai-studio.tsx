@@ -13,6 +13,7 @@ import {
 } from '@/app/actions/ai';
 import type { AiMediaJobKind, JobStatus } from '@prisma/client';
 import { AI_MEDIA_JOB_LABELS, JOB_STATUS_LABELS } from '@/lib/ai/labels';
+import { AiJobProgress } from '@/components/ai-job-progress';
 import { DEFAULT_IMAGE_SIZE, IMAGE_SIZE_PRESETS, imageSizeAvailableFor, type ImageSize } from '@/lib/ai/image-sizes';
 import type { ImageProviderName } from '@/lib/ai/provider-selection';
 
@@ -25,6 +26,8 @@ type Job = {
   prompt: string;
   outputAssetId: string | null;
   createdAt: string;
+  startedAt: string | null;
+  provider: string;
 };
 type JobAction = 'IMAGE_VARIATION' | 'VIDEO_GENERATE' | 'VIDEO_ANIMATE' | 'AUDIO_TTS';
 type Action = 'IMAGE' | 'REGENERATE' | 'CANCEL' | 'RETRY' | 'DELETE' | JobAction;
@@ -163,6 +166,8 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
           prompt,
           outputAssetId: null,
           createdAt: new Date().toISOString(),
+          startedAt: null,
+          provider: result.job.provider,
         }, ...current]);
         setNotice('Image generation queued. You can leave this page; processing continues on the server.');
         return;
@@ -193,6 +198,8 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
         prompt,
         outputAssetId: null,
         createdAt: new Date().toISOString(),
+        startedAt: null,
+        provider: job.provider,
       }, ...current]);
       setNotice(`${AI_MEDIA_JOB_LABELS[kind]} queued. You can leave this page; processing continues on the server.`);
     }, 'The media job could not be queued.');
@@ -218,6 +225,8 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
         prompt,
         outputAssetId: null,
         createdAt: new Date().toISOString(),
+        startedAt: null,
+        provider: created.provider,
       }, ...current]);
       setNotice('Generation queued again with the current brief.');
     }, 'The generation could not be retried.');
@@ -407,11 +416,12 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
                 <Badge tone={statusTone(job.status)}>{JOB_STATUS_LABELS[job.status]}</Badge>
               </div>
               <p className="mt-2 line-clamp-2 text-sm">{job.prompt}</p>
+              <AiJobProgress job={job} now={now} />
               {ACTIVE_STATUSES.includes(job.status) && (
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                   <span className="flex items-center gap-2 text-sm">
                     <span className="b88-spinner-inline" aria-hidden="true" />
-                    Processing on the server · {elapsed(job)}
+                    Total {elapsed(job)}
                   </span>
                   <Button type="button" variant="secondary" onClick={() => cancel(job.id)} disabled={isPending('CANCEL')}>
                     <X size={16} /> Cancel
