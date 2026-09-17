@@ -32,6 +32,17 @@ describe('image size presets', () => {
     expect(imageSizesFor()).toContain('1024x1820');
   });
 
+  /**
+   * Demo mode has to be able to run the workflow it is standing in for. The
+   * mock draws its placeholder at whatever dimensions it is given, so gating a
+   * shape on a paid backend only made a vertical video impossible to rehearse
+   * without paying for it.
+   */
+  it('offers every shape to the mock, which has no API to refuse them', () => {
+    expect(imageSizesFor('mock')).toEqual(IMAGE_SIZE_PRESETS.map((preset) => preset.id));
+    expect(imageSizeAvailableFor('1024x1820', 'mock')).toBe(true);
+  });
+
   it('names each preset by shape, not by delivery platform', () => {
     // Labelling 2:3 "Reels" — while the video presets label 9:16 "Reels" —
     // promises a match that does not exist. The 9:16 preset keeps the same

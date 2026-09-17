@@ -98,6 +98,12 @@ export function imageSizeAvailableFor(size: string, provider?: ImageProviderName
   const preset = IMAGE_SIZE_PRESETS.find((candidate) => candidate.id === size);
   if (!preset) return false;
   if (!preset.requires || !provider) return true;
+  // `requires` names the real backend a shape needs. The mock is not one: it
+  // rasterises its placeholder at whatever dimensions it is handed, so gating a
+  // size on a paid backend only stopped demo mode from exercising the shape it
+  // exists to exercise — a vertical video workflow could not be run at all
+  // without switching to a provider that charges for it.
+  if (provider === 'mock') return true;
   return preset.requires === provider;
 }
 
