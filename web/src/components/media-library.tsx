@@ -67,10 +67,15 @@ export function MediaLibrary({
   const [preview, setPreview] = useState<MediaLibraryAsset | null>(null);
   const [visibleAssetCount, setVisibleAssetCount] = useState(12);
   /** The asset whose deletion is waiting on an answer about its posts. */
+  /**
+   * A deletion waiting on an answer about the posts using it. `retry` carries
+   * the caller back, so the card and the selection bar share one dialog
+   * instead of growing two behaviours for the same verb.
+   */
   const [inUse, setInUse] = useState<{
-    asset: MediaLibraryAsset;
-    closePreview: boolean;
+    label: string;
     posts: { id: string; title: string; status: string }[];
+    retry: (mode: 'detach' | 'delete-posts') => void;
   } | null>(null);
   const noticeRef = useRef<HTMLDivElement>(null);
   const [notice, setNotice] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
@@ -178,6 +183,21 @@ export function MediaLibrary({
     startTransition(async () => {
       try {
         const result = await mutateAssetsAction(slug, data);
+        if (result.status === 'in-use') {
+          const count = data.getAll('assetId').length;
+          setInUse({
+            label: count === 1 ? assetDisplayName(assets, String(data.get('assetId'))) : `${count} assets`,
+            posts: result.posts,
+            retry: (next) => {
+              const retryData = new FormData();
+              for (const [key, value] of data.entries()) retryData.append(key, value);
+              retryData.set('mode', next);
+              runBulkAction(retryData);
+            },
+          });
+          return;
+        }
+        setInUse(null);
         setNotice({ tone: 'success', message: result.message });
         setSelected([]);
         router.refresh();
@@ -216,7 +236,11 @@ export function MediaLibrary({
       try {
         const result = await deleteMediaAction(slug, asset.id, mode);
         if (result.status === 'in-use') {
-          setInUse({ asset, closePreview, posts: result.posts });
+          setInUse({
+            label: assetDisplayName(assets, asset.id),
+            posts: result.posts,
+            retry: (next) => deleteAsset(asset, closePreview, next),
+          });
           return;
         }
         setInUse(null);
@@ -320,7 +344,7 @@ export function MediaLibrary({
       <Dialog
         open={Boolean(inUse)}
         eyebrow="In use"
-        title={`${inUse ? assetDisplayName(assets, inUse.asset.id) : ''} is attached to ${inUse?.posts.length ?? 0} ${inUse?.posts.length === 1 ? 'post' : 'posts'}`}
+        title={`${inUse?.label ?? ''} is attached to ${inUse?.posts.length ?? 0} ${inUse?.posts.length === 1 ? 'post' : 'posts'}`}
         onClose={() => setInUse(null)}
         actions={
           <>
@@ -329,14 +353,14 @@ export function MediaLibrary({
               type="button"
               variant="secondary"
               disabled={pending}
-              onClick={() => inUse && deleteAsset(inUse.asset, inUse.closePreview, 'detach')}
+              onClick={() => inUse?.retry('detach')}
             >
               Remove it from those posts
             </Button>
             <Button
               type="button"
               disabled={pending}
-              onClick={() => inUse && deleteAsset(inUse.asset, inUse.closePreview, 'delete-posts')}
+              onClick={() => inUse?.retry('delete-posts')}
             >
               Delete those posts too
             </Button>

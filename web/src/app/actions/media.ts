@@ -323,16 +323,54 @@ export async function mutateAssetsAction(slug: string, formData: FormData) {
       await enqueue('process-media', { mediaAssetId: copy.id }, { workspaceId: ctx.workspace.id });
     }
   } else if (operation === 'delete') {
-    const used = await db.postMedia.findFirst({
+    // The same three answers the single-asset delete gives. This path had its
+    // own guard that only threw, so selecting one asset and pressing Delete in
+    // the selection bar refused where the identical action on the card offered
+    // a way forward — two behaviours for one verb.
+    const mode = deleteMode(formData.get('mode'));
+    const attached = await db.postMedia.findMany({
       where: { mediaAssetId: { in: ids }, mediaAsset: { workspaceId: ctx.workspace.id } },
-      select: { mediaAsset: { select: { filename: true } } },
+      select: { postPlatform: { select: { postId: true, post: { select: { title: true, status: true } } } } },
     });
-    if (used) throw new Error('This asset is attached to a post. Remove or replace it there first.');
+
+    const published = attached.filter(({ postPlatform }) =>
+      ['PUBLISHED', 'PUBLISHING'].includes(postPlatform.post.status),
+    );
+    if (published.length > 0) {
+      const titles = [...new Set(published.map(({ postPlatform }) => postPlatform.post.title || 'Untitled post'))];
+      throw new Error(
+        `${titles.join(', ')} ${titles.length === 1 ? 'has' : 'have'} already been published with this media, so it cannot be deleted. It is the record of what went out.`,
+      );
+    }
+
+    if (attached.length > 0) {
+      if (mode === 'refuse') {
+        return {
+          status: 'in-use' as const,
+          posts: [...new Map(attached.map(({ postPlatform }) => [
+            postPlatform.postId,
+            {
+              id: postPlatform.postId,
+              title: postPlatform.post.title || 'Untitled post',
+              status: postPlatform.post.status as string,
+            },
+          ])).values()],
+        };
+      }
+      if (mode === 'delete-posts') {
+        const postIds = [...new Set(attached.map(({ postPlatform }) => postPlatform.postId))];
+        await db.post.deleteMany({ where: { id: { in: postIds }, workspaceId: ctx.workspace.id } });
+      } else {
+        await db.postMedia.deleteMany({ where: { mediaAssetId: { in: ids } } });
+      }
+    }
+
     await Promise.all(assets.flatMap((asset) => [
       storage().delete(asset.storageKey),
       asset.thumbnailKey ? storage().delete(asset.thumbnailKey) : Promise.resolve(),
     ]));
     await db.mediaAsset.deleteMany({ where: { id: { in: ids }, workspaceId: ctx.workspace.id } });
+    revalidatePath(`/w/${slug}/drafts`);
   } else {
     throw new Error('Unknown media operation.');
   }
@@ -346,7 +384,13 @@ export async function mutateAssetsAction(slug: string, formData: FormData) {
     untag: `Tag removed from ${count} ${noun}.`,
     delete: `${count} ${noun} deleted.`,
   };
-  return { message: messages[operation] };
+  return { status: 'done' as const, message: messages[operation] };
+}
+
+/** Only the three the UI can ask for; anything else is treated as a question. */
+function deleteMode(value: FormDataEntryValue | null): 'refuse' | 'detach' | 'delete-posts' {
+  const mode = String(value ?? '');
+  return mode === 'detach' || mode === 'delete-posts' ? mode : 'refuse';
 }
 
 export async function createDerivativeAction(slug: string, mediaId: string, formData: FormData) {

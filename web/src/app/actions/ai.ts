@@ -172,6 +172,21 @@ export async function deleteGeneratedAssetAction(slug: string, assetId: string) 
     },
   });
   if (!asset) throw invalid('This generated asset is no longer available.');
+
+  // The attachment row cascades when the asset goes, so without this a post
+  // silently loses its media here — the worst of the three behaviours this
+  // verb had, because nothing tells anyone it happened.
+  const attached = await db.postMedia.findMany({
+    where: { mediaAssetId: asset.id },
+    select: { postPlatform: { select: { post: { select: { title: true, status: true } } } } },
+  });
+  if (attached.length > 0) {
+    const titles = [...new Set(attached.map(({ postPlatform }) => postPlatform.post.title || 'Untitled post'))];
+    throw invalid(
+      `This is attached to ${titles.join(', ')}. Delete it from the Media library instead, where you can choose whether to take it out of those posts or delete them too.`,
+    );
+  }
+
   await storage().delete(asset.storageKey);
   await db.$transaction([
     db.aiMediaJob.updateMany({
