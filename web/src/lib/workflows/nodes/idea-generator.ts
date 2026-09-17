@@ -53,7 +53,7 @@ export function buildIdeaInstruction(config: Config, recentTitles: string[] = []
       config.titleGuidance,
     ),
     directed(
-      'caption is the post copy itself, written for a social feed and describing the whole set.',
+      'caption is the post copy itself, written for a social feed.',
       config.captionGuidance,
     ),
     directed(
@@ -71,11 +71,13 @@ export function buildIdeaInstruction(config: Config, recentTitles: string[] = []
 /**
  * Turns a theme into N detailed prompts.
  *
- * The instruction below is the one piece of the original Python pipeline worth
- * keeping (main.py:161-178): it bans vague adjectives and demands a concrete
- * foreground/midground/background, a camera angle and a light source. Prompts
- * written that way produce a set of images that look like one shoot rather than
- * eight unrelated renders, which is what makes the finished video hold together.
+ * INSTRUCTION below is what makes a set of images read as one shoot rather than
+ * eight unrelated renders: it fixes the depth structure and the finish, and
+ * leaves the subject, mood and materials to the theme. Deliberately written as
+ * direction rather than a checklist of required nouns — naming the hierarchy
+ * and the look, then explicitly allowing creative interpretation, gives a set
+ * that varies without drifting. It names no subject matter of its own, so a
+ * theme pool can range from interiors to landscapes without fighting it.
  */
 export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>> {
   const config = ctx.config as Config;
@@ -220,13 +222,10 @@ function coveredTitles(history: Array<{ theme: string; titles: string[] }>, them
 
 const INSTRUCTION: Record<Config['mode'], string> = {
   image: [
-    'You are writing prompts for an image generator.',
-    'Every prompt must name a concrete foreground, midground and background, a camera angle, a lens, and where the light comes from.',
-    'Never use vague adjectives — "beautiful", "stunning", "amazing" carry no information and waste the prompt.',
-    'Describe what is physically in the frame, in 120 to 150 words.',
-    'Assume a vertical 9:16 frame: keep the subject centred with headroom, because the sides get cropped.',
-    'No text, letters, watermarks or signage in the image.',
-  ].join(' '),
+    'Create a visually compelling scene with a strong sense of depth and atmosphere. Describe the subject of the theme as the main focus, then naturally establish the foreground, surrounding environment, background, and distant views. Include details such as terrain, sky, weather, vegetation, nearby structures, surfaces, reflections, furnishings, and other environmental elements when appropriate to the concept.',
+    'Use the theme to determine the mood, time of day, lighting, colors, materials, and environment. Keep everything realistic and physically believable while allowing creative interpretation. Build a clear visual hierarchy with an interesting foreground, a strong focal point, and a visually rich background. Avoid overly specific constraints that limit creativity.',
+    'The final image should feel like a premium photograph, with natural lighting, realistic textures, believable scale, and subtle imperfections. Vertical 9:16 composition, designed for Instagram Reels. No people, text, logos, or watermarks.',
+  ].join('\n\n'),
   video: [
     'You are writing prompts for a video generator.',
     'Describe one continuous shot: what is in frame, how the camera moves, and how the light behaves.',

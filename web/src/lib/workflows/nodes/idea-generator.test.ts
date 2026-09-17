@@ -33,7 +33,7 @@ describe('buildIdeaInstruction', () => {
     }));
 
     expect(instruction).toContain('not just one image. Follow this direction: Phrase it as a question.');
-    expect(instruction).toContain('describing the whole set. Follow this direction: Two sentences, no emoji.');
+    expect(instruction).toContain('written for a social feed. Follow this direction: Two sentences, no emoji.');
     expect(instruction).toContain('without the # sign. Follow this direction: Three tags at most.');
   });
 
