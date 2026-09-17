@@ -59,13 +59,21 @@ export async function deleteMediaAction(
 
   if (asset.postMedia.length > 0) {
     if (mode === 'refuse') {
-      const affected = [...new Map(asset.postMedia.map(({ postPlatform }) => [
-        postPlatform.post.title || 'Untitled post',
-        postPlatform.post.status,
-      ])).entries()]
-        .map(([title, status]) => `${title} (${status.toLowerCase()})`)
-        .join(', ');
-      throw new Error(`This asset is attached to ${affected}. Remove or replace it in those posts first.`);
+      // Answered, not thrown. The browser's copy of what uses this asset is as
+      // old as its last render — attach it to a draft in another tab and the
+      // page still believes it is unused — so the question of whether anything
+      // is using it is settled here, where the answer is current.
+      return {
+        status: 'in-use' as const,
+        posts: [...new Map(asset.postMedia.map(({ postPlatform }) => [
+          postPlatform.postId,
+          {
+            id: postPlatform.postId,
+            title: postPlatform.post.title || 'Untitled post',
+            status: postPlatform.post.status as string,
+          },
+        ])).values()],
+      };
     }
     if (mode === 'delete-posts') {
       const postIds = [...new Set(asset.postMedia.map(({ postPlatform }) => postPlatform.postId))];
@@ -85,6 +93,7 @@ export async function deleteMediaAction(
   revalidatePath(`/w/${slug}/media`);
   revalidatePath(`/w/${slug}/drafts`);
   return {
+    status: 'deleted' as const,
     message:
       asset.postMedia.length === 0
         ? 'Asset deleted.'

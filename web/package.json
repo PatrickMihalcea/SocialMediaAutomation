@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev --turbo",
-    "build": "prisma generate && next build",
+    "build": "node scripts/migrate-on-build.mjs && prisma generate && next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

@@ -67,7 +67,12 @@ export function MediaLibrary({
   const [preview, setPreview] = useState<MediaLibraryAsset | null>(null);
   const [visibleAssetCount, setVisibleAssetCount] = useState(12);
   /** The asset whose deletion is waiting on an answer about its posts. */
-  const [inUse, setInUse] = useState<{ asset: MediaLibraryAsset; closePreview: boolean } | null>(null);
+  const [inUse, setInUse] = useState<{
+    asset: MediaLibraryAsset;
+    closePreview: boolean;
+    posts: { id: string; title: string; status: string }[];
+  } | null>(null);
+  const noticeRef = useRef<HTMLDivElement>(null);
   const [notice, setNotice] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
   const [managingTags, setManagingTags] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -195,12 +200,10 @@ export function MediaLibrary({
   };
   const runDelete = (asset: MediaLibraryAsset, closePreview = false) => {
     const displayName = assetDisplayName(assets, asset.id);
-    // Attached to something: ask what to do with those posts rather than
-    // refusing and leaving the only route a manual trawl through each one.
-    if (asset.usages.length > 0) {
-      setInUse({ asset, closePreview });
-      return;
-    }
+    // No client-side decision about whether anything is using this. The list
+    // here is as old as the last render, so an asset attached to a draft since
+    // then would skip the warning and be refused by the server with no way
+    // forward. The server answers that question when asked.
     if (!window.confirm(`Delete ${displayName}? This cannot be undone.`)) return;
     deleteAsset(asset, closePreview, 'refuse');
   };
@@ -212,12 +215,17 @@ export function MediaLibrary({
     startTransition(async () => {
       try {
         const result = await deleteMediaAction(slug, asset.id, mode);
+        if (result.status === 'in-use') {
+          setInUse({ asset, closePreview, posts: result.posts });
+          return;
+        }
         setInUse(null);
         if (closePreview) setPreview(null);
         setSelected((value) => value.filter((id) => id !== asset.id));
         setNotice({ tone: 'success', message: result.message });
         router.refresh();
       } catch (error) {
+        setInUse(null);
         setNotice({ tone: 'error', message: errorMessage(error, 'The asset could not be deleted.') });
       }
     });
@@ -303,12 +311,16 @@ export function MediaLibrary({
     });
   };
 
+  useEffect(() => {
+    if (notice) noticeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [notice]);
+
   return (
     <>
       <Dialog
         open={Boolean(inUse)}
         eyebrow="In use"
-        title={`${inUse ? assetDisplayName(assets, inUse.asset.id) : ''} is attached to ${inUse?.asset.usages.length ?? 0} ${inUse?.asset.usages.length === 1 ? 'post' : 'posts'}`}
+        title={`${inUse ? assetDisplayName(assets, inUse.asset.id) : ''} is attached to ${inUse?.posts.length ?? 0} ${inUse?.posts.length === 1 ? 'post' : 'posts'}`}
         onClose={() => setInUse(null)}
         actions={
           <>
@@ -336,13 +348,18 @@ export function MediaLibrary({
           intact, or delete the posts along with it.
         </p>
         <ul className="mt-3 space-y-1">
-          {inUse?.asset.usages.map((usage) => (
-            <li key={`${usage.id}-${usage.platform}`} className="b88-body-sm">
-              {usage.title || 'Untitled post'} · {usage.status.toLowerCase()} · {usage.platform.toLowerCase()}
+          {inUse?.posts.map((post) => (
+            <li key={post.id} className="b88-body-sm">
+              {post.title} · {post.status.toLowerCase()}
             </li>
           ))}
         </ul>
       </Dialog>
+      {/* Scrolled to, because it renders at the top of a page whose actions
+          are all the way down a long grid: clicking Remove on the fortieth
+          card and having the outcome appear off-screen reads as nothing
+          happening, which is how a refusal got mistaken for a dead button. */}
+      <div ref={noticeRef} />
       {notice && <StatusMessage className="mt-6" tone={notice.tone}>{notice.message}</StatusMessage>}
       {stalled && pendingIds.length > 0 && (
         <StatusMessage className="mt-6" tone="error">
