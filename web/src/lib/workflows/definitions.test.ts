@@ -307,3 +307,27 @@ describe('node catalogue', () => {
     expect(trimmer.outputs[0].followsInput).toBe('audio');
   });
 });
+
+describe('configs saved by earlier releases', () => {
+  /**
+   * Narrowing an enum orphans every row that used the value removed, and
+   * parseConfig throws rather than failing politely — so a workflow that ran
+   * yesterday stops opening, stops saving and stops running. IMAGE_GENERATOR
+   * briefly offered 'default'.
+   */
+  it('keeps an image step readable after the deployment option was removed', () => {
+    expect(() => parseConfig('IMAGE_GENERATOR', { provider: 'default' })).not.toThrow();
+    expect(parseConfig('IMAGE_GENERATOR', { provider: 'default' })).toMatchObject({
+      provider: 'image-use',
+    });
+    // A step that was also mocking keeps mocking, rather than silently
+    // switching to something that spends quota.
+    expect(parseConfig('IMAGE_GENERATOR', { provider: 'default', useMockGeneration: true })).toMatchObject({
+      provider: 'mock',
+    });
+  });
+
+  it('leaves a current config untouched', () => {
+    expect(parseConfig('IMAGE_GENERATOR', { provider: 'openai' })).toMatchObject({ provider: 'openai' });
+  });
+});

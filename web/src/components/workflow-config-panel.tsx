@@ -18,6 +18,7 @@ import {
 import {
   PUBLISH_CHANNEL_REQUIRED,
   getDefinition,
+  migrateLegacyConfig,
   nodeUsesChannelPicker,
   parseConfig,
   type WorkflowAudioOption,
@@ -913,7 +914,7 @@ function normalizeNodeConfig(type: string, raw: unknown): Record<string, unknown
   if (type === 'BEAT_SLIDESHOW' || type === 'AUDIO_TRIMMER' || nodeUsesChannelPicker(type)) {
     return parseConfig(type, raw) as Record<string, unknown>;
   }
-  const config = (raw as Record<string, unknown>) ?? {};
+  const config = (migrateLegacyConfig(type, raw) as Record<string, unknown>) ?? {};
   // A step saved before `provider` existed has only the old boolean. Deriving
   // the value here means the panel shows what the step will actually do, rather
   // than an empty dropdown over a step that still mocks.

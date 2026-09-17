@@ -544,11 +544,30 @@ export function findPort(
   return getNodePorts(type, undefined, direction).find((p) => p.id === portId) ?? null;
 }
 
+/**
+ * Values a saved config may still hold from an earlier release.
+ *
+ * A schema is also a migration: every stored config was written by some past
+ * version, and narrowing an enum orphans the rows that used the value you
+ * removed. Those rows do not fail politely — parseConfig throws, so a workflow
+ * that ran yesterday stops opening, stops saving, and stops running.
+ *
+ * IMAGE_GENERATOR briefly offered 'default', meaning "follow the deployment".
+ * The replacement for a step that said that is the source it would have
+ * resolved to.
+ */
+export function migrateLegacyConfig(type: string, raw: unknown): unknown {
+  if (type !== 'IMAGE_GENERATOR' || typeof raw !== 'object' || raw === null) return raw;
+  const config = raw as Record<string, unknown>;
+  if (config.provider !== 'default') return raw;
+  return { ...config, provider: config.useMockGeneration === true ? 'mock' : 'image-use' };
+}
+
 /** Config parsed through the node's schema, with defaults filled in. */
 export function parseConfig(type: string, raw: unknown) {
   const definition = getDefinition(type);
   if (!definition) throw new Error(`Unknown node type "${type}"`);
-  return definition.configSchema.parse(raw ?? {});
+  return definition.configSchema.parse(migrateLegacyConfig(type, raw ?? {}));
 }
 
 /** Ports normally belong to a step type. Idea Generator additionally exposes
