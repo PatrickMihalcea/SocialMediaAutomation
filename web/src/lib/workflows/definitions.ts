@@ -235,9 +235,12 @@ export const NODE_DEFINITIONS = {
        * model decides, which is why these are separate from `theme`: the theme
        * says what the post is about, these say how each piece should read.
        */
-      titleGuidance: z.string().max(500).default(''),
-      captionGuidance: z.string().max(500).default(''),
-      hashtagsGuidance: z.string().max(500).default(''),
+      // 2000, not 500: these hold pasted prompts, and 500 rejected an ordinary
+      // one. Each carries its own message because the generic schema error is
+      // no use when three fields on the panel have the same limit.
+      titleGuidance: z.string().max(2_000, 'How to write the title must be 2,000 characters or fewer.').default(''),
+      captionGuidance: z.string().max(2_000, 'How to write the caption must be 2,000 characters or fewer.').default(''),
+      hashtagsGuidance: z.string().max(2_000, 'How to pick hashtags must be 2,000 characters or fewer.').default(''),
       /** Extra, named text fields created as ports on this particular step. */
       additionalOutputs: z.array(z.object({
         id: z.string().regex(/^[a-z][a-zA-Z0-9]*$/, 'Use letters and numbers, starting with a letter.').max(40),

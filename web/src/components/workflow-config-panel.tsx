@@ -21,6 +21,7 @@ import {
   migrateLegacyConfig,
   nodeUsesChannelPicker,
   parseConfig,
+  zodValidationMessage,
   type WorkflowAudioOption,
   type WorkflowChannelOption,
   type WorkflowMediaAssetOption,
@@ -350,6 +351,17 @@ export function NodeConfigPanel({
   const [error, setError] = useState('');
   /** The settings as they were when the save succeeded, or null before one. */
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+  /**
+   * The settings a save was refused for.
+   *
+   * Autosave fires on any state that is not the last saved one, so a refusal
+   * used to re-arm it immediately: the same settings were resubmitted every
+   * 700ms for as long as the panel was open, and the error message cleared and
+   * reappeared on each pass, which reads as flashing. A refused state is now
+   * retried only after it changes — which is the only thing that could make it
+   * succeed.
+   */
+  const [failedSnapshot, setFailedSnapshot] = useState<string | null>(null);
   /** What was stored when the panel opened, so an untouched panel saves nothing. */
   const [openedSnapshot] = useState(() => snapshotOf(node.name, normalizeNodeConfig(node.type, node.config)));
   const [showHelp, setShowHelp] = useState(false);
@@ -431,12 +443,14 @@ export function NodeConfigPanel({
   useEffect(() => {
     if (!canEdit || pending) return;
     if (savedSnapshot === null ? currentSnapshot === openedSnapshot : currentSnapshot === savedSnapshot) return;
+    // Refused once, refused again until something changes.
+    if (currentSnapshot === failedSnapshot) return;
     const timer = window.setTimeout(() => save(), 700);
     return () => window.clearTimeout(timer);
     // save() closes over the current form state by design; re-running it on a
     // later render is exactly what picks up an edit made mid-flight.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSnapshot, canEdit, pending, savedSnapshot, openedSnapshot]);
+  }, [currentSnapshot, canEdit, pending, savedSnapshot, openedSnapshot, failedSnapshot]);
 
   if (!definition) {
     return (
@@ -488,7 +502,28 @@ export function NodeConfigPanel({
       : [];
     if (node.type === 'PUBLISH' && channelIds.length === 0) {
       setError(PUBLISH_CHANNEL_REQUIRED);
+      setFailedSnapshot(snapshot);
       return;
+    }
+
+    /**
+     * The same schema the server enforces, run here first.
+     *
+     * Not belt and braces: a server action that throws is redacted to "an error
+     * occurred in the Server Components render" in a production build, so a
+     * setting that is merely too long arrived as an unreadable digest message.
+     * The schema module is deliberately free of server imports, so the real
+     * message — "…must be 500 characters or fewer" — is available right here.
+     */
+    try {
+      parseConfig(node.type, payload);
+    } catch (cause) {
+      if (cause instanceof z.ZodError) {
+        setError(zodValidationMessage(cause).message);
+        setFailedSnapshot(snapshot);
+        return;
+      }
+      throw cause;
     }
 
     startTransition(async () => {
@@ -507,6 +542,7 @@ export function NodeConfigPanel({
         setSavedSnapshot(snapshot);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'Those settings could not be saved.');
+        setFailedSnapshot(snapshot);
       }
     });
   }
