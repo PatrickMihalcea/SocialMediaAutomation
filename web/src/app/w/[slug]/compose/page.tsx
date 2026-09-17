@@ -62,6 +62,7 @@ async function ComposeData({
       action={action}
       accounts={data.accounts}
       assets={data.assets}
+      audioTracks={data.audioTracks}
       campaigns={data.campaigns}
       timezone={data.timezone}
       attachAssetId={context.assetId}

@@ -56,7 +56,7 @@ export async function loadComposerContext(
       platform.media.map((item) => item.mediaAssetId)) ?? []),
   ];
   if (requestedAssetId) attachedMediaIds.push(requestedAssetId);
-  const [recentMedia, attachedMedia] = await Promise.all([
+  const [recentMedia, attachedMedia, audioTracks] = await Promise.all([
     db.mediaAsset.findMany({
       where: { workspaceId, status: 'READY' },
       orderBy: { createdAt: 'desc' },
@@ -69,6 +69,15 @@ export async function loadComposerContext(
           select: mediaSelect,
         })
       : Promise.resolve([]),
+    // Separately from the twelve most recent of everything: a soundtrack is
+    // chosen long after it was uploaded, so the track someone wants is rarely
+    // among the last dozen things they added.
+    db.mediaAsset.findMany({
+      where: { workspaceId, status: 'READY', type: 'AUDIO' },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: mediaSelect,
+    }),
   ]);
   const media = [
     ...new Map(
@@ -111,6 +120,16 @@ export async function loadComposerContext(
     })),
   );
 
+  const tracks: ComposerAsset[] = await Promise.all(
+    audioTracks.map(async (asset) => ({
+      id: asset.id,
+      filename: asset.filename,
+      type: asset.type,
+      url: await mediaStorage.signedUrl(asset.storageKey),
+      thumbnailUrl: await mediaStorage.signedUrl(asset.thumbnailKey ?? asset.storageKey),
+    })),
+  );
+
   const initial: ComposerInitial | undefined = post
     ? {
         title: post.title,
@@ -140,6 +159,7 @@ export async function loadComposerContext(
     timezone: workspace.timezone,
     accounts: mergedAccounts,
     assets,
+    audioTracks: tracks,
     campaigns: campaigns as ComposerCampaign[],
     preferences,
     post: post ? { id: post.id, status: post.status } : null,

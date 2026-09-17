@@ -96,6 +96,7 @@ export default async function EditComposePage({
           action={action}
           accounts={data.accounts}
           assets={data.assets}
+      audioTracks={data.audioTracks}
           campaigns={data.campaigns}
           timezone={data.timezone}
           postId={postId}

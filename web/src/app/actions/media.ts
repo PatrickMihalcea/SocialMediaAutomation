@@ -6,6 +6,8 @@ import { mediaKey, storage } from '@/lib/storage';
 import { db } from '@/lib/db';
 import { enqueue } from '@/lib/queue';
 import { createImageDerivative, createVideoDerivative } from '@/lib/media/process';
+import { queueAudioMux } from '@/lib/media/audio-mux-derivative';
+import { invalid } from '@/lib/errors';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
 import { storeMediaUpload } from '@/lib/media/upload';
 
@@ -293,6 +295,52 @@ export async function mutateAssetsAction(slug: string, formData: FormData) {
     delete: `${count} ${noun} deleted.`,
   };
   return { message: messages[operation] };
+}
+
+/**
+ * Puts a track on an image or a video, as a new asset.
+ *
+ * Worth saying plainly, because the platforms are not: no publishing API has a
+ * "music" field. The track someone picks inside Instagram comes from that app's
+ * licensed library and cannot be set by an API client. What can be published is
+ * a video whose audio *is* the music — so a still with a soundtrack becomes a
+ * video, and that changes what the post is on every platform.
+ *
+ * Returns straight away with an asset that is still rendering: ffmpeg lives on
+ * the worker, and a composer waiting on an encode would be a request nobody
+ * should be holding open.
+ */
+export async function addSoundtrackAction(
+  slug: string,
+  input: { mediaId: string; audioId: string; seconds?: number | null; startSeconds?: number },
+) {
+  const ctx = await requireWorkspace(slug, 'media:update');
+  const [source, audio] = await Promise.all([
+    db.mediaAsset.findFirst({ where: { id: input.mediaId, workspaceId: ctx.workspace.id } }),
+    db.mediaAsset.findFirst({ where: { id: input.audioId, workspaceId: ctx.workspace.id } }),
+  ]);
+  if (!source) throw invalid('That media is unavailable.');
+  if (!audio) throw invalid('That track is unavailable.');
+  if (audio.type !== 'AUDIO') throw invalid('Pick an audio file as the track.');
+  if (source.type !== 'IMAGE' && source.type !== 'VIDEO') {
+    throw invalid('Only an image or a video can carry a soundtrack.');
+  }
+
+  const created = await queueAudioMux({
+    sourceAssetId: source.id,
+    audioAssetId: audio.id,
+    seconds: input.seconds ?? null,
+    startSeconds: input.startSeconds ?? 0,
+    userId: ctx.user.id,
+  });
+  revalidatePath(`/w/${slug}/media`);
+  return {
+    id: created.id,
+    // The caller swaps its attachment to this id now and the render lands on
+    // it; saying so is the difference between "nothing happened" and "wait".
+    filename: `${source.filename} with ${audio.filename}`,
+    wasImage: source.type === 'IMAGE',
+  };
 }
 
 export async function createDerivativeAction(slug: string, mediaId: string, formData: FormData) {

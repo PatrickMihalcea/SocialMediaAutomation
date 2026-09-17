@@ -25,6 +25,8 @@ export interface JobPayloadMap {
   /** Beat-grid analysis for an uploaded audio asset. */
   'analyse-audio': { mediaAssetId: string };
   'ai-media-job': { aiMediaJobId: string };
+  /** Renders a chosen track onto an image or video as its only audio. */
+  'mux-audio': { mediaAssetId: string };
 }
 
 export type JobType = keyof JobPayloadMap;
@@ -47,6 +49,7 @@ export const JOB_QUEUE: Record<JobType, QueueName> = {
   'scan-due-workflows': 'WORKFLOW',
   'analyse-audio': 'MEDIA_PROCESSING',
   'ai-media-job': 'AI_GENERATION',
+  'mux-audio': 'MEDIA_PROCESSING',
 };
 
 export interface EnqueueOptions {
