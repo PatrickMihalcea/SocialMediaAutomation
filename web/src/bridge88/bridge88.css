@@ -120,6 +120,15 @@ select.b88-input,.b88-pill-select,.b88-filter-control{appearance:none;background
 .b88-app{min-height:100vh;padding-left:var(--sidebar-width)}
 .b88-main{padding:var(--space-2xl) var(--gutter-desktop) 80px;max-width:1536px;margin:0 auto}
 .b88-topbar{height:var(--nav-height);border-bottom:1px solid var(--hairline-soft);display:flex;align-items:center;justify-content:space-between;padding:0 var(--gutter-desktop);position:sticky;top:0;background:var(--canvas);z-index:20}
+/* A column that holds its place while the other one scrolls. For side-by-side
+   layouts where one pane is a reference for the work happening in the other —
+   the composer's previews against its settings — so checking the result does
+   not mean scrolling the thing you are editing out of view. Only above the
+   breakpoint where the two are actually side by side; stacked, it is one
+   column and sticking would strand it. */
+@media(min-width:1280px){
+  .b88-sticky-pane{position:sticky;top:calc(var(--nav-height) + var(--space-lg));max-height:calc(100vh - var(--nav-height) - var(--space-xl));overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+}
 .b88-table{width:100%;border-collapse:collapse}
 .b88-table th,.b88-table td{text-align:left;padding:var(--space-sm) var(--space-md);border-bottom:1px solid var(--hairline-soft)}
 .b88-table th:first-child,.b88-table td:first-child{padding-left:0}

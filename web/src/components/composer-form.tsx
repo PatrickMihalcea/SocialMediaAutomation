@@ -859,7 +859,7 @@ export function ComposerForm({
           className="hidden"
         />
       )}
-      <aside ref={previewRef} className="space-y-6 self-start">
+      <aside ref={previewRef} className="b88-sticky-pane space-y-6 self-start">
         {previewAccounts.map((account) => (
           <ComposerPreview
             key={account.id}
