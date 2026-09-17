@@ -1,4 +1,6 @@
 import 'server-only';
+import { WorkflowNodeRunStatus } from '@prisma/client';
+import { db } from '@/lib/db';
 import { generateObject } from '@/lib/ai';
 import { buildSystemPrompt } from '@/lib/ai/brand-voice';
 import { imagePromptsSchema } from '@/lib/ai/schemas';
@@ -7,7 +9,9 @@ import type { NodeRunContext } from '@/lib/workflows/node-context';
 
 interface Config {
   mode: 'image' | 'text' | 'video';
+  themeMode: 'fixed' | 'random';
   theme: string;
+  themePool: string[];
   count: number;
   styleSuffix: string;
   titleGuidance: string;
@@ -34,10 +38,16 @@ const directed = (base: string, guidance: string) => {
  * the guidance settings, and it is otherwise only observable by mocking the
  * model.
  */
-export function buildIdeaInstruction(config: Config): string {
+export function buildIdeaInstruction(config: Config, recentTitles: string[] = []): string {
   return [
     'Reply as {"postTitle":string,"caption":string,"hashtags":string[],"additionalOutputs":Record<string,string>,"prompts":[{"title":string,"prompt":string}]}.',
     `Produce exactly ${config.count} entries.`,
+    // The model has no memory between runs, so a step left on the same theme
+    // writes near enough the same set every week. Naming what it already
+    // covered is the cheapest way to keep a feed from repeating itself.
+    ...(recentTitles.length
+      ? [`This step has already covered these angles, so take a different one for every entry: ${recentTitles.join('; ')}.`]
+      : []),
     directed(
       'postTitle is a concise, compelling title for the finished social post. It must describe the whole set, not just one image.',
       config.titleGuidance,
@@ -69,13 +79,19 @@ export function buildIdeaInstruction(config: Config): string {
  */
 export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>> {
   const config = ctx.config as Config;
-  const theme = String(ctx.inputs.theme ?? config.theme ?? '').trim();
+  const history = await recentRuns(ctx);
+  const theme = resolveTheme(config, ctx.inputs.theme, history.map((entry) => entry.theme));
   if (theme.length < 3) {
-    throw new PermanentJobError('Give this step a theme to work from, or connect one to its input.');
+    throw new PermanentJobError(
+      config.themeMode === 'random'
+        ? 'This step draws its theme at random but its theme pool is empty. Add some themes to it.'
+        : 'Give this step a theme to work from, or connect one to its input.',
+    );
   }
   if (!ctx.userId) {
     throw new PermanentJobError('This workflow has no owner to bill AI usage to. Open it and save it again.');
   }
+  const recentTitles = coveredTitles(history, theme);
 
   const system = await buildSystemPrompt({
     workspaceId: ctx.workspaceId,
@@ -95,7 +111,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
         role: 'user',
         content: `Write ${config.count} ${config.mode} prompts about: ${theme}`,
       },
-      { role: 'system', content: buildIdeaInstruction(config) },
+      { role: 'system', content: buildIdeaInstruction(config, recentTitles) },
     ],
   });
 
@@ -109,6 +125,10 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     object.additionalOutputs?.[field.id]?.trim() || object.postTitle.trim(),
   ]));
   return {
+    // Emitted as well as used: a random theme that only lived inside this run
+    // could not be shown on the video, written into the caption, or read back
+    // by the next run deciding what not to repeat.
+    theme,
     postTitle: object.postTitle.trim(),
     caption: (object.caption ?? '').trim(),
     // One space-separated string rather than a list, because that is what the
@@ -123,6 +143,77 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     // Titles ride along so a downstream overlay can label each clip by name.
     titles: object.prompts.slice(0, config.count).map((p) => p.title),
   };
+}
+
+/**
+ * The theme this run works from.
+ *
+ * Three sources, most specific first: a connected input beats everything, a
+ * random draw comes next, and the typed theme is the fallback. The draw skips
+ * whatever this step used most recently, so a pool cycles instead of landing
+ * on the same topic two runs running.
+ */
+export function resolveTheme(
+  config: Pick<Config, 'themeMode' | 'theme' | 'themePool'>,
+  connected: unknown,
+  recentThemes: string[],
+  random: () => number = Math.random,
+): string {
+  const wired = String(connected ?? '').trim();
+  if (wired) return wired;
+  if (config.themeMode !== 'random') return String(config.theme ?? '').trim();
+
+  const pool = [...new Set((config.themePool ?? []).map((entry) => entry.trim()).filter(Boolean))];
+  if (pool.length === 0) return '';
+  if (pool.length === 1) return pool[0];
+
+  // Never exclude the whole pool: with four themes and a long history, an
+  // unbounded exclusion list would leave nothing to draw and the step would
+  // fall back to the same arbitrary first entry every time.
+  const avoid = new Set(recentThemes.slice(0, Math.min(pool.length - 1, 12)));
+  const candidates = pool.filter((entry) => !avoid.has(entry));
+  const choices = candidates.length ? candidates : pool;
+  return choices[Math.min(choices.length - 1, Math.floor(random() * choices.length))];
+}
+
+/** Themes and titles this step produced before, newest first. */
+async function recentRuns(ctx: NodeRunContext): Promise<Array<{ theme: string; titles: string[] }>> {
+  const runs = await db.workflowNodeRun.findMany({
+    where: {
+      nodeId: ctx.nodeId,
+      workspaceId: ctx.workspaceId,
+      status: WorkflowNodeRunStatus.SUCCEEDED,
+      id: { not: ctx.nodeRunId },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 12,
+    select: { output: true },
+  });
+  return runs.map((run) => {
+    const output = (run.output ?? {}) as { theme?: unknown; titles?: unknown; postTitle?: unknown };
+    return {
+      theme: typeof output.theme === 'string' ? output.theme.trim() : '',
+      titles: [
+        ...(Array.isArray(output.titles) ? output.titles : []),
+        output.postTitle,
+      ].filter((title): title is string => typeof title === 'string' && title.trim() !== ''),
+    };
+  });
+}
+
+/**
+ * What to tell the model it has already made — only for the theme in hand,
+ * because titles written for a different topic say nothing about this one.
+ */
+function coveredTitles(history: Array<{ theme: string; titles: string[] }>, theme: string): string[] {
+  return [
+    ...new Set(
+      history
+        .filter((entry) => !entry.theme || entry.theme === theme)
+        .flatMap((entry) => entry.titles)
+        .map((title) => title.trim()),
+    ),
+  ].slice(0, 40);
 }
 
 const INSTRUCTION: Record<Config['mode'], string> = {

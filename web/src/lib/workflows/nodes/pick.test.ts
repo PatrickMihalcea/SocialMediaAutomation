@@ -8,6 +8,7 @@ function context(config: Record<string, unknown>, inputs: Record<string, unknown
     workspaceId: 'workspace-1',
     runId: 'run-1',
     nodeRunId: 'node-run-1',
+    nodeId: 'node-1',
     nodeName: 'Select items',
     workflowName: 'Workflow',
     userId: null,

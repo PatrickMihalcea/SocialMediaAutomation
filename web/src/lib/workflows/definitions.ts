@@ -195,11 +195,30 @@ export const NODE_DEFINITIONS = {
         type: text(),
         description: 'Tags for the finished post, written from the same theme.',
       },
+      {
+        id: 'theme',
+        label: 'Theme used',
+        type: text(),
+        description: 'The theme this run actually worked from, which is worth connecting when the theme is drawn at random.',
+      },
     ],
     configSchema: z.object({
       /** What the prompts are written to produce — the wording differs a lot. */
       mode: z.enum(['image', 'text', 'video']).default('image'),
+      /**
+       * Where the theme comes from. Random draws one line out of the pool below
+       * at the start of every run, so a page whose subject should keep moving
+       * does not need a new workflow per topic. A connected Theme input still
+       * wins over both, because a wired value is always the more specific one.
+       */
+      themeMode: z.enum(['fixed', 'random']).default('fixed'),
       theme: z.string().max(2000).default(''),
+      /**
+       * Candidate themes for random mode, one per line in the panel. The run
+       * avoids whatever this step used recently, so a pool of twenty topics
+       * cycles rather than landing on the same one twice in a week.
+       */
+      themePool: z.array(z.string().trim().min(1).max(300)).max(60).default([]),
       count: z.number().int().min(1).max(20).default(8),
       /** Appended to every prompt; the old pipeline hardcoded a 4k-realism suffix. */
       styleSuffix: z.string().max(500).default(''),
@@ -629,6 +648,9 @@ export type WorkflowMediaCounts = {
 
 export const PUBLISH_CHANNEL_REQUIRED = 'Choose at least one channel.';
 
+export const THEME_POOL_REQUIRED =
+  'Add at least one theme to the pool, or set this step back to one fixed theme.';
+
 export function nodeUsesChannelPicker(type: string): boolean {
   return type === 'PUBLISH' || type === 'CREATE_DRAFT';
 }
@@ -669,11 +691,23 @@ export function nodeSaveConfigIssue(
   raw: unknown,
 ): { message: string; fields: Record<string, string[]> } | null {
   try {
-    const config = parseConfig(type, raw) as { socialAccountIds?: string[] };
+    const config = parseConfig(type, raw) as {
+      socialAccountIds?: string[];
+      themeMode?: string;
+      themePool?: string[];
+    };
     if (publishRequiresChannels(type, config)) {
       return {
         message: PUBLISH_CHANNEL_REQUIRED,
         fields: { socialAccountIds: [PUBLISH_CHANNEL_REQUIRED] },
+      };
+    }
+    // Caught here rather than at run time: a random theme with nothing to draw
+    // from would fail the run an hour later, on a schedule, with nobody watching.
+    if (type === 'IDEA_GENERATOR' && config.themeMode === 'random' && !config.themePool?.length) {
+      return {
+        message: THEME_POOL_REQUIRED,
+        fields: { themePool: [THEME_POOL_REQUIRED] },
       };
     }
     return null;

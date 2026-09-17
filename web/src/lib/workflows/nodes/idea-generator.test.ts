@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
+const dbMock = vi.hoisted(() => ({ workflowNodeRun: { findMany: vi.fn() } }));
+
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/ai', () => ({ generateObject: vi.fn() }));
 vi.mock('@/lib/ai/brand-voice', () => ({ buildSystemPrompt: vi.fn() }));
 
-import { buildIdeaInstruction } from '@/lib/workflows/nodes/idea-generator';
+import { buildIdeaInstruction, resolveTheme } from '@/lib/workflows/nodes/idea-generator';
 import { parseConfig } from '@/lib/workflows/definitions';
 
 const config = (overrides: Record<string, unknown> = {}) =>
@@ -49,5 +52,68 @@ describe('buildIdeaInstruction', () => {
       additionalOutputs: [{ id: 'hook', label: 'Opening hook' }],
     }));
     expect(instruction).toContain('hook (Opening hook)');
+  });
+});
+
+describe('resolveTheme', () => {
+  const pool = ['Interior design', 'Luxury homes', 'Brutalist landmarks', 'Cliffside houses'];
+  const random = (value: number) => () => value;
+
+  it('prefers a connected theme over both settings', () => {
+    expect(resolveTheme(
+      { themeMode: 'random', theme: 'typed', themePool: pool },
+      '  wired theme  ',
+      [],
+      random(0),
+    )).toBe('wired theme');
+  });
+
+  it('uses the typed theme when the step is not drawing at random', () => {
+    expect(resolveTheme({ themeMode: 'fixed', theme: 'coastal rooms', themePool: pool }, null, []))
+      .toBe('coastal rooms');
+  });
+
+  it('draws from the pool, skipping what this step used recently', () => {
+    const chosen = resolveTheme(
+      { themeMode: 'random', theme: '', themePool: pool },
+      null,
+      ['Interior design', 'Luxury homes'],
+      random(0),
+    );
+    expect(chosen).toBe('Brutalist landmarks');
+  });
+
+  it('draws from the whole pool again once every theme has been used', () => {
+    const chosen = resolveTheme(
+      { themeMode: 'random', theme: '', themePool: pool },
+      null,
+      [...pool].reverse(),
+      random(0.99),
+    );
+    expect(pool).toContain(chosen);
+  });
+
+  it('is empty when random mode has nothing to draw from, so the run says so', () => {
+    expect(resolveTheme({ themeMode: 'random', theme: 'ignored', themePool: [] }, null, [])).toBe('');
+  });
+
+  it('ignores blank and duplicated pool entries', () => {
+    expect(resolveTheme(
+      { themeMode: 'random', theme: '', themePool: ['  Luxury homes  ', 'Luxury homes', '   '] },
+      null,
+      [],
+      random(0.9),
+    )).toBe('Luxury homes');
+  });
+});
+
+describe('buildIdeaInstruction recent work', () => {
+  it('names what the step already covered so the next run does not repeat it', () => {
+    const instruction = buildIdeaInstruction(config(), ['Oak kitchen', 'Sunken lounge']);
+    expect(instruction).toContain('Oak kitchen; Sunken lounge');
+  });
+
+  it('says nothing about earlier runs on the first one', () => {
+    expect(buildIdeaInstruction(config())).not.toContain('already covered');
   });
 });

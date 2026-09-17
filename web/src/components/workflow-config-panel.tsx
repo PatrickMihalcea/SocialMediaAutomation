@@ -163,6 +163,51 @@ function PresetField({
   );
 }
 
+/**
+ * A list of short strings, typed one per line.
+ *
+ * The text being edited is held here rather than derived from the saved list:
+ * pressing Enter leaves a blank line, and a control that rebuilt its value from
+ * the filtered list would delete that line out from under the cursor.
+ */
+function LinesField({
+  label,
+  hint,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: string[];
+  disabled: boolean;
+  onChange: (lines: string[]) => void;
+}) {
+  const [text, setText] = useState(() => value.join('\n'));
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  return (
+    <div>
+      <TextArea
+        label={label}
+        hint={hint}
+        rows={6}
+        value={text}
+        disabled={disabled}
+        placeholder={'Interior design\nLuxury homes\nBrutalist landmarks'}
+        onChange={(event) => {
+          setText(event.target.value);
+          onChange(event.target.value.split('\n').map((line) => line.trim()).filter(Boolean));
+        }}
+      />
+      <p className="b88-caption mt-1.5">
+        {lines.length === 0
+          ? 'One per line'
+          : lines.length === 1 ? '1 entry' : `${lines.length} entries`}
+      </p>
+    </div>
+  );
+}
+
 function beatSlideshowSizeValue(config: Record<string, unknown>): string {
   if (typeof config.size === 'string' && isVideoOutputSize(config.size)) return config.size;
   if (typeof config.width === 'number' && typeof config.height === 'number') {
@@ -234,7 +279,7 @@ function ConnectedSetting({
 interface FieldSpec {
   key: string;
   label: string;
-  kind: 'text' | 'number' | 'boolean' | 'enum' | 'namedOutputs';
+  kind: 'text' | 'number' | 'boolean' | 'enum' | 'namedOutputs' | 'lines';
   options?: string[];
   optionLabels?: Record<string, string>;
   description?: string;
@@ -464,6 +509,12 @@ export function NodeConfigPanel({
       if (field.key === 'includeSubfolders') return typeof config.assetId !== 'string';
     }
     if (node.type === 'PICK' && field.key === 'index') return config.mode === 'index';
+    // One theme or a pool, never both on screen: showing the unused one invites
+    // someone to fill in a setting this step will not read.
+    if (node.type === 'IDEA_GENERATOR') {
+      if (field.key === 'theme') return config.themeMode !== 'random';
+      if (field.key === 'themePool') return config.themeMode === 'random';
+    }
     return true;
   });
   /** One settings control, chosen by the field's shape and its node type. */
@@ -708,6 +759,18 @@ export function NodeConfigPanel({
         />
       );
     }
+    if (field.kind === 'lines') {
+      return (
+        <LinesField
+          key={field.key}
+          label={field.label}
+          hint={showHelp ? field.description : undefined}
+          value={Array.isArray(value) ? (value as unknown[]).filter((line): line is string => typeof line === 'string') : []}
+          disabled={!canEdit}
+          onChange={(lines) => setConfig((c) => ({ ...c, [field.key]: lines }))}
+        />
+      );
+    }
     if (field.multiline) {
       return (
         <TextArea
@@ -893,6 +956,12 @@ function describeSchema(schema: z.ZodTypeAny): FieldSpec[] {
     // place among the other settings and reads as a panel bolted to the bottom.
     if (inner instanceof z.ZodArray && key === 'additionalOutputs') {
       return [{ key, label, kind: 'namedOutputs' }];
+    }
+    // A list of plain strings, edited as one per line. Its own control rather
+    // than the named-output editor: these have no id and no label, and a row of
+    // single-line fields would make pasting twenty topics a twenty-click job.
+    if (inner instanceof z.ZodArray && unwrap(inner.element as z.ZodTypeAny) instanceof z.ZodString) {
+      return [{ key, label, kind: 'lines' }];
     }
     return [];
   });

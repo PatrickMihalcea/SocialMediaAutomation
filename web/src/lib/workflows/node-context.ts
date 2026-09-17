@@ -6,6 +6,8 @@ export interface NodeRunContext {
   workspaceId: string;
   runId: string;
   nodeRunId: string;
+  /** The canvas node, stable across runs — how a step reads its own history. */
+  nodeId: string;
   nodeName: string;
   /** The workflow's name, used to name the media a step produces. */
   workflowName: string;

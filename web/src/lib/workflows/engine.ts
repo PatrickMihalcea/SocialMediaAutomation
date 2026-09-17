@@ -318,6 +318,7 @@ async function buildContext(
     workspaceId: nodeRun.workspaceId,
     runId: nodeRun.runId,
     nodeRunId: nodeRun.id,
+    nodeId: nodeRun.nodeId,
     nodeName: nodeRun.nodeName,
     workflowName: nodeRun.run.workflow.name,
     userId: nodeRun.run.triggeredById,

@@ -6,6 +6,7 @@ const context = (inputs: Record<string, unknown>, sourceOrder = ['media1', 'medi
   workspaceId: 'workspace-1',
   runId: 'run-1',
   nodeRunId: 'node-run-1',
+  nodeId: 'node-1',
   nodeName: 'Combine',
   workflowName: 'Workflow',
   userId: null,

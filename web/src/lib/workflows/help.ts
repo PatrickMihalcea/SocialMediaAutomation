@@ -93,9 +93,22 @@ export const WORKFLOW_FIELD_HELP: Partial<
         text: 'Written posts',
       },
     },
+    themeMode: {
+      label: 'Where the theme comes from',
+      description: 'One fixed subject every run, or one drawn at random from a pool. A connected Theme input overrides both.',
+      optionLabels: {
+        fixed: 'One fixed theme',
+        random: 'Random from a pool',
+      },
+    },
     theme: {
       label: 'Theme',
       description: 'The subject every idea varies. Connecting the Theme input overrides whatever is typed here.',
+      multiline: true,
+    },
+    themePool: {
+      label: 'Theme pool',
+      description: 'One theme per line. Each run draws one of them, skipping the ones this step used most recently, so a page keeps moving through its subjects instead of repeating one.',
       multiline: true,
     },
     count: {
@@ -369,6 +382,11 @@ export const WORKFLOW_RECIPES = [
     name: 'Weekly reel',
     outcome: 'Theme → generated scenes → beat-cut vertical video → reviewable draft',
     steps: ['Idea generator', 'Image generator', 'Media library', 'Select a track', 'Beat slideshow', 'Text overlay', 'Create draft'],
+  },
+  {
+    name: 'Rotating subject reel',
+    outcome: 'A pool of subjects → one drawn per run → beat-cut vertical video → reviewable draft',
+    steps: ['Idea generator on Random from a pool', 'Image generator', 'Media library', 'Select a track', 'Beat slideshow', 'Text overlay', 'Create draft'],
   },
   {
     name: 'Numbered image countdown',
