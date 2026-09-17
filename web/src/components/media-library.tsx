@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { uploadMedia } from '@/lib/media/upload-client';
 import {
-  Check, Copy, Download, Eye, Folder, MoreHorizontal, Move, Pencil, Plus,
+  Check, ChevronRight, Copy, Download, Eye, Folder, MoreHorizontal, Move, Pencil, Plus,
   Tags, Trash2, X,
 } from 'lucide-react';
 import { Badge, Button, Dialog, EmptyState, Field, humanizeMachineValue, IconButton, MediaFrame, MediaUploader, Select, StatusMessage, VideoPlayer } from '@/bridge88/components';
@@ -46,7 +46,7 @@ export interface MediaLibraryAsset {
 /** Roughly nine minutes of watching before the library stops asking. */
 const MAX_STATUS_POLLS = 100;
 
-interface FolderItem { id: string; parentId: string | null; name: string; label: string }
+interface FolderItem { id: string; parentId: string | null; name: string; label: string; assetCount?: number }
 interface TagItem { id: string; name: string; assetCount: number }
 
 export function MediaLibrary({
@@ -77,6 +77,16 @@ export function MediaLibrary({
     posts: { id: string; title: string; status: string }[];
     retry: (mode: 'detach' | 'delete-posts') => void;
   } | null>(null);
+  /**
+   * Folder tree state. Everything that was a nested <details> stack — create,
+   * rename, move, delete, each its own form — is one row with an inline input
+   * now, so the common case (make a folder here) is a click and a word.
+   */
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
+    () => new Set(folders.filter((folder) => folder.parentId).map((folder) => folder.parentId!)),
+  );
+  const [creatingIn, setCreatingIn] = useState<string | 'root' | null>(null);
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   const noticeRef = useRef<HTMLDivElement>(null);
   const [notice, setNotice] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
   const [managingTags, setManagingTags] = useState(false);
@@ -254,6 +264,54 @@ export function MediaLibrary({
       }
     });
   };
+  const submitFolderCreate = (name: string, parentId: string | null) => {
+    if (!name.trim()) return setCreatingIn(null);
+    startTransition(async () => {
+      try {
+        const data = new FormData();
+        data.set('name', name.trim());
+        if (parentId) data.set('parentId', parentId);
+        await createFolderAction(slug, data);
+        // Opened, so the folder just made is visible rather than hidden inside
+        // a collapsed parent.
+        if (parentId) setExpandedFolders((current) => new Set(current).add(parentId));
+        setCreatingIn(null);
+        router.refresh();
+      } catch (error) {
+        setNotice({ tone: 'error', message: errorMessage(error, 'The folder could not be created.') });
+      }
+    });
+  };
+  const submitFolderRename = (folderId: string, name: string, parentId: string | null) => {
+    if (!name.trim()) return setRenamingFolder(null);
+    startTransition(async () => {
+      try {
+        const data = new FormData();
+        data.set('name', name.trim());
+        if (parentId) data.set('parentId', parentId);
+        await updateFolderAction(slug, folderId, data);
+        setRenamingFolder(null);
+        router.refresh();
+      } catch (error) {
+        setNotice({ tone: 'error', message: errorMessage(error, 'The folder could not be renamed.') });
+      }
+    });
+  };
+  const runDeleteFolder = (folder: FolderItem) => {
+    const children = folders.filter((item) => item.parentId === folder.id).length;
+    const warning = children
+      ? ` Its ${children} ${children === 1 ? 'subfolder goes' : 'subfolders go'} with it.`
+      : '';
+    if (!window.confirm(`Delete ${folder.name}?${warning} Assets stay in the library.`)) return;
+    startTransition(async () => {
+      try {
+        await deleteFolderAction(slug, folder.id);
+        router.refresh();
+      } catch (error) {
+        setNotice({ tone: 'error', message: errorMessage(error, 'The folder could not be deleted.') });
+      }
+    });
+  };
   const runDetails = (assetId: string, data: FormData) => {
     startTransition(async () => {
       try {
@@ -395,51 +453,51 @@ export function MediaLibrary({
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[240px_minmax(0,1fr)]">
         <aside className="space-y-6">
           <section className="b88-card p-4">
-            <p className="b88-caption">Folders</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="b88-caption">Folders</p>
+              {canEdit && (
+                <IconButton icon={Plus} label="New folder" onClick={() => setCreatingIn('root')} />
+              )}
+            </div>
             <nav className="mt-3 space-y-1">
               <FolderLink href={hrefWith({ folder: null })} active={!currentFolder} onNavigate={navigate}>
                 <Folder size={16} className="shrink-0" /> All media
               </FolderLink>
-              {folders.map((folder) => (
-                <FolderLink
-                  key={folder.id}
-                  href={hrefWith({ folder: currentFolder === folder.id ? null : folder.id })}
-                  active={currentFolder === folder.id}
-                  onNavigate={navigate}
-                >
-                  <span className="truncate">{folder.label}</span>
-                </FolderLink>
-              ))}
+              <FolderTree
+                folders={folders}
+                parentId={null}
+                depth={0}
+                currentFolder={currentFolder}
+                canEdit={canEdit}
+                pending={pending}
+                expanded={expandedFolders}
+                onToggle={(id) =>
+                  setExpandedFolders((current) => {
+                    const next = new Set(current);
+                    if (next.has(id)) next.delete(id);
+                    else next.add(id);
+                    return next;
+                  })
+                }
+                creatingIn={creatingIn}
+                onCreateIn={setCreatingIn}
+                renaming={renamingFolder}
+                onRename={setRenamingFolder}
+                onSubmitCreate={submitFolderCreate}
+                onSubmitRename={submitFolderRename}
+                onDelete={runDeleteFolder}
+                hrefWith={hrefWith}
+                onNavigate={navigate}
+              />
+              {creatingIn === 'root' && (
+                <FolderNameInput
+                  placeholder="New folder"
+                  depth={0}
+                  onCancel={() => setCreatingIn(null)}
+                  onSubmit={(name) => submitFolderCreate(name, null)}
+                />
+              )}
             </nav>
-            {canEdit && (
-              <details className="mt-4 border-t border-hairline pt-4">
-                <summary className="cursor-pointer text-sm font-[480]">Manage folders</summary>
-                <form action={createFolderAction.bind(null, slug)} className="mt-3 space-y-2">
-                  <input name="name" className="b88-input" placeholder="Folder name" required />
-                  <FolderSelect folders={folders} name="parentId" label="Root folder" />
-                  <Button type="submit" variant="secondary" fullWidth>Create folder</Button>
-                </form>
-                {folders.map((folder) => (
-                  <details key={folder.id} className="mt-3">
-                    <summary className="cursor-pointer truncate text-sm">{folder.label}</summary>
-                    <form action={updateFolderAction.bind(null, slug, folder.id)} className="mt-2 space-y-2">
-                      <input name="name" className="b88-input" defaultValue={folder.name} required />
-                      <FolderSelect folders={folders.filter((item) => item.id !== folder.id)} name="parentId" label="Root folder" defaultValue={folder.parentId ?? ''} />
-                      <Button type="submit" variant="secondary" fullWidth>Save</Button>
-                    </form>
-                    <form
-                      action={deleteFolderAction.bind(null, slug, folder.id)}
-                      className="mt-1"
-                      onSubmit={(event) => {
-                        if (!window.confirm(`Delete ${folder.label}? Assets will be retained in the library.`)) event.preventDefault();
-                      }}
-                    >
-                      <Button type="submit" variant="tertiary" fullWidth>Delete folder</Button>
-                    </form>
-                  </details>
-                ))}
-              </details>
-            )}
           </section>
 
           {/* Tags are a filter first. They used to render as inert badges with the
@@ -1072,22 +1130,237 @@ function TagEditRow({ tag, pending, onRename, onDelete }: {
 
 // A real Link so hover prefetches, but the click is intercepted to run the
 // navigation inside a transition and keep the surrounding page mounted.
+/**
+ * The folder list as the shape it actually is.
+ *
+ * It was flat, with each row labelled "Parent / Child / Grandchild" and every
+ * management action buried in a stack of nested disclosures — a create form, a
+ * rename form and a delete form per folder, all expanded from one summary. You
+ * could not see the structure and could not act on it without unfolding two
+ * levels of chrome first.
+ *
+ * Now the structure is the indentation, and each row carries its own actions:
+ * add a folder inside this one, rename it, delete it. Rows with no children
+ * keep an empty slot where the twisty would be, so names stay on one vertical
+ * line instead of stepping in and out.
+ */
+function FolderTree({
+  folders,
+  parentId,
+  depth,
+  currentFolder,
+  canEdit,
+  pending,
+  expanded,
+  onToggle,
+  creatingIn,
+  onCreateIn,
+  renaming,
+  onRename,
+  onSubmitCreate,
+  onSubmitRename,
+  onDelete,
+  hrefWith,
+  onNavigate,
+}: {
+  folders: FolderItem[];
+  parentId: string | null;
+  depth: number;
+  currentFolder: string | null;
+  canEdit: boolean;
+  pending: boolean;
+  expanded: Set<string>;
+  onToggle: (id: string) => void;
+  creatingIn: string | 'root' | null;
+  onCreateIn: (id: string | 'root' | null) => void;
+  renaming: string | null;
+  onRename: (id: string | null) => void;
+  onSubmitCreate: (name: string, parentId: string | null) => void;
+  onSubmitRename: (id: string, name: string, parentId: string | null) => void;
+  onDelete: (folder: FolderItem) => void;
+  hrefWith: (changes: Record<string, string | null>) => string;
+  onNavigate: (href: string) => void;
+}) {
+  const children = folders.filter((folder) => folder.parentId === parentId);
+  if (!children.length) return null;
+
+  return (
+    <>
+      {children.map((folder) => {
+        const hasChildren = folders.some((item) => item.parentId === folder.id);
+        const isOpen = expanded.has(folder.id);
+        const isActive = currentFolder === folder.id;
+
+        if (renaming === folder.id) {
+          return (
+            <FolderNameInput
+              key={folder.id}
+              depth={depth}
+              defaultValue={folder.name}
+              onCancel={() => onRename(null)}
+              onSubmit={(name) => onSubmitRename(folder.id, name, folder.parentId)}
+            />
+          );
+        }
+
+        return (
+          <div key={folder.id}>
+            <div className="group flex items-center gap-1" style={{ paddingLeft: depth * 14 }}>
+              {hasChildren ? (
+                <button
+                  type="button"
+                  aria-label={isOpen ? `Collapse ${folder.name}` : `Expand ${folder.name}`}
+                  aria-expanded={isOpen}
+                  className="flex size-5 shrink-0 items-center justify-center rounded-sm transition-opacity hover:opacity-70"
+                  onClick={() => onToggle(folder.id)}
+                >
+                  <ChevronRight
+                    size={14}
+                    className="transition-transform"
+                    style={{ transform: isOpen ? 'rotate(90deg)' : undefined }}
+                  />
+                </button>
+              ) : (
+                <span className="size-5 shrink-0" aria-hidden="true" />
+              )}
+
+              <FolderLink
+                href={hrefWith({ folder: isActive ? null : folder.id })}
+                active={isActive}
+                onNavigate={onNavigate}
+                className="min-w-0 flex-1"
+              >
+                <span className="truncate">{folder.name}</span>
+                {folder.assetCount !== undefined && folder.assetCount > 0 && (
+                  <span className="b88-caption ml-auto shrink-0 opacity-70">{folder.assetCount}</span>
+                )}
+              </FolderLink>
+
+              {canEdit && (
+                // Visible on hover, and on focus so the keyboard can reach
+                // them; always visible on the folder you are looking at.
+                <span
+                  className={`flex shrink-0 gap-0.5 transition-opacity focus-within:opacity-100 group-hover:opacity-100 ${isActive ? '' : 'opacity-0'}`}
+                >
+                  <IconButton
+                    icon={Plus}
+                    label={`New folder inside ${folder.name}`}
+                    className="size-8"
+                    disabled={pending}
+                    onClick={() => onCreateIn(folder.id)}
+                  />
+                  <IconButton
+                    icon={Pencil}
+                    label={`Rename ${folder.name}`}
+                    className="size-8"
+                    disabled={pending}
+                    onClick={() => onRename(folder.id)}
+                  />
+                  <IconButton
+                    icon={Trash2}
+                    label={`Delete ${folder.name}`}
+                    className="size-8"
+                    disabled={pending}
+                    onClick={() => onDelete(folder)}
+                  />
+                </span>
+              )}
+            </div>
+
+            {creatingIn === folder.id && (
+              <FolderNameInput
+                placeholder="New folder"
+                depth={depth + 1}
+                onCancel={() => onCreateIn(null)}
+                onSubmit={(name) => onSubmitCreate(name, folder.id)}
+              />
+            )}
+
+            {isOpen && (
+              <FolderTree
+                folders={folders}
+                parentId={folder.id}
+                depth={depth + 1}
+                currentFolder={currentFolder}
+                canEdit={canEdit}
+                pending={pending}
+                expanded={expanded}
+                onToggle={onToggle}
+                creatingIn={creatingIn}
+                onCreateIn={onCreateIn}
+                renaming={renaming}
+                onRename={onRename}
+                onSubmitCreate={onSubmitCreate}
+                onSubmitRename={onSubmitRename}
+                onDelete={onDelete}
+                hrefWith={hrefWith}
+                onNavigate={onNavigate}
+              />
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * Type the name, press Enter. Escape abandons it, and so does clicking away —
+ * an empty input left behind is clutter nobody asked to keep.
+ */
+function FolderNameInput({
+  depth,
+  defaultValue = '',
+  placeholder,
+  onSubmit,
+  onCancel,
+}: {
+  depth: number;
+  defaultValue?: string;
+  placeholder?: string;
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(defaultValue);
+  return (
+    <div style={{ paddingLeft: depth * 14 + 24 }} className="py-1">
+      <input
+        autoFocus
+        className="b88-input"
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={() => (value.trim() && value !== defaultValue ? onSubmit(value) : onCancel())}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            onSubmit(value);
+          }
+          if (event.key === 'Escape') onCancel();
+        }}
+      />
+    </div>
+  );
+}
+
 function FolderLink({
   href,
   active,
   onNavigate,
   children,
+  className = '',
 }: {
   href: string;
   active: boolean;
   onNavigate: (href: string) => void;
   children: ReactNode;
+  className?: string;
 }) {
   return (
     <Link
       href={href}
       aria-current={active ? 'page' : undefined}
-      className={`flex min-h-10 items-center gap-2 rounded-pill px-3 text-sm transition-opacity hover:opacity-80 ${active ? 'bg-primary text-on-primary' : ''}`}
+      className={`flex min-h-10 items-center gap-2 rounded-pill px-3 text-sm transition-opacity hover:opacity-80 ${active ? 'bg-primary text-on-primary' : ''} ${className}`}
       onClick={(event) => {
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
         event.preventDefault();
@@ -1097,10 +1370,6 @@ function FolderLink({
       {children}
     </Link>
   );
-}
-
-function FolderSelect({ folders, name, label, defaultValue }: { folders: FolderItem[]; name: string; label: string; defaultValue?: string }) {
-  return <select className="b88-input" name={name} defaultValue={defaultValue}><option value="">{label}</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.label}</option>)}</select>;
 }
 
 function assetDisplayName(assets: MediaLibraryAsset[], assetId: string) {

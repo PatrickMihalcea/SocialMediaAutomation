@@ -91,7 +91,13 @@ async function MediaData({
         },
       },
     }),
-    db.mediaFolder.findMany({ where: { workspaceId: ctx.workspace.id }, orderBy: { name: 'asc' } }),
+    db.mediaFolder.findMany({
+      where: { workspaceId: ctx.workspace.id },
+      orderBy: { name: 'asc' },
+      // Its own assets, not its descendants': a folder saying 40 while holding
+      // nothing itself would send someone into an empty list.
+      include: { _count: { select: { assets: true } } },
+    }),
     db.mediaTag.findMany({
       where: { workspaceId: ctx.workspace.id },
       orderBy: { name: 'asc' },
@@ -152,6 +158,7 @@ async function MediaData({
   );
   const folderItems = folders.map((folder) => ({
     ...folder,
+    assetCount: folder._count.assets,
     label: folderLabel(folder.id, folders),
   }));
   const tagItems = tags.map((tag) => ({ id: tag.id, name: tag.name, assetCount: tag._count.assets }));
