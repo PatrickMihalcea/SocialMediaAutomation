@@ -719,6 +719,14 @@ model MediaAsset {
   derivationPreset String?     @map("derivation_preset")
   /// Set when the asset came out of AI image generation.
   aiGenerationId   String?     @map("ai_generation_id") @db.Uuid
+  /// Audio only — where this track should start playing by default, in
+  /// seconds, to millisecond resolution.
+  ///
+  /// A song rarely opens on the part worth posting, and the useful part is the
+  /// same every time that track is used. Storing it on the asset means it is
+  /// chosen once rather than re-found in every post and every workflow run.
+  /// PostMedia.audioStart overrides it for one post; this is only the default.
+  audioStart       Float?      @map("audio_start")
   /// Audio only — detected tempo. Null until analysis has run; a track whose
   /// tempo could not be detected keeps null rather than a guessed number.
   bpm              Float?

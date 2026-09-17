@@ -60,6 +60,8 @@ export async function loadComposerContext(
     storageKey: true,
     type: true,
     status: true,
+    /** Audio only, and only read for the soundtrack list; null on everything else. */
+    audioStart: true,
   } as const;
   const attachedMediaIds = [
     ...new Set(post?.platforms.flatMap((platform) =>
@@ -142,6 +144,8 @@ export async function loadComposerContext(
       status: asset.status,
       url: await mediaStorage.signedUrl(asset.storageKey),
       thumbnailUrl: await mediaStorage.signedUrl(asset.thumbnailKey ?? asset.storageKey),
+      // Seeds the start box when this track is attached to a post.
+      audioStart: asset.audioStart,
     })),
   );
 

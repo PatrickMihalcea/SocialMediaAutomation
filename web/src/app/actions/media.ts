@@ -8,6 +8,7 @@ import { enqueue } from '@/lib/queue';
 import { createImageDerivative, createVideoDerivative } from '@/lib/media/process';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
 import { storeMediaUpload } from '@/lib/media/upload';
+import { parseAudioStart } from '@/lib/media/audio-start';
 
 // Callers must read the returned state; upload failures are never thrown.
 export async function uploadMediaAction(slug: string, formData: FormData): Promise<ActionState> {
@@ -108,13 +109,33 @@ export async function updateMediaDetailsAction(slug: string, mediaId: string, fo
   const filename = requiredName(formData.get('filename'), 'filename');
   const altText = nullableString(formData.get('altText'));
   if (altText && altText.length > 1_000) throw new Error('Alt text must be 1,000 characters or fewer.');
+
+  // Read first, for the track length the start point is validated against —
+  // and because only audio carries one at all.
+  const asset = await db.mediaAsset.findFirst({
+    where: { id: mediaId, workspaceId: ctx.workspace.id },
+    select: { type: true, duration: true },
+  });
+  if (!asset) throw new Error('Asset not found.');
+
+  const isAudio = asset.type === 'AUDIO';
+  // The field is absent from the form for everything but audio. Absent means
+  // "not editable here" and must leave the stored value alone, which is why
+  // this is undefined rather than null — Prisma skips an undefined field.
+  const audioStart = isAudio && formData.has('audioStart')
+    ? parseAudioStart(formData.get('audioStart'), { duration: asset.duration })
+    : undefined;
+
   const result = await db.mediaAsset.updateMany({
     where: { id: mediaId, workspaceId: ctx.workspace.id },
-    data: { filename, altText },
+    data: { filename, altText, ...(audioStart === undefined ? {} : { audioStart }) },
   });
   if (!result.count) throw new Error('Asset not found.');
   revalidatePath(`/w/${slug}/media`);
-  return { message: 'Asset details saved.', filename, altText };
+  // The composer reads this asset's default when a track is attached, so a
+  // change here has to reach a composer that is already open.
+  if (isAudio) revalidatePath(`/w/${slug}/compose`);
+  return { message: 'Asset details saved.', filename, altText, audioStart };
 }
 
 export async function retryMediaAction(slug: string, mediaId: string) {

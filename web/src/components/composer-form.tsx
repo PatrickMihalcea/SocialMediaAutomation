@@ -1187,7 +1187,17 @@ function SoundtrackRow({
           }
           onChange={(event) => {
             onStop();
-            onChange({ audioAssetId: event.target.value });
+            const nextId = event.target.value;
+            // Picking a track seeds the start box from the default stored on
+            // that track, so the point someone already found once does not have
+            // to be found again for every post. Typing over it is the override,
+            // and clearing the track clears the seeded number with it —
+            // otherwise the next track inherits the previous one's offset.
+            const seeded = tracks.find((entry) => entry.id === nextId)?.audioStart;
+            onChange({
+              audioAssetId: nextId,
+              audioStart: nextId && seeded != null ? String(seeded) : '',
+            });
           }}
         >
           <option value="">No music</option>

@@ -19,6 +19,7 @@ import {
 } from '@/app/actions/media';
 import { MediaTagPicker } from '@/components/media-tag-picker';
 import { MEDIA_KIND_LABELS, MEDIA_STATUS_LABELS, MEDIA_TYPE_LABELS } from '@/lib/media/labels';
+import { formatSeconds } from '@/lib/media/audio-start';
 
 export interface MediaLibraryAsset {
   id: string;
@@ -30,6 +31,8 @@ export interface MediaLibraryAsset {
   width: number | null;
   height: number | null;
   duration: number | null;
+  /** Audio only — the stored default start point, seconds. Null when unset. */
+  audioStart: number | null;
   usageCount: number;
   folderId: string | null;
   altText: string | null;
@@ -1021,6 +1024,25 @@ function PreviewDrawer({ asset, displayName, slug, tags, canEdit, canDelete, pen
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field name="filename" label="Filename" defaultValue={editableAssetFilename(asset.filename, displayName)} required />
                 <Field name="altText" label="Alt text" defaultValue={asset.altText ?? ''} placeholder="Describe the image" />
+                {asset.type === 'AUDIO' && (
+                  <Field
+                    name="audioStart"
+                    label="Start at (seconds)"
+                    type="number"
+                    min="0"
+                    // Milliseconds: the resolution that separates starting on
+                    // the beat from starting just after it.
+                    step="0.001"
+                    max={asset.duration ? String(asset.duration) : undefined}
+                    defaultValue={asset.audioStart != null ? String(asset.audioStart) : ''}
+                    placeholder="0"
+                    hint={
+                      asset.duration
+                        ? `Where this track starts by default, in posts and in workflows. Leave empty to play from the beginning. Track is ${formatSeconds(asset.duration)} long.`
+                        : 'Where this track starts by default, in posts and in workflows. Leave empty to play from the beginning.'
+                    }
+                  />
+                )}
               </div>
               <Button type="submit" variant="secondary" className="mt-3" disabled={pending}><Pencil size={15} /> Save details</Button>
             </form>

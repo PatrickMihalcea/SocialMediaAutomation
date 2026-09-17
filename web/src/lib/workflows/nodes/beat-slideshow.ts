@@ -72,6 +72,12 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     beatsPerClip: config.beatsPerClip,
     fps: config.fps,
     visualLeadMs: config.visualLeadMs,
+    // The start point saved on the track, when it has one. Absent, the plan
+    // finds the drop from onset strength — a good guess, but only a guess, and
+    // a person who has already listened to the track knows better. The plan
+    // snaps it to the nearest downbeat, so a start typed by ear still opens on
+    // bar one rather than part-way through a bar.
+    startSeconds: audio.audioStart,
   });
 
   await ctx.assertNotCancelled();

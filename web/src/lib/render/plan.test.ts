@@ -62,6 +62,30 @@ describe('buildBeatPlan', () => {
     expect(plan.startBeatIndex % 4).toBe(0);
   });
 
+  /**
+   * The contract the saved start point on a track depends on. Drop-finding is a
+   * guess from onset strength; a start somebody chose by ear is not, so the
+   * explicit value has to win even when the automatic rule would have skipped
+   * well past it. Without this, setting a start on a track with a quiet intro
+   * would look like it had been ignored.
+   */
+  it('honours an explicit start over the drop it would otherwise find', () => {
+    const withIntro = grid(120, 64);
+    withIntro.beatStrength = withIntro.beats.map((_, i) => (i < 16 ? 0.05 : 1));
+
+    const plan = buildBeatPlan({
+      grid: withIntro,
+      imageCount: 4,
+      beatsPerClip: 4,
+      fps: 30,
+      // 2.0s is beat 4 at 120bpm — a downbeat inside the quiet intro.
+      startSeconds: 2,
+    });
+
+    expect(plan.startBeatIndex).toBe(4);
+    expect(plan.audioStartSeconds).toBeCloseTo(2, 6);
+  });
+
   it('skips a quiet intro and starts on the drop', () => {
     const withIntro = grid(120, 64);
     // First sixteen beats near-silent, then the track arrives.

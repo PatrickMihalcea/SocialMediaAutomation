@@ -22,6 +22,11 @@ export type ComposerAsset = {
   /** PROCESSING means a render is still filling this in. */
   status?: string;
   thumbnailUrl: string;
+  /**
+   * Audio only — the start point stored on the track, seconds. Used to seed a
+   * post's own start when the track is attached; null when none is set.
+   */
+  audioStart?: number | null;
 };
 
 export type ComposerCampaign = {

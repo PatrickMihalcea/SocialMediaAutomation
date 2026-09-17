@@ -131,6 +131,7 @@ async function MediaData({
       width: asset.width,
       height: asset.height,
       duration: asset.duration,
+      audioStart: asset.audioStart,
       usageCount: asset.usageCount,
       folderId: asset.folderId,
       altText: asset.altText,
