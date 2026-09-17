@@ -688,6 +688,28 @@ export async function cancelRunAction(slug: string, runId: string) {
   revalidatePath(`/w/${slug}/workflows`);
 }
 
+/**
+ * One step's recorded output, for review.
+ *
+ * Fetched on demand rather than carried by the run poll: the poll runs every
+ * couple of seconds for the life of a run, and an idea step's output holds a
+ * full prompt list, so putting it in that payload would repeat kilobytes
+ * nobody is reading. Almost nobody opens this, and the ones who do open it
+ * once.
+ */
+export async function getNodeRunOutputAction(
+  slug: string,
+  nodeRunId: string,
+): Promise<{ nodeName: string; nodeType: string; output: unknown }> {
+  const ctx = await requireWorkspace(slug, 'workflow:view');
+  const nodeRun = await db.workflowNodeRun.findFirst({
+    where: { id: nodeRunId, workspaceId: ctx.workspace.id },
+    select: { nodeName: true, nodeType: true, output: true },
+  });
+  if (!nodeRun) throw new Error('That step is no longer part of this run.');
+  return { nodeName: nodeRun.nodeName, nodeType: nodeRun.nodeType, output: nodeRun.output };
+}
+
 export async function retryNodeAction(slug: string, nodeRunId: string) {
   const ctx = await requireWorkspace(slug, 'workflow:run');
   await retryWorkflowNode(nodeRunId, ctx.workspace.id);

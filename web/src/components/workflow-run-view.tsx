@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import type { WorkflowNodeRunStatus, WorkflowRunStatus } from '@prisma/client';
 import { Badge, Button, humanizeMachineValue, MediaFrame, StatusMessage } from '@/bridge88/components';
-import { cancelRunAction, retryNodeAction } from '@/app/actions/workflows';
+import { cancelRunAction, getNodeRunOutputAction, retryNodeAction } from '@/app/actions/workflows';
+import { WorkflowNodeOutput } from '@/components/workflow-node-output';
 import {
   NODE_STATUS_LABEL,
   NODE_STATUS_TONE,
@@ -77,6 +78,44 @@ export function WorkflowRunView({
   const [error, setError] = useState('');
   const [pending, startTransition] = useTransition();
   const etag = useRef<string | null>(null);
+  /**
+   * Per-step output, fetched the first time it is asked for and then kept.
+   * A finished step's output never changes, so re-opening it costs nothing and
+   * closing it does not discard what was already loaded.
+   */
+  const [outputs, setOutputs] = useState<Record<string, {
+    open: boolean;
+    loading: boolean;
+    value?: unknown;
+    error?: string;
+  }>>({});
+
+  function toggleOutput(nodeRunId: string) {
+    const current = outputs[nodeRunId];
+    if (current?.open) {
+      setOutputs((all) => ({ ...all, [nodeRunId]: { ...current, open: false } }));
+      return;
+    }
+    if (current && 'value' in current) {
+      setOutputs((all) => ({ ...all, [nodeRunId]: { ...current, open: true } }));
+      return;
+    }
+    setOutputs((all) => ({ ...all, [nodeRunId]: { open: true, loading: true } }));
+    void getNodeRunOutputAction(slug, nodeRunId).then(
+      (result) => setOutputs((all) => ({
+        ...all,
+        [nodeRunId]: { open: true, loading: false, value: result.output },
+      })),
+      (cause: unknown) => setOutputs((all) => ({
+        ...all,
+        [nodeRunId]: {
+          open: true,
+          loading: false,
+          error: cause instanceof Error ? cause.message : 'The output could not be loaded.',
+        },
+      })),
+    );
+  }
 
   const active = !isRunTerminal(status.run.status);
   // Corrects for a client clock that disagrees with the server's.
@@ -312,12 +351,37 @@ export function WorkflowRunView({
                       >
                         {node.status === 'FAILED' ? 'Fix this step' : 'Step settings'}
                       </Link>
+                      {/* Only once a step has finished: before that there is
+                          nothing recorded to show. */}
+                      {isNodeTerminal(node.status) && (
+                        <button
+                          type="button"
+                          className="b88-body-sm underline underline-offset-4"
+                          onClick={() => toggleOutput(node.id)}
+                          aria-expanded={Boolean(outputs[node.id]?.open)}
+                        >
+                          {outputs[node.id]?.open
+                            ? 'Hide what it made'
+                            : outputs[node.id]?.loading
+                              ? 'Loading'
+                              : 'See what it made'}
+                        </button>
+                      )}
                       {canRun && isNodeTerminal(node.status) && node.status !== 'SUCCEEDED' && (
                         <Button variant="secondary" onClick={() => retry(node.id)} disabled={pending}>
                           Run this step again
                         </Button>
                       )}
                     </div>
+                    {outputs[node.id]?.open && (
+                      outputs[node.id]?.loading ? (
+                        <p className="b88-caption mt-3">Loading the output</p>
+                      ) : outputs[node.id]?.error ? (
+                        <StatusMessage tone="error">{outputs[node.id]!.error}</StatusMessage>
+                      ) : (
+                        <WorkflowNodeOutput output={outputs[node.id]?.value} />
+                      )
+                    )}
                   </li>
                 );
               })}
