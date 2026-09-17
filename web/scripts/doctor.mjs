@@ -49,6 +49,7 @@ async function main() {
   await checkAppUrl(appUrl, local);
   await checkOpenAi();
   await checkImageUse();
+  await checkWorkerWake();
   await checkRender();
   await checkAudio();
   await checkYouTube(appUrl);
@@ -176,6 +177,36 @@ async function checkImageUse() {
       'If generation starts failing, run `codex login` and update the CODEX_AUTH_JSON secret'));
   }
   add(ok('image-use credential', days === null ? 'Present.' : `Present, refreshed ${days} day(s) ago.`));
+}
+
+/**
+ * Whether queued work starts now or on the next tick.
+ *
+ * The one check here that deliberately makes no live call, against this file's
+ * usual rule. The token is scoped to starting workflow runs and nothing else,
+ * so it cannot read back a workflow to prove itself — and the call that would
+ * prove it is a dispatch, which starts a real worker run and publishes whatever
+ * is due. A preflight must not do that, so this validates shape and stops.
+ *
+ * Missing is not broken: the schedule still catches everything within five
+ * minutes. It is worth saying out loud because the failure is invisible —
+ * wakeRemoteWorker() no-ops in silence, and the only symptom is a studio job
+ * that sits there long enough to look stuck.
+ */
+async function checkWorkerWake() {
+  const token = e('GITHUB_DISPATCH_TOKEN');
+  const repo = e('GITHUB_DISPATCH_REPO');
+
+  if (!token || !repo) {
+    return add(prod('Worker wake-up',
+      'Not configured, so queued work waits for the 5-minute schedule instead of starting at once.',
+      'Set GITHUB_DISPATCH_TOKEN and GITHUB_DISPATCH_REPO on the web deployment — "Making it feel instant" in docs/going-live.md'));
+  }
+  if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) {
+    return add(fail('Worker wake-up', `GITHUB_DISPATCH_REPO is "${repo}", which is not owner/repo.`,
+      'Use the form PatrickMihalcea/SocialMediaAutomation'));
+  }
+  add(ok('Worker wake-up', `${repo} · ${e('GITHUB_DISPATCH_WORKFLOW', 'worker.yml')} on ${e('GITHUB_DISPATCH_REF', 'main')}`));
 }
 
 async function checkRender() {
