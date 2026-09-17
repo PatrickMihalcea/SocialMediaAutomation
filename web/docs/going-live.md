@@ -282,8 +282,16 @@ real work queued, rather than waiting for the next tick.
 
 1. **github.com/settings/personal-access-tokens/new** — a fine-grained token,
    scoped to **only this repository**. Under **Repository permissions**, set
-   **Workflows** to **Read and write**. Nothing else — this token can start a
-   workflow run and nothing more, deliberately the narrowest thing that works.
+   **Actions** to **Read and write**. Nothing else — this token can start a
+   workflow run and read its status, deliberately the narrowest thing that
+   works.
+
+   **Not "Workflows"**, however much it sounds like the right one: that
+   permission governs editing files under `.github/workflows`, and a token with
+   it is refused with `403 Resource not accessible by personal access token`
+   when it tries to start a run. The app's dispatch is fire-and-forget, so the
+   only symptom is queued work sitting there while the Actions tab stays empty.
+   `npm run doctor` probes for exactly this.
    This is a different credential from every `secrets.SOMETHING` in the
    workflow file: those are what GitHub hands to a run it already started,
    this is what lets the app ask GitHub to start one.
@@ -295,7 +303,9 @@ real work queued, rather than waiting for the next tick.
    ```
    `GITHUB_DISPATCH_WORKFLOW` and `GITHUB_DISPATCH_REF` default to `worker.yml`
    and `main`; only set them if either differs.
-3. Restart. Confirm a workflow run and check the repo's **Actions** tab — a new
+3. Redeploy — the values are read at deploy time, so an existing deployment
+   will not pick them up. Then run `npm run doctor`: **Worker wake-up** should
+   be green. Confirm a workflow run and check the repo's **Actions** tab — a new
    run should appear within a few seconds, not up to 5 minutes later.
 
 Leave all four unset and nothing changes: the schedule alone still catches

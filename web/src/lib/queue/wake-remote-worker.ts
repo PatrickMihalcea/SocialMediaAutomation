@@ -69,7 +69,15 @@ export async function wakeRemoteWorker(): Promise<void> {
       },
     );
     if (!response.ok) {
-      console.warn(`[wake-remote-worker] dispatch rejected (${response.status}); the 5-minute schedule will still pick this up`);
+      // 403 here is almost always one specific mistake, and naming it turns a
+      // status code in a log nobody reads into something fixable.
+      const cause =
+        response.status === 403 || response.status === 401
+          ? ' — the token needs Actions: read and write on the repository ("Workflows" is a different permission)'
+          : '';
+      console.warn(
+        `[wake-remote-worker] dispatch rejected (${response.status})${cause}; the schedule will still pick this up`,
+      );
     }
   } catch (error) {
     console.warn('[wake-remote-worker] dispatch failed; the 5-minute schedule will still pick this up', error);

@@ -182,31 +182,67 @@ async function checkImageUse() {
 /**
  * Whether queued work starts now or on the next tick.
  *
- * The one check here that deliberately makes no live call, against this file's
- * usual rule. The token is scoped to starting workflow runs and nothing else,
- * so it cannot read back a workflow to prove itself — and the call that would
- * prove it is a dispatch, which starts a real worker run and publishes whatever
- * is due. A preflight must not do that, so this validates shape and stops.
+ * The permission this needs is easy to get wrong and fails invisibly: the
+ * dispatch endpoint requires the fine-grained token to hold **Actions: read and
+ * write**, while "Workflows: read and write" — the plausible-sounding one —
+ * governs editing workflow files and is refused here with a 403. The app's
+ * dispatch is fire-and-forget, so the only symptom is work that waits for the
+ * schedule while the Actions tab shows nothing.
  *
- * Missing is not broken: the schedule still catches everything within five
- * minutes. It is worth saying out loud because the failure is invisible —
- * wakeRemoteWorker() no-ops in silence, and the only symptom is a studio job
- * that sits there long enough to look stuck.
+ * The probe posts a dispatch for a ref that cannot exist. A token without the
+ * permission is refused (403) before the ref is ever looked up; one that has it
+ * gets 422 for the missing ref. Either way no workflow run starts, so this is
+ * safe in a preflight in a way a real dispatch would not be.
  */
 async function checkWorkerWake() {
   const token = e('GITHUB_DISPATCH_TOKEN');
   const repo = e('GITHUB_DISPATCH_REPO');
+  const workflow = e('GITHUB_DISPATCH_WORKFLOW', 'worker.yml');
 
   if (!token || !repo) {
     return add(prod('Worker wake-up',
-      'Not configured, so queued work waits for the 5-minute schedule instead of starting at once.',
+      'Not configured, so queued work waits for the schedule instead of starting at once.',
       'Set GITHUB_DISPATCH_TOKEN and GITHUB_DISPATCH_REPO on the web deployment — "Making it feel instant" in docs/going-live.md'));
   }
   if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) {
     return add(fail('Worker wake-up', `GITHUB_DISPATCH_REPO is "${repo}", which is not owner/repo.`,
-      'Use the form PatrickMihalcea/SocialMediaAutomation'));
+      'Use the form owner/repository'));
   }
-  add(ok('Worker wake-up', `${repo} · ${e('GITHUB_DISPATCH_WORKFLOW', 'worker.yml')} on ${e('GITHUB_DISPATCH_REF', 'main')}`));
+
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${repo}/actions/workflows/${workflow}/dispatches`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ ref: 'refs/heads/doctor-permission-probe-does-not-exist' }),
+        signal: AbortSignal.timeout(15000),
+      },
+    );
+    if (response.status === 422) {
+      return add(ok('Worker wake-up', `${repo} · ${workflow} — token can start runs`));
+    }
+    if (response.status === 403 || response.status === 401) {
+      return add(fail('Worker wake-up',
+        `GitHub refused the dispatch (${response.status}), so queued work only ever starts on the schedule.`,
+        'The fine-grained token needs Actions: read and write on this repository — "Workflows" is a different permission and is not enough'));
+    }
+    if (response.status === 404) {
+      return add(fail('Worker wake-up', `No workflow ${workflow} in ${repo}, or the token cannot see the repository.`,
+        'Check GITHUB_DISPATCH_REPO and GITHUB_DISPATCH_WORKFLOW'));
+    }
+    // 204 means the probe ref somehow existed and a run has started; harmless,
+    // and it still proves the permission.
+    add(ok('Worker wake-up', `${repo} · ${workflow} (HTTP ${response.status})`));
+  } catch (error) {
+    add(warn('Worker wake-up', `Could not reach GitHub — ${shorten(error)}`,
+      'Re-run when online; the schedule is the backstop either way'));
+  }
 }
 
 async function checkRender() {
