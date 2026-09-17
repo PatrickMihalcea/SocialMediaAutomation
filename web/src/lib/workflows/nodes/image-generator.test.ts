@@ -7,14 +7,14 @@ import { resolveStepProvider, type Config } from '@/lib/workflows/nodes/image-ge
 const config = (overrides: Partial<Config>): Config => ({
   size: '1024x1536',
   maxImages: 8,
-  provider: 'default',
+  provider: 'image-use',
   useMockGeneration: false,
   ...overrides,
 });
 
 describe('image step provider', () => {
-  it('defers to the deployment when nothing is pinned', () => {
-    expect(resolveStepProvider(config({}))).toBeUndefined();
+  it('uses the subscription by default, whatever the deployment is set to', () => {
+    expect(resolveStepProvider(config({}))).toBe('image-use');
   });
 
   it('pins the step to the chosen source', () => {
@@ -31,7 +31,12 @@ describe('image step provider', () => {
     expect(resolveStepProvider(config({ useMockGeneration: true }))).toBe('mock');
   });
 
-  it('lets an explicit choice override the old flag', () => {
-    expect(resolveStepProvider(config({ provider: 'image-use', useMockGeneration: true }))).toBe('image-use');
+  /**
+   * The panel clears useMockGeneration whenever someone picks a source, so a
+   * step carrying both is one nobody has opened since the setting existed —
+   * and its author's intent was "do not spend anything".
+   */
+  it('keeps the old flag winning until someone actually picks a source', () => {
+    expect(resolveStepProvider(config({ provider: 'openai', useMockGeneration: true }))).toBe('mock');
   });
 });

@@ -238,12 +238,13 @@ export const NODE_DEFINITIONS = {
       /** Stops a runaway prompt list from spending the whole month's quota. */
       maxImages: z.number().int().min(1).max(20).default(8),
       /**
-       * Where the pixels come from, per step. They cost differently enough to
-       * be worth choosing: mock is free, the API bills per image, and codex
-       * spends a ChatGPT subscription but is the only one that renders a true
-       * 9:16. 'default' follows AI_IMAGE_PROVIDER.
+       * Where the pixels come from, per step, and the same three everywhere
+       * regardless of what the deployment is configured for: mock is free, the
+       * API bills per image, and codex spends a ChatGPT subscription and is the
+       * only one that renders a true 9:16. Codex is the default because it is
+       * the one that costs nothing per image.
        */
-      provider: z.enum(['default', 'mock', 'openai', 'image-use']).default('default'),
+      provider: z.enum(['mock', 'openai', 'image-use']).default('image-use'),
       /** Superseded by `provider`; kept so steps saved before it keep mocking. */
       useMockGeneration: z.boolean().default(false),
     }),

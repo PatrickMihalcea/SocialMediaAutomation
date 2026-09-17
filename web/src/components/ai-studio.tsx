@@ -64,34 +64,45 @@ function ActionLabel({ idle, busy, isBusy }: { idle: string; busy: string; isBus
 }
 
 /**
- * What the studio can generate an image with. Mock is not offered as a choice:
- * it is what a demo deployment does, not something to pick per image.
+ * The same three choices an Image generator step offers, in the same order, so
+ * the two surfaces cannot teach different mental models. Codex leads because it
+ * is the one that costs nothing per image.
  */
-const IMAGE_SOURCES: Array<{ value: Exclude<ImageProviderName, 'mock'>; label: string }> = [
-  { value: 'openai', label: 'API — instant, billed per image' },
+const IMAGE_SOURCES: Array<{ value: ImageProviderName; label: string }> = [
   { value: 'image-use', label: 'Codex — ChatGPT subscription, queued' },
+  { value: 'openai', label: 'API — instant, billed per image' },
+  { value: 'mock', label: 'Mock — free placeholder, instant' },
 ];
 
-export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetId, simulated, imageSource }: {
+export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetId, simulated }: {
   slug: string;
   initialAssets: Asset[];
   initialJobs: Job[];
   initialSourceAssetId?: string;
   simulated: boolean;
-  /** The image provider this deployment is configured for. */
-  imageSource: ImageProviderName;
 }) {
   const router = useRouter();
   const [prompt, setPrompt] = useState('A clean editorial workspace for planning social content');
   // Square, not the workflow default: a studio image is composed on its own,
   // not cropped into a vertical video.
-  const [size, setSize] = useState<ImageSize>('1024x1024');
-  // Starts on whatever the deployment is configured for, so the common case is
-  // one click. 'mock' means this is a demo deployment and there is nothing to
-  // choose between — the banner above already says so.
-  const [source, setSource] = useState<Exclude<ImageProviderName, 'mock'>>(
-    imageSource === 'image-use' ? 'image-use' : 'openai',
-  );
+  const [size, setSize] = useState<ImageSize>(DEFAULT_IMAGE_SIZE);
+  // Codex regardless of how the deployment is configured: the choice belongs to
+  // whoever is making the image, and this is the one with no per-image bill.
+  const [source, setSource] = useState<ImageProviderName>('image-use');
+
+  /**
+   * Both pickers are remembered per workspace.
+   *
+   * Someone working through a batch picks a shape and a source once; making
+   * them redo it after every trip to the Media Library is the kind of friction
+   * that makes a tool feel hostile. Read after mount rather than in the initial
+   * state so the server and the first client render agree.
+   */
+  useEffect(() => {
+    const saved = readStudioPrefs(slug);
+    if (saved.source) setSource(saved.source);
+    if (saved.size) setSize(saved.size);
+  }, [slug]);
   const [assets, setAssets] = useState(initialAssets);
   const [jobs, setJobs] = useState(initialJobs);
   const [selected, setSelected] = useState<string | undefined>(initialSourceAssetId);
@@ -152,7 +163,7 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
 
   function generate(action: Action, sourceAssetId?: string) {
     return run(action, async () => {
-      const result = await generateStudioImageAction(slug, { prompt, size, sourceAssetId, provider: imageSource === 'mock' ? undefined : source });
+      const result = await generateStudioImageAction(slug, { prompt, size, sourceAssetId, provider: source });
       // Where the image provider is a local CLI, the server cannot generate
       // inside the request — it queues instead, and the jobs panel below takes
       // over from here.
@@ -274,32 +285,35 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
             onChange={(event) => setPrompt(event.target.value)}
             className="min-h-28"
           />
-          {imageSource !== 'mock' && (
-            <Dropdown
-              label="Generate images with"
-              containerClassName="mt-5"
-              value={source}
-              options={IMAGE_SOURCES}
-              onChange={(value) => {
-                const chosen = value as Exclude<ImageProviderName, 'mock'>;
-                setSource(chosen);
-                // 9:16 exists only on Codex, so leaving it selected while
-                // switching to the API would send a shape it refuses.
-                if (!imageSizeAvailableFor(size, chosen)) setSize(DEFAULT_IMAGE_SIZE);
-              }}
-            />
-          )}
+          <Dropdown
+            label="Generate images with"
+            containerClassName="mt-5"
+            value={source}
+            options={IMAGE_SOURCES}
+            onChange={(value) => {
+              const chosen = value as ImageProviderName;
+              setSource(chosen);
+              // 9:16 exists only on Codex, so leaving it selected while
+              // switching to the API would send a shape it refuses.
+              const nextSize = imageSizeAvailableFor(size, chosen) ? size : DEFAULT_IMAGE_SIZE;
+              setSize(nextSize);
+              writeStudioPrefs(slug, { source: chosen, size: nextSize });
+            }}
+          />
           <Dropdown
             label="Image shape"
             containerClassName="mt-5"
             value={size}
             options={IMAGE_SIZE_PRESETS.filter((preset) =>
-              imageSizeAvailableFor(preset.id, imageSource === 'mock' ? undefined : source),
+              imageSizeAvailableFor(preset.id, source),
             ).map((preset) => ({
               value: preset.id,
               label: preset.label,
             }))}
-            onChange={(value) => setSize(value as ImageSize)}
+            onChange={(value) => {
+              setSize(value as ImageSize);
+              writeStudioPrefs(slug, { source, size: value as ImageSize });
+            }}
           />
         </div>
         <div className="flex flex-wrap items-end gap-3 lg:min-w-56 lg:flex-col lg:items-stretch lg:justify-end">
@@ -331,14 +345,23 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
                 </span>
               )}
             </div>
-            <div className="mt-3 space-y-3" aria-live="polite">
+            <div className="mt-3 space-y-4" aria-live="polite">
               {recentJobs.map((job) => (
-                <div key={job.id} className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="text-sm font-[480]">{AI_MEDIA_JOB_LABELS[job.kind]}</span>
-                  <span className="flex items-center gap-2">
-                    {ACTIVE_STATUSES.includes(job.status) && <span className="b88-caption">{elapsed(job)}</span>}
-                    <Badge tone={statusTone(job.status)}>{JOB_STATUS_LABELS[job.status]}</Badge>
-                  </span>
+                <div key={job.id}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    {/* The brief, not the kind: three rows all reading
+                        "Generated image" cannot be told apart. */}
+                    <span className="min-w-0 flex-1 truncate text-sm font-[480]">
+                      {job.prompt.trim() || AI_MEDIA_JOB_LABELS[job.kind]}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      {ACTIVE_STATUSES.includes(job.status) && <span className="b88-caption">{elapsed(job)}</span>}
+                      <Badge tone={statusTone(job.status)}>{JOB_STATUS_LABELS[job.status]}</Badge>
+                    </span>
+                  </div>
+                  {/* This strip is what people watch — it is above the fold and
+                      the full panel is not. Finished rows keep the badge only. */}
+                  {ACTIVE_STATUSES.includes(job.status) && <AiJobProgress job={job} now={now} />}
                 </div>
               ))}
             </div>
@@ -482,4 +505,43 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
       </Dialog>
     </div>
   );
+}
+
+/**
+ * Per-workspace studio picks, in the browser that made them.
+ *
+ * localStorage rather than the database: this is one person's working
+ * preference on one machine, not workspace configuration their teammates
+ * should inherit. Every access is guarded — Safari's private mode throws on
+ * read, and a corrupt value must not take the whole studio down with it.
+ */
+const PREFS_KEY = (slug: string) => `b88:studio:${slug}`;
+
+function readStudioPrefs(slug: string): { source?: ImageProviderName; size?: ImageSize } {
+  try {
+    const raw = window.localStorage.getItem(PREFS_KEY(slug));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as { source?: unknown; size?: unknown };
+    return {
+      source: IMAGE_SOURCES.some((option) => option.value === parsed.source)
+        ? (parsed.source as ImageProviderName)
+        : undefined,
+      // A shape that is no longer offered — or no longer valid for the saved
+      // source — is dropped rather than restored into a request that fails.
+      size: IMAGE_SIZE_PRESETS.some((preset) => preset.id === parsed.size)
+        && imageSizeAvailableFor(parsed.size as string, parsed.source as ImageProviderName)
+        ? (parsed.size as ImageSize)
+        : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function writeStudioPrefs(slug: string, prefs: { source: ImageProviderName; size: ImageSize }) {
+  try {
+    window.localStorage.setItem(PREFS_KEY(slug), JSON.stringify(prefs));
+  } catch {
+    // Storage disabled or full: the picks just do not outlive the page.
+  }
 }

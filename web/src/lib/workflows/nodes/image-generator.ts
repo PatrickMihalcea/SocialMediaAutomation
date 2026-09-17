@@ -12,20 +12,21 @@ import type { NodeRunContext } from '@/lib/workflows/node-context';
 export interface Config {
   size: ImageSize;
   maxImages: number;
-  /** 'default' defers to the deployment; anything else pins this step. */
-  provider: 'default' | ImageProviderName;
-  /** Superseded by `provider`. Still read, so steps saved before it keep their choice. */
+  /** Which source renders this step, independent of the deployment's setting. */
+  provider: ImageProviderName;
+  /** Superseded by `provider`. Still read, so steps saved before it keep mocking. */
   useMockGeneration: boolean;
 }
 
 /**
  * A step that was set to mock before this setting existed stays mocked. Getting
- * this wrong in the other direction would quietly start spending real quota on
- * a workflow somebody built specifically to avoid it.
+ * this wrong the other way would quietly start spending real quota on a
+ * workflow somebody built specifically to avoid it. The config panel clears the
+ * old flag as soon as anyone picks a source, so it only ever shadows a step
+ * nobody has opened since.
  */
-export function resolveStepProvider(config: Config): ImageProviderName | undefined {
-  if (config.provider && config.provider !== 'default') return config.provider;
-  return config.useMockGeneration ? 'mock' : undefined;
+export function resolveStepProvider(config: Config): ImageProviderName {
+  return config.useMockGeneration ? 'mock' : config.provider;
 }
 
 /**

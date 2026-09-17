@@ -325,10 +325,10 @@ export function NodeConfigPanel({
     }
 
     if (node.type === 'IMAGE_GENERATOR') {
-      const chosen = typeof config.provider === 'string' ? config.provider : 'default';
       // 9:16 exists only on the subscription backend, so offering it while this
       // step is pinned to the API would save a config the provider then refuses.
-      const sizes = imageSizesFor(chosen === 'default' ? undefined : (chosen as ImageProviderName));
+      const chosen = (typeof config.provider === 'string' ? config.provider : 'image-use') as ImageProviderName;
+      const sizes = imageSizesFor(chosen);
       return specs
         // Replaced by `provider`, and showing both would put two answers to the
         // same question on screen. Still in the schema so old steps keep theirs.
@@ -661,11 +661,16 @@ export function NodeConfigPanel({
                 return next;
               }
               next[field.key] = chosen;
+              // An explicit choice retires the flag it replaced; leaving it set
+              // would let a step display "API" and quietly render a placeholder.
+              if (node.type === 'IMAGE_GENERATOR' && field.key === 'provider') {
+                next.useMockGeneration = false;
+              }
               // Switching an image step away from Codex takes 9:16 with it.
               // Leaving the stale value would save a shape the chosen provider
               // refuses, and the step would fail at run time instead of here.
               if (node.type === 'IMAGE_GENERATOR' && field.key === 'provider') {
-                const allowed = imageSizesFor(chosen === 'default' ? undefined : (chosen as ImageProviderName));
+                const allowed = imageSizesFor(chosen as ImageProviderName);
                 if (typeof next.size === 'string' && !allowed.includes(next.size as ImageSize)) {
                   next.size = DEFAULT_IMAGE_SIZE;
                 }
@@ -908,7 +913,14 @@ function normalizeNodeConfig(type: string, raw: unknown): Record<string, unknown
   if (type === 'BEAT_SLIDESHOW' || type === 'AUDIO_TRIMMER' || nodeUsesChannelPicker(type)) {
     return parseConfig(type, raw) as Record<string, unknown>;
   }
-  return (raw as Record<string, unknown>) ?? {};
+  const config = (raw as Record<string, unknown>) ?? {};
+  // A step saved before `provider` existed has only the old boolean. Deriving
+  // the value here means the panel shows what the step will actually do, rather
+  // than an empty dropdown over a step that still mocks.
+  if (type === 'IMAGE_GENERATOR' && typeof config.provider !== 'string') {
+    return { ...config, provider: config.useMockGeneration === true ? 'mock' : 'image-use' };
+  }
+  return config;
 }
 
 function combineSourceOrder(value: unknown): CombineSourceId[] {

@@ -151,12 +151,11 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
     provider: {
       label: 'Generate with',
-      description: 'Mock costs nothing and returns instantly, for testing the workflow. API bills your OpenAI key per image. Codex uses your ChatGPT subscription — no per-image bill, slower, and the only one that renders a true 9:16.',
+      description: 'Codex uses your ChatGPT subscription — no per-image bill, a minute or so, and the only one that renders a true 9:16. API bills your OpenAI key per image and returns in seconds. Mock costs nothing and returns instantly, for testing the workflow.',
       optionLabels: {
-        default: 'Deployment default',
-        mock: 'Mock — free placeholder',
-        openai: 'API — billed per image',
         'image-use': 'Codex — ChatGPT subscription',
+        openai: 'API — billed per image',
+        mock: 'Mock — free placeholder',
       },
     },
   },
