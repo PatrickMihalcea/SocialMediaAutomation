@@ -9,7 +9,7 @@ import {
   Check, Copy, Download, Eye, Folder, MoreHorizontal, Move, Pencil, Plus,
   Tags, Trash2, X,
 } from 'lucide-react';
-import { Badge, Button, EmptyState, Field, humanizeMachineValue, IconButton, MediaFrame, MediaUploader, Select, StatusMessage, VideoPlayer } from '@/bridge88/components';
+import { Badge, Button, Dialog, EmptyState, Field, humanizeMachineValue, IconButton, MediaFrame, MediaUploader, Select, StatusMessage, VideoPlayer } from '@/bridge88/components';
 import { listAttachableDraftsAction } from '@/app/actions/posts';
 import { MEDIA_PRESETS } from '@/lib/social/capabilities';
 import {
@@ -66,6 +66,8 @@ export function MediaLibrary({
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<MediaLibraryAsset | null>(null);
   const [visibleAssetCount, setVisibleAssetCount] = useState(12);
+  /** The asset whose deletion is waiting on an answer about its posts. */
+  const [inUse, setInUse] = useState<{ asset: MediaLibraryAsset; closePreview: boolean } | null>(null);
   const [notice, setNotice] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
   const [managingTags, setManagingTags] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -193,17 +195,24 @@ export function MediaLibrary({
   };
   const runDelete = (asset: MediaLibraryAsset, closePreview = false) => {
     const displayName = assetDisplayName(assets, asset.id);
+    // Attached to something: ask what to do with those posts rather than
+    // refusing and leaving the only route a manual trawl through each one.
     if (asset.usages.length > 0) {
-      setNotice({
-        tone: 'error',
-        message: `${displayName} is attached to ${asset.usages.length} ${asset.usages.length === 1 ? 'post' : 'posts'}. Open the asset preview to review them before removing media from those posts.`,
-      });
+      setInUse({ asset, closePreview });
       return;
     }
     if (!window.confirm(`Delete ${displayName}? This cannot be undone.`)) return;
+    deleteAsset(asset, closePreview, 'refuse');
+  };
+  const deleteAsset = (
+    asset: MediaLibraryAsset,
+    closePreview: boolean,
+    mode: 'refuse' | 'detach' | 'delete-posts',
+  ) => {
     startTransition(async () => {
       try {
-        const result = await deleteMediaAction(slug, asset.id);
+        const result = await deleteMediaAction(slug, asset.id, mode);
+        setInUse(null);
         if (closePreview) setPreview(null);
         setSelected((value) => value.filter((id) => id !== asset.id));
         setNotice({ tone: 'success', message: result.message });
@@ -296,6 +305,44 @@ export function MediaLibrary({
 
   return (
     <>
+      <Dialog
+        open={Boolean(inUse)}
+        eyebrow="In use"
+        title={`${inUse ? assetDisplayName(assets, inUse.asset.id) : ''} is attached to ${inUse?.asset.usages.length ?? 0} ${inUse?.asset.usages.length === 1 ? 'post' : 'posts'}`}
+        onClose={() => setInUse(null)}
+        actions={
+          <>
+            <Button type="button" variant="tertiary" onClick={() => setInUse(null)}>Keep the asset</Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={pending}
+              onClick={() => inUse && deleteAsset(inUse.asset, inUse.closePreview, 'detach')}
+            >
+              Remove it from those posts
+            </Button>
+            <Button
+              type="button"
+              disabled={pending}
+              onClick={() => inUse && deleteAsset(inUse.asset, inUse.closePreview, 'delete-posts')}
+            >
+              Delete those posts too
+            </Button>
+          </>
+        }
+      >
+        <p className="b88-body-sm">
+          Deleting it cannot be undone. Either take it out of these posts and leave them otherwise
+          intact, or delete the posts along with it.
+        </p>
+        <ul className="mt-3 space-y-1">
+          {inUse?.asset.usages.map((usage) => (
+            <li key={`${usage.id}-${usage.platform}`} className="b88-body-sm">
+              {usage.title || 'Untitled post'} · {usage.status.toLowerCase()} · {usage.platform.toLowerCase()}
+            </li>
+          ))}
+        </ul>
+      </Dialog>
       {notice && <StatusMessage className="mt-6" tone={notice.tone}>{notice.message}</StatusMessage>}
       {stalled && pendingIds.length > 0 && (
         <StatusMessage className="mt-6" tone="error">
@@ -920,7 +967,7 @@ function PreviewDrawer({ asset, displayName, slug, tags, canEdit, canDelete, pen
         </div>
         {canDelete && (
           <div className="shrink-0 border-t border-hairline bg-canvas p-6">
-            <Button type="button" variant="tertiary" disabled={pending || asset.usages.length > 0} onClick={onDelete}>
+            <Button type="button" variant="tertiary" disabled={pending} onClick={onDelete}>
               <Trash2 size={15} /> {asset.usages.length > 0 ? 'Remove from posts before deleting' : 'Delete asset'}
             </Button>
           </div>

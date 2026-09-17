@@ -19,34 +19,79 @@ export async function uploadMediaAction(slug: string, formData: FormData): Promi
   }
 }
 
-export async function deleteMediaAction(slug: string, mediaId: string) {
+/**
+ * Deleting media that a post is using.
+ *
+ * Refusing outright was a dead end: the only way forward was to open every post
+ * and detach the asset by hand, and the message did not even say which posts.
+ * So the caller says what it wants done with them instead.
+ *
+ * Published posts are the exception and stay refused. Their media is already on
+ * the platform and the row here is the record of what went out — deleting it
+ * would leave a post nobody can reconstruct, which is not a thing to offer
+ * behind a confirm dialog.
+ */
+export async function deleteMediaAction(
+  slug: string,
+  mediaId: string,
+  mode: 'refuse' | 'detach' | 'delete-posts' = 'refuse',
+) {
   const ctx = await requireWorkspace(slug, 'media:delete');
   const asset = await db.mediaAsset.findFirst({
     where: { id: mediaId, workspaceId: ctx.workspace.id },
     include: {
       postMedia: {
-        include: { postPlatform: { select: { post: { select: { title: true, status: true } } } } },
-        take: 5,
+        include: { postPlatform: { select: { postId: true, post: { select: { title: true, status: true } } } } },
       },
     },
   });
   if (!asset) throw new Error('Asset not found.');
-  if (asset.postMedia.length > 0) {
-    const affected = [...new Map(asset.postMedia.map(({ postPlatform }) => [
-      postPlatform.post.title || 'Untitled post',
-      postPlatform.post.status,
-    ])).entries()]
-      .map(([title, status]) => `${title} (${status.toLowerCase()})`)
-      .join(', ');
-    throw new Error(`This asset is attached to ${affected}. Remove or replace it in those posts first.`);
+
+  const published = asset.postMedia.filter(({ postPlatform }) =>
+    ['PUBLISHED', 'PUBLISHING'].includes(postPlatform.post.status),
+  );
+  if (published.length > 0) {
+    const titles = [...new Set(published.map(({ postPlatform }) => postPlatform.post.title || 'Untitled post'))];
+    throw new Error(
+      `${titles.join(', ')} ${titles.length === 1 ? 'has' : 'have'} already been published with this asset, so it cannot be deleted. It is the record of what went out.`,
+    );
   }
+
+  if (asset.postMedia.length > 0) {
+    if (mode === 'refuse') {
+      const affected = [...new Map(asset.postMedia.map(({ postPlatform }) => [
+        postPlatform.post.title || 'Untitled post',
+        postPlatform.post.status,
+      ])).entries()]
+        .map(([title, status]) => `${title} (${status.toLowerCase()})`)
+        .join(', ');
+      throw new Error(`This asset is attached to ${affected}. Remove or replace it in those posts first.`);
+    }
+    if (mode === 'delete-posts') {
+      const postIds = [...new Set(asset.postMedia.map(({ postPlatform }) => postPlatform.postId))];
+      await db.post.deleteMany({ where: { id: { in: postIds }, workspaceId: ctx.workspace.id } });
+    } else {
+      // Detach only. The posts survive with one fewer attachment, which is what
+      // someone means by "take it out of the drafts".
+      await db.postMedia.deleteMany({ where: { mediaAssetId: asset.id } });
+    }
+  }
+
   await Promise.all([
     storage().delete(asset.storageKey),
     asset.thumbnailKey ? storage().delete(asset.thumbnailKey) : Promise.resolve(),
   ]);
   await db.mediaAsset.delete({ where: { id: asset.id } });
   revalidatePath(`/w/${slug}/media`);
-  return { message: 'Asset deleted.' };
+  revalidatePath(`/w/${slug}/drafts`);
+  return {
+    message:
+      asset.postMedia.length === 0
+        ? 'Asset deleted.'
+        : mode === 'delete-posts'
+          ? 'Asset and the posts using it were deleted.'
+          : 'Asset deleted and removed from the posts using it.',
+  };
 }
 
 export async function updateMediaDetailsAction(slug: string, mediaId: string, formData: FormData) {
