@@ -251,8 +251,11 @@ function mapVersion(version: PlatformVersionState): PostPlatformInput {
         : null,
       // Only meaningful together: a start offset with no track is nothing.
       audioAssetId: item.audioAssetId?.trim() || null,
+      // Rounded to the millisecond the field offers: binary floats turn a
+      // typed 12.345 into 12.344999999999999, which then reads back into the
+      // box as a number nobody entered.
       audioStart: item.audioAssetId?.trim() && item.audioStart?.trim()
-        ? Number.parseFloat(item.audioStart)
+        ? Math.round(Number.parseFloat(item.audioStart) * 1000) / 1000
         : null,
     })),
   };

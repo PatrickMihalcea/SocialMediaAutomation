@@ -106,3 +106,26 @@ describe('what publishing renders', () => {
     expect(plan.totalFrames / plan.fps).toBe(6);
   });
 });
+
+describe('sub-second start offsets', () => {
+  /**
+   * A track starts on the beat or just after it, and the difference is
+   * milliseconds — so the offset has to survive the trip to the filter graph
+   * at the precision it was typed.
+   */
+  it('carries a millisecond offset through to the plan', () => {
+    const plan = buildAudioMuxPlan({ source: video, audio: { ...track, startSeconds: 12.345 } });
+
+    expect(plan.audio?.startSeconds).toBe(12.345);
+  });
+
+  it('measures a still from the fractional offset, not a rounded one', () => {
+    const plan = buildAudioMuxPlan({
+      source: image,
+      audio: { ...track, durationSeconds: 10, startSeconds: 2.5 },
+      fps: 30,
+    });
+
+    expect(plan.totalFrames / plan.fps).toBeCloseTo(7.5, 5);
+  });
+});

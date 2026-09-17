@@ -1202,7 +1202,10 @@ function SoundtrackRow({
             label="Start at (seconds)"
             type="number"
             min="0"
-            step="0.5"
+            // Milliseconds, because that is the resolution at which a track
+            // starts on the beat rather than just after it. A half-second step
+            // made the browser reject everything in between.
+            step="0.001"
             value={audioStart}
             disabled={disabled}
             onChange={(event) => {
