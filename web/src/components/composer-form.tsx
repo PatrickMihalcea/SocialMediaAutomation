@@ -18,7 +18,6 @@ import {
   TextArea,
 } from '@/bridge88/components';
 import { uploadMedia } from '@/lib/media/upload-client';
-import { addSoundtrackAction } from '@/app/actions/media';
 import { loadMoreComposerAssetsAction, type ComposerState } from '@/app/actions/posts';
 import { PendingButton } from '@/components/action-ui';
 import { ComposerPreview } from '@/components/composer-preview';
@@ -101,8 +100,6 @@ export function ComposerForm({
   const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
   const [replacement, setReplacement] = useState<{ accountId: string; index: number } | null>(null);
   const [libraryAssets, setLibraryAssets] = useState(assets);
-  const [soundtrackPending, setSoundtrackPending] = useState(false);
-  const [soundtrackNotice, setSoundtrackNotice] = useState<{ tone: 'neutral' | 'error'; text: string } | null>(null);
   const [assetOffset, setAssetOffset] = useState(12);
   const [hasMoreAssets, setHasMoreAssets] = useState(assets.length >= 12);
   const [loadingMoreAssets, setLoadingMoreAssets] = useState(false);
@@ -205,64 +202,12 @@ export function ComposerForm({
       const exists = version.media.some((item) => item.mediaAssetId === assetId);
       const media = exists
         ? version.media.filter((item) => item.mediaAssetId !== assetId)
-        : [...version.media, { mediaAssetId: assetId, altText: '', thumbnailOffset: '' }];
+        : [...version.media, { mediaAssetId: assetId, altText: '', thumbnailOffset: '', audioAssetId: '', audioStart: '' }];
       return {
         ...current,
         versions: { ...current.versions, [accountId]: { ...version, media } },
       };
     });
-  }
-
-  /**
-   * Swaps the attachment for a copy of it carrying the chosen track.
-   *
-   * The new asset is returned still rendering — ffmpeg runs on the worker — so
-   * the attachment points at something that will fill in, exactly as a fresh
-   * upload does. An image becomes a video here, because no platform publishes a
-   * photograph with sound.
-   */
-  async function addSoundtrack(
-    accountId: string,
-    index: number,
-    audioId: string,
-    startSeconds: number,
-    seconds: number | null,
-  ) {
-    const version = draft.versions[accountId];
-    const item = version?.media[index];
-    if (!item) return;
-    setSoundtrackPending(true);
-    setSoundtrackNotice(null);
-    try {
-      const created = await addSoundtrackAction(slug, {
-        mediaId: item.mediaAssetId,
-        audioId,
-        startSeconds,
-        seconds,
-      });
-      const track = audioTracks.find((entry) => entry.id === audioId);
-      setLibraryAssets((current) => [
-        // No URL yet — the render has not written any bytes. The tile shows
-        // the name and the library fills the preview in once it lands.
-        { id: created.id, filename: created.filename, type: 'VIDEO', url: '', thumbnailUrl: '' },
-        ...current,
-      ]);
-      const media = version.media.map((entry, i) =>
-        i === index ? { ...entry, mediaAssetId: created.id } : entry,
-      );
-      updateVersion(accountId, { media });
-      setSoundtrackNotice({
-        tone: 'neutral',
-        text: `${humanizeMachineValue(track?.filename ?? 'Track')} is rendering onto this media and will finish in the background${created.wasImage ? '. The image becomes a video, which is the only way a platform carries audio' : ''}.`,
-      });
-    } catch (error) {
-      setSoundtrackNotice({
-        tone: 'error',
-        text: error instanceof Error ? error.message : 'The track could not be added.',
-      });
-    } finally {
-      setSoundtrackPending(false);
-    }
   }
 
   function chooseMedia(accountId: string, assetId: string) {
@@ -279,7 +224,7 @@ export function ComposerForm({
     }
     const media = version.media.map((item, index) =>
       index === replacement.index
-        ? { mediaAssetId: assetId, altText: '', thumbnailOffset: '' }
+        ? { mediaAssetId: assetId, altText: '', thumbnailOffset: '', audioAssetId: '', audioStart: '' }
         : item,
     );
     updateVersion(accountId, { media });
@@ -679,9 +624,6 @@ export function ComposerForm({
             )}
             {activeVersion.media.length > 0 && (
               <div className="mt-4 space-y-4">
-                {soundtrackNotice && (
-                  <StatusMessage tone={soundtrackNotice.tone}>{soundtrackNotice.text}</StatusMessage>
-                )}
                 {activeVersion.media.map((item, index) => {
                   const assetIndex = libraryAssets.findIndex((entry) => entry.id === item.mediaAssetId);
                   const asset = libraryAssets[assetIndex];
@@ -743,11 +685,16 @@ export function ComposerForm({
                         <SoundtrackRow
                           tracks={audioTracks}
                           isImage={asset.type === 'IMAGE'}
-                          pending={soundtrackPending}
                           disabled={readOnly}
-                          onChoose={(audioId, startSeconds) =>
-                            addSoundtrack(activeAccount.id, index, audioId, startSeconds, null)
-                          }
+                          mediaUrl={asset.url}
+                          audioAssetId={item.audioAssetId ?? ''}
+                          audioStart={item.audioStart ?? ''}
+                          onChange={(next) => {
+                            const media = activeVersion.media.map((entry, i) =>
+                              i === index ? { ...entry, ...next } : entry,
+                            );
+                            updateVersion(activeAccount.id, { media });
+                          }}
                         />
                       )}
                       {caps?.supportsAltText && (
@@ -940,59 +887,115 @@ function mergeDraft(base: ComposerDraft, stored: ComposerDraft, preserveInitialP
 }
 
 /**
- * One row: pick a track, optionally say where in it to start.
+ * Pick a track and hear it against the media, without rendering anything.
  *
- * Choosing applies it — there is no confirm button, because there is nothing to
- * confirm that the dropdown has not already said. The start offset is the only
- * other thing worth setting: songs rarely open on the part anyone wants, and
- * without it every post begins on an intro.
+ * The preview is the whole point: finding the right few seconds of a song means
+ * trying eight of them, and an encode per attempt would make that cost minutes
+ * and litter the library with abandoned files. Playing the track over a muted
+ * clip is what the finished post will sound like, because the render replaces
+ * the video's audio with exactly this.
+ *
+ * Nothing here touches the server. The choice is saved with the post and
+ * rendered once, when it publishes.
  */
 function SoundtrackRow({
   tracks,
   isImage,
-  pending,
   disabled,
-  onChoose,
+  mediaUrl,
+  audioAssetId,
+  audioStart,
+  onChange,
 }: {
   tracks: ComposerAsset[];
   isImage: boolean;
-  pending: boolean;
   disabled: boolean;
-  onChoose: (audioId: string, startSeconds: number) => void;
+  mediaUrl: string;
+  audioAssetId: string;
+  audioStart: string;
+  onChange: (next: { audioAssetId?: string; audioStart?: string }) => void;
 }) {
-  const [start, setStart] = useState('0');
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const track = tracks.find((entry) => entry.id === audioAssetId);
+  const start = Number(audioStart) || 0;
+
+  function stop() {
+    audioRef.current?.pause();
+    videoRef.current?.pause();
+    setPlaying(false);
+  }
+
+  async function play() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    // Seeking before play is what makes trying a different offset instant:
+    // nothing is fetched or encoded, the element just moves its playhead.
+    audio.currentTime = start;
+    const video = videoRef.current;
+    if (video) {
+      video.currentTime = 0;
+      video.muted = true;
+      await video.play().catch(() => {});
+    }
+    await audio.play().catch(() => {});
+    setPlaying(true);
+  }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-      <Select
-        label="Music"
-        value=""
-        disabled={disabled || pending}
-        hint={
-          isImage
-            ? 'Adds the track and turns this still into a video — the only shape a platform carries audio in.'
-            : 'Adds the track in place of any audio this video already has.'
-        }
-        onChange={(event) => {
-          if (event.target.value) onChoose(event.target.value, Number(start) || 0);
-        }}
-      >
-        <option value="">{pending ? 'Adding…' : 'No music'}</option>
-        {tracks.map((entry) => (
-          <option key={entry.id} value={entry.id}>
-            {humanizeMachineValue(entry.filename)}
-          </option>
-        ))}
-      </Select>
-      <Field
-        label="Start at (seconds)"
-        type="number"
-        min="0"
-        step="0.5"
-        value={start}
-        onChange={(event) => setStart(event.target.value)}
-        disabled={disabled || pending}
-      />
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <Select
+          label="Music"
+          value={audioAssetId}
+          disabled={disabled}
+          hint={
+            isImage
+              ? 'Rendered onto the still when the post publishes, which turns it into a video — the only shape a platform carries audio in.'
+              : 'Replaces this video’s own audio when the post publishes.'
+          }
+          onChange={(event) => {
+            stop();
+            onChange({ audioAssetId: event.target.value });
+          }}
+        >
+          <option value="">No music</option>
+          {tracks.map((entry) => (
+            <option key={entry.id} value={entry.id}>
+              {humanizeMachineValue(entry.filename)}
+            </option>
+          ))}
+        </Select>
+        {!!audioAssetId && (
+          <Field
+            label="Start at (seconds)"
+            type="number"
+            min="0"
+            step="0.5"
+            value={audioStart}
+            disabled={disabled}
+            onChange={(event) => {
+              onChange({ audioStart: event.target.value });
+              // Follow the number as it is typed, so the ear can find the spot.
+              if (audioRef.current) audioRef.current.currentTime = Number(event.target.value) || 0;
+            }}
+          />
+        )}
+      </div>
+      {!!track && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" variant="secondary" onClick={() => (playing ? stop() : play())}>
+            {playing ? 'Stop preview' : 'Preview from here'}
+          </Button>
+          <span className="b88-caption">Nothing is rendered until the post publishes</span>
+          <audio ref={audioRef} src={track.url} onEnded={stop} preload="none" className="hidden" />
+          {/* Muted on purpose: the track is what the post will carry. */}
+          {!isImage && mediaUrl && (
+            <video ref={videoRef} src={mediaUrl} muted playsInline className="h-24 rounded-md" />
+          )}
+        </div>
+      )}
     </div>
   );
 }

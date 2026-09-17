@@ -79,3 +79,30 @@ describe('buildAudioMuxPlan', () => {
     }
   });
 });
+
+describe('what publishing renders', () => {
+  /**
+   * The preview plays the track over a muted clip; the render replaces the
+   * video's audio with that same track. They agree because the plan carries
+   * exactly one audio stream — so what someone hears while choosing a start
+   * point is what the post goes out with.
+   */
+  it('starts the track where the preview started it', () => {
+    const plan = buildAudioMuxPlan({
+      source: video,
+      audio: { ...track, startSeconds: 42 },
+    });
+
+    expect(plan.audio?.startSeconds).toBe(42);
+  });
+
+  it('measures a still against what is left of the track after the offset', () => {
+    const plan = buildAudioMuxPlan({
+      source: image,
+      audio: { ...track, durationSeconds: 20, startSeconds: 14 },
+      fps: 30,
+    });
+
+    expect(plan.totalFrames / plan.fps).toBe(6);
+  });
+});

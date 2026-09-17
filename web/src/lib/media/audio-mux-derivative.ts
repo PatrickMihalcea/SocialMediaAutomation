@@ -1,5 +1,5 @@
 import 'server-only';
-import { MediaStatus, MediaType } from '@prisma/client';
+import { MediaStatus, MediaType, type MediaAsset } from '@prisma/client';
 import { db } from '@/lib/db';
 import { PermanentJobError } from '@/lib/queue/runner';
 import { mediaKey, storage } from '@/lib/storage';
@@ -8,26 +8,35 @@ import { buildAudioMuxPlan, type MuxSource } from '@/lib/media/audio-mux';
 import { enqueue } from '@/lib/queue';
 
 /**
- * Claims the asset the render will fill in, and queues the render.
+ * The soundtracked version of an asset, rendered if it does not exist yet.
  *
- * The row exists before the pixels do because the caller needs something to
- * point at now: the composer swaps its attachment to this id immediately, and
- * the library shows it processing, exactly as an upload does. ffmpeg only
- * exists on the worker, so the render cannot happen in the request that asked
- * for it.
+ * Called at publish time, not while composing. Choosing a track is a decision;
+ * encoding is a consequence of publishing, and doing it up front meant every
+ * change of mind burned an encode and left half-finished assets in the library.
  *
- * Always a derivative, never an edit in place. The original stays untouched, so
- * changing your mind about the music costs nothing and a post that already went
- * out silent keeps pointing at what was actually published.
+ * Cached by exactly what determines the output — source, track, start offset —
+ * so republishing, retrying a failed platform, or posting the same media to
+ * four channels all reuse one render.
  */
-export async function queueAudioMux(input: {
+export async function soundtrackedAsset(input: {
   sourceAssetId: string;
   audioAssetId: string;
-  /** Stills only; a video keeps its own length. */
+  startSeconds: number;
   seconds?: number | null;
-  startSeconds?: number;
   userId?: string;
-}): Promise<{ id: string }> {
+}): Promise<MediaAsset> {
+  const signature = muxSignature(input.audioAssetId, input.startSeconds, input.seconds ?? null);
+  const existing = await db.mediaAsset.findFirst({
+    where: {
+      derivedFromId: input.sourceAssetId,
+      derivationPreset: signature,
+      status: { in: [MediaStatus.READY, MediaStatus.PROCESSING] },
+      size: { gt: 0 },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (existing) return existing;
+
   const [source, audio] = await Promise.all([
     db.mediaAsset.findUniqueOrThrow({ where: { id: input.sourceAssetId } }),
     db.mediaAsset.findUniqueOrThrow({ where: { id: input.audioAssetId } }),
@@ -35,42 +44,77 @@ export async function queueAudioMux(input: {
   if (source.workspaceId !== audio.workspaceId) {
     throw new PermanentJobError('The track and the media belong to different workspaces.');
   }
-  if (audio.type !== MediaType.AUDIO) throw new PermanentJobError('Pick an audio file as the track.');
+  if (audio.type !== MediaType.AUDIO) throw new PermanentJobError('The chosen soundtrack is not an audio file.');
   if (source.type !== MediaType.IMAGE && source.type !== MediaType.VIDEO) {
     throw new PermanentJobError('Only an image or a video can carry a soundtrack.');
   }
-  const created = await db.mediaAsset.create({
+  if (!(await renderer().isAvailable())) {
+    // Refused, never published silently: posting the original as though the
+    // music were on it is the one outcome nobody could detect afterwards.
+    throw new PermanentJobError(
+      'This post has a soundtrack, which needs ffmpeg to render. The worker has it; this machine does not.',
+    );
+  }
+
+  const [sourceBytes, audioBytes] = await Promise.all([
+    storage().get(source.storageKey),
+    storage().get(audio.storageKey),
+  ]);
+
+  const media: MuxSource = {
+    kind: source.type === MediaType.VIDEO ? 'video' : 'image',
+    bytes: sourceBytes,
+    mimeType: source.mimeType,
+    // A still that never finished processing has no measured size; 1080x1920
+    // is the shape this product mostly makes.
+    width: source.width ?? 1080,
+    height: source.height ?? 1920,
+    durationSeconds: source.duration,
+  };
+
+  const result = await renderer().render(
+    buildAudioMuxPlan({
+      source: media,
+      audio: {
+        bytes: audioBytes,
+        mimeType: audio.mimeType,
+        durationSeconds: audio.duration,
+        startSeconds: input.startSeconds,
+      },
+      requestedSeconds: input.seconds ?? null,
+    }),
+  );
+
+  const filename = withSoundtrackName(source.filename);
+  const key = mediaKey(source.workspaceId, filename, 'derived');
+  await storage().put(key, result.data, result.mimeType);
+
+  return db.mediaAsset.create({
     data: {
       workspaceId: source.workspaceId,
       folderId: source.folderId,
       uploadedById: input.userId ?? source.uploadedById,
-      filename: withSoundtrackName(source.filename),
-      mimeType: 'video/mp4',
-      // An image with a soundtrack is a video. No platform has a post type
-      // that is a photograph with sound.
+      filename,
+      mimeType: result.mimeType,
+      // An image with a soundtrack is a video. No platform has a post type that
+      // is a photograph with sound.
       type: MediaType.VIDEO,
-      size: 0,
-      width: source.width,
-      height: source.height,
-      // Nothing is written here yet. The render fills it, and PROCESSING is
-      // what stops anything publishing an empty object in the meantime.
-      storageKey: mediaKey(source.workspaceId, withSoundtrackName(source.filename), 'derived'),
+      size: result.data.byteLength,
+      width: result.width,
+      height: result.height,
+      duration: result.durationSeconds,
+      storageKey: key,
       altText: source.altText,
-      status: MediaStatus.PROCESSING,
+      status: MediaStatus.READY,
       derivedFromId: source.id,
-      derivationPreset: JSON.stringify({
-        kind: 'audio-mux',
-        audioAssetId: audio.id,
-        audioName: audio.filename,
-        seconds: input.seconds ?? null,
-        startSeconds: input.startSeconds ?? 0,
-      }),
+      derivationPreset: signature,
     },
-    select: { id: true },
   });
+}
 
-  await enqueue('mux-audio', { mediaAssetId: created.id }, { workspaceId: source.workspaceId });
-  return created;
+/** What determines the output, and therefore what a cached render must match. */
+function muxSignature(audioAssetId: string, startSeconds: number, seconds: number | null): string {
+  return JSON.stringify({ kind: 'audio-mux', audioAssetId, startSeconds, seconds });
 }
 
 /** The render itself, on a machine that has ffmpeg. */

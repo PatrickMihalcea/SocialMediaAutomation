@@ -210,6 +210,8 @@ export async function savePost(
             position,
             altText: item.altText || null,
             thumbnailOffset: item.thumbnailOffset,
+            audioAssetId: item.audioAssetId ?? null,
+            audioStart: item.audioStart ?? null,
           })),
         });
       }
@@ -330,6 +332,8 @@ export async function duplicatePost(workspaceId: string, postId: string, authorI
             position: media.position,
             altText: media.altText,
             thumbnailOffset: media.thumbnailOffset,
+            audioAssetId: media.audioAssetId ?? null,
+            audioStart: media.audioStart ?? null,
           })),
         });
       }

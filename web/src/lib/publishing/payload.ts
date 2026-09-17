@@ -1,6 +1,7 @@
 import 'server-only';
 import type { MediaAsset, PostMedia, PostPlatform } from '@prisma/client';
 import { storage } from '@/lib/storage';
+import { soundtrackedAsset } from '@/lib/media/audio-mux-derivative';
 import type { OutgoingMedia, OutgoingPost } from '@/lib/social/types';
 
 type MediaRow = PostMedia & { mediaAsset: MediaAsset };
@@ -29,11 +30,22 @@ export async function toOutgoingPost(
 }
 
 export async function toOutgoingMedia(row: MediaRow): Promise<OutgoingMedia> {
-  const asset = row.mediaAsset;
+  // The soundtrack is rendered here, at the last possible moment, because this
+  // is the first point where it is certain the post is actually going out.
+  // While it was being composed it was only a choice, and choices change.
+  const asset = row.audioAssetId
+    ? await soundtrackedAsset({
+        sourceAssetId: row.mediaAssetId,
+        audioAssetId: row.audioAssetId,
+        startSeconds: row.audioStart ?? 0,
+      })
+    : row.mediaAsset;
   const url = await storage().signedUrl(asset.storageKey, 60 * 60 * 6);
   return {
     id: asset.id,
-    type: asset.type,
+    // A soundtracked still is a video, and the adapters have to be told so:
+    // they choose an upload endpoint from this.
+    type: row.audioAssetId ? 'VIDEO' : asset.type,
     mimeType: asset.mimeType,
     filename: asset.filename,
     size: asset.size,

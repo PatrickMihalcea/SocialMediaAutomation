@@ -53,10 +53,6 @@ const HANDLERS: { [K in JobType]: () => Promise<(payload: JobPayloadMap[K]) => P
     const { runAiMediaJob } = await import('@/lib/ai/media-jobs');
     return (p) => runAiMediaJob(p.aiMediaJobId);
   },
-  'mux-audio': async () => {
-    const { runAudioMux } = await import('@/lib/media/audio-mux-derivative');
-    return (p) => runAudioMux(p.mediaAssetId);
-  },
   'run-workflow-node': async () => {
     const { runWorkflowNode } = await import('@/lib/workflows/engine');
     return (p) => runWorkflowNode(p.nodeRunId);

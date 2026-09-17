@@ -34,7 +34,16 @@ export async function loadComposerContext(
             platforms: {
               orderBy: { createdAt: 'asc' },
               include: {
-                media: { orderBy: { position: 'asc' }, select: { mediaAssetId: true, altText: true, thumbnailOffset: true } },
+                media: {
+                  orderBy: { position: 'asc' },
+                  select: {
+                    mediaAssetId: true,
+                    altText: true,
+                    thumbnailOffset: true,
+                    audioAssetId: true,
+                    audioStart: true,
+                  },
+                },
               },
             },
           },
@@ -155,6 +164,8 @@ export async function loadComposerContext(
             mediaAssetId: item.mediaAssetId,
             altText: item.altText,
             thumbnailOffset: item.thumbnailOffset,
+            audioAssetId: item.audioAssetId,
+            audioStart: item.audioStart,
           })),
         })),
       }

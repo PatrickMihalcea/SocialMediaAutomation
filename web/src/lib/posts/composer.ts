@@ -38,7 +38,14 @@ export type PlatformVersionState = {
   hashtags: string;
   mentions: string;
   link: string;
-  media: Array<{ mediaAssetId: string; altText: string; thumbnailOffset: string }>;
+  media: Array<{
+    mediaAssetId: string;
+    altText: string;
+    thumbnailOffset: string;
+    /** Soundtrack chosen here, rendered at publish time. Empty means none. */
+    audioAssetId?: string;
+    audioStart?: string;
+  }>;
 };
 
 export type ComposerDraft = {
@@ -65,7 +72,13 @@ export type ComposerInitial = {
     hashtags: string[];
     mentions: string[];
     link: string | null;
-    media: Array<{ mediaAssetId: string; altText: string | null; thumbnailOffset: number | null }>;
+    media: Array<{
+      mediaAssetId: string;
+      altText: string | null;
+      thumbnailOffset: number | null;
+      audioAssetId?: string | null;
+      audioStart?: number | null;
+    }>;
   }>;
 };
 
@@ -92,7 +105,7 @@ export type ComposerWorkspaceDefaults = {
 };
 
 const attachedMedia = (assetId: string) => [
-  { mediaAssetId: assetId, altText: '', thumbnailOffset: '' },
+  { mediaAssetId: assetId, altText: '', thumbnailOffset: '', audioAssetId: '', audioStart: '' },
 ];
 
 export function buildInitialDraft(
@@ -117,6 +130,8 @@ export function buildInitialDraft(
             mediaAssetId: m.mediaAssetId,
             altText: m.altText ?? '',
             thumbnailOffset: m.thumbnailOffset != null ? String(m.thumbnailOffset) : '',
+            audioAssetId: m.audioAssetId ?? '',
+            audioStart: m.audioStart != null ? String(m.audioStart) : '',
           })),
         }
       : {
@@ -167,6 +182,11 @@ function mapVersion(version: PlatformVersionState): PostPlatformInput {
       altText: item.altText.trim() || null,
       thumbnailOffset: item.thumbnailOffset.trim()
         ? Number.parseFloat(item.thumbnailOffset)
+        : null,
+      // Only meaningful together: a start offset with no track is nothing.
+      audioAssetId: item.audioAssetId?.trim() || null,
+      audioStart: item.audioAssetId?.trim() && item.audioStart?.trim()
+        ? Number.parseFloat(item.audioStart)
         : null,
     })),
   };

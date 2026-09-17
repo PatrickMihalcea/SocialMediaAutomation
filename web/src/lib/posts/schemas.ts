@@ -15,6 +15,9 @@ export const postPlatformInputSchema = z.object({
         mediaAssetId: z.string().uuid(),
         altText: z.string().max(2_000).nullable().optional(),
         thumbnailOffset: z.number().min(0).nullable().optional(),
+        /** Soundtrack: stored as intent, rendered when the post publishes. */
+        audioAssetId: z.string().uuid().nullable().optional(),
+        audioStart: z.number().min(0).max(3_600).nullable().optional(),
       }),
     )
     .max(35)

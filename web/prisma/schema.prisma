@@ -630,10 +630,17 @@ model PostMedia {
   altText         String?  @map("alt_text")
   /// Frame offset (seconds) chosen as the video cover.
   thumbnailOffset Float?   @map("thumbnail_offset")
+  /// Soundtrack, chosen while composing and rendered at publish time. Stored as
+  /// intent rather than as a rendered file so changing it costs nothing.
+  audioAssetId    String?  @map("audio_asset_id") @db.Uuid
+  /// Where in the track the post starts. Songs rarely open on the useful part.
+  audioStart      Float?   @map("audio_start")
   createdAt       DateTime @default(now()) @map("created_at")
 
   postPlatform PostPlatform @relation(fields: [postPlatformId], references: [id], onDelete: Cascade)
   mediaAsset   MediaAsset   @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  /// SetNull, not Cascade: deleting a track must not delete the post's media.
+  audioAsset   MediaAsset?  @relation("PostMediaSoundtrack", fields: [audioAssetId], references: [id], onDelete: SetNull)
 
   @@unique([postPlatformId, position])
   @@index([postPlatformId])
@@ -752,6 +759,7 @@ model MediaAsset {
   derivatives     MediaAsset[]           @relation("Derivation")
   tags            MediaAssetTag[]
   postMedia       PostMedia[]
+  soundtrackFor   PostMedia[]            @relation("PostMediaSoundtrack")
   aiGeneration    AiGeneration?          @relation(fields: [aiGenerationId], references: [id], onDelete: SetNull)
   aiJobOutputs    AiMediaJob[]           @relation("AiJobOutput")
   workflowOutputs WorkflowNodeRunAsset[]
