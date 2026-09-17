@@ -65,7 +65,7 @@ export async function generateObject<T>(input: {
   userId: string;
   operation: AiOperation;
   messages: AiMessage[];
-  schema: z.ZodType<T>;
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   schemaName: string;
   temperature?: number;
 }): Promise<AiObjectResult<T>> {

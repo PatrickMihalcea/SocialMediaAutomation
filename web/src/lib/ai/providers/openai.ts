@@ -91,7 +91,7 @@ export class OpenAiProvider implements AiProvider {
 
   async completeObject<T>(input: {
     messages: AiMessage[];
-    schema: z.ZodType<T>;
+    schema: z.ZodType<T, z.ZodTypeDef, unknown>;
     schemaName: string;
     temperature?: number;
   }): Promise<AiObjectResult<T>> {
@@ -205,7 +205,7 @@ function stripFence(text: string): string {
  * it is.
  */
 function safeParseJson<T>(
-  schema: z.ZodType<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   raw: string,
 ): { success: true; data: T } | { success: false; error: string } {
   let json: unknown;

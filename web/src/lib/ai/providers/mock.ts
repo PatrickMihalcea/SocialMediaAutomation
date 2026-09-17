@@ -32,7 +32,7 @@ export class MockAiProvider implements AiProvider {
 
   async completeObject<T>(input: {
     messages: AiMessage[];
-    schema: z.ZodType<T>;
+    schema: z.ZodType<T, z.ZodTypeDef, unknown>;
     schemaName: string;
   }): Promise<AiObjectResult<T>> {
     const prompt = lastUser(input.messages);
@@ -191,10 +191,13 @@ function build(schemaName: string, prompt: string, messages: AiMessage[]): unkno
             },
           };
         }
-        const graph = weeklyReelTemplate(topic);
+        const pool = requestedThemePool(prompt);
+        const graph = weeklyReelTemplate(topic, pool);
         const { hour, minute } = requestedTime(prompt);
         return {
-          reply: `${simulated}I prepared a weekly reel workflow for ${topic}. Nothing will be created until you confirm.`,
+          reply: pool.length
+            ? `${simulated}I prepared a reel workflow that draws one of ${pool.length} subjects at random each run. Nothing will be created until you confirm.`
+            : `${simulated}I prepared a weekly reel workflow for ${topic}. Nothing will be created until you confirm.`,
           action: {
             kind: 'create_workflow',
             summary: `Create "${graph.name}"`,
@@ -493,6 +496,26 @@ function shortDraft(topic: string): string {
 function hashtagsFor(topic: string): string[] {
   const slug = topic.replace(/[^a-zA-Z0-9 ]/g, '').split(/\s+/).filter(Boolean).slice(0, 2);
   return [...slug.map((w) => `#${w.toLowerCase()}`), '#buildinpublic', '#engineering', '#automation'].slice(0, 5);
+}
+
+/**
+ * Subjects for a workflow asked to vary what it posts about.
+ *
+ * The simulated provider invents nothing, so it reads the subjects out of the
+ * request — the ones listed after "like" or "such as", or the request itself
+ * when none are listed. Real output comes from the model.
+ */
+function requestedThemePool(prompt: string): string[] {
+  if (!/\b(random|randomly|varied|vary|varying|rotate|rotating|different topics|different themes|not repeat|no repeats)\b/i.test(prompt)) {
+    return [];
+  }
+  const listed = prompt.match(/\b(?:like|such as|including)\s+(.{3,200}?)(?:[.?!\n]|$)/i);
+  const entries = (listed?.[1] ?? '')
+    .split(/,| and |\betc\b/i)
+    .map((entry) => entry.trim().replace(/[.\s]+$/, ''))
+    .filter((entry) => entry.length > 2)
+    .slice(0, 8);
+  return entries.length ? entries : [extractTopic(prompt)];
 }
 
 function extractTopic(prompt: string): string {

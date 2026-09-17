@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { validateProposedGraph, weeklyReelTemplate, workflowAssistantSkill } from '@/lib/workflows/assistant-graph';
+import {
+  normalizeAssistantAction,
+  validateProposedGraph,
+  weeklyReelTemplate,
+  workflowAssistantSkill,
+} from '@/lib/workflows/assistant-graph';
+import { assistantReplySchema } from '@/lib/ai/schemas';
 
 describe('assistant workflow graphs', () => {
   it('accepts the weekly reel template', () => {
@@ -113,5 +119,80 @@ describe('assistant workflow graphs', () => {
         { sourceKey: 'slideshow', sourcePort: 'video', targetKey: 'draft', targetPort: 'video' },
       ],
     )).not.toThrow();
+  });
+});
+
+describe('a theme drawn at random', () => {
+  it('builds a reel whose idea step draws from the pool', () => {
+    const graph = weeklyReelTemplate('architecture', ['Interior design', 'Luxury homes']);
+    expect(() => validateProposedGraph(graph.nodes, graph.edges)).not.toThrow();
+    expect(graph.nodes[0].config).toMatchObject({
+      themeMode: 'random',
+      theme: '',
+      themePool: ['Interior design', 'Luxury homes'],
+    });
+  });
+
+  it('is described in the skill the assistant is given', () => {
+    const skill = workflowAssistantSkill();
+    expect(skill).toContain('themeMode');
+    expect(skill).toContain('themePool');
+    // The mistake this replaces: routing text through the media-only Pick step.
+    expect(skill).toContain('never wire a text output into PICK.items');
+  });
+});
+
+describe('normalizeAssistantAction', () => {
+  const parse = (action: unknown) => assistantReplySchema.parse({ reply: 'Here it is.', action });
+
+  it('repairs the spellings a model reaches for in a new workflow', () => {
+    const parsed = parse({
+      kind: 'createWorkflow',
+      summary: 'Create a reel',
+      name: 'Architecture reel',
+      nodes: [
+        { key: 'Idea Step', type: 'idea_generator', settings: { theme: 'architecture' } },
+        { key: 'images', type: 'IMAGE_GENERATOR', config: {} },
+      ],
+      edges: [{ source: 'Idea Step', sourcePort: 'prompts', target: 'images', targetPort: 'prompts' }],
+    });
+
+    expect(parsed.action).toMatchObject({
+      kind: 'create_workflow',
+      nodes: [
+        { key: 'idea_step', type: 'IDEA_GENERATOR', config: { theme: 'architecture' } },
+        { key: 'images', type: 'IMAGE_GENERATOR' },
+      ],
+      edges: [{ sourceKey: 'idea_step', sourcePort: 'prompts', targetKey: 'images', targetPort: 'prompts' }],
+    });
+  });
+
+  it('repairs graph edit operation names and leaves step ids alone', () => {
+    const nodeId = '55555555-5555-4555-8555-555555555555';
+    const parsed = parse({
+      kind: 'update_workflow',
+      summary: 'Add a publish step',
+      workflowId: nodeId,
+      workflowName: 'Treehouses',
+      graphEdits: [
+        { operation: 'addNode', key: 'Publish Step', type: 'publish', config: { socialAccountIds: [] } },
+        { operation: 'add_edge', source: nodeId, sourcePort: 'video', target: 'Publish Step', targetPort: 'video' },
+      ],
+    });
+
+    expect(parsed.action).toMatchObject({
+      graphEdits: [
+        { operation: 'add_node', key: 'publish_step', type: 'PUBLISH' },
+        // The uuid survives: lowercasing its hyphens would point the edit at nothing.
+        { operation: 'connect', sourceNodeRef: nodeId, targetNodeRef: 'publish_step' },
+      ],
+    });
+  });
+
+  it('leaves anything it does not recognise for the schema to reject', () => {
+    expect(normalizeAssistantAction(null)).toBeNull();
+    expect(normalizeAssistantAction('nonsense')).toBe('nonsense');
+    expect(assistantReplySchema.safeParse({ reply: 'x', action: { kind: 'invent_something' } }).success)
+      .toBe(false);
   });
 });

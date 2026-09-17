@@ -75,6 +75,151 @@ export const workflowGraphEditSchema = z.discriminatedUnion('operation', [
   }).strict(),
 ]);
 
+/**
+ * Straightens out the shapes a model reaches for instead of the ones this
+ * schema names.
+ *
+ * Every mistake handled here was fatal before it: a capitalised node key, an
+ * "addNode" operation, a lowercase step type or an edge written with
+ * source/target rather than sourceKey/targetKey all fail the discriminated
+ * union outright, and the user reads that as "the AI returned something
+ * Bridge88 could not use" for a proposal that was one rename away from valid.
+ * Repairing them costs nothing; a repair turn costs a minute of waiting.
+ *
+ * It only renames — it never invents a field, a step or a connection, so an
+ * action that was genuinely wrong still fails validation and is still repaired
+ * or reported rather than quietly becoming a different workflow.
+ */
+export function normalizeAssistantAction(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const action = { ...value };
+  if (typeof action.kind === 'string') action.kind = snake(action.kind);
+
+  if (action.kind === 'create_workflow') {
+    if (Array.isArray(action.nodes)) action.nodes = action.nodes.map(normalizeNode);
+    if (Array.isArray(action.edges)) {
+      action.edges = action.edges.map((edge) => {
+        if (!isRecord(edge)) return edge;
+        return omitUndefined({
+          ...edge,
+          sourceKey: localKey(pick(edge, ['sourceKey', 'sourceNodeRef', 'sourceNodeId', 'source', 'from'])),
+          sourcePort: pick(edge, ['sourcePort', 'sourceHandle', 'fromPort', 'outputPort', 'output']),
+          targetKey: localKey(pick(edge, ['targetKey', 'targetNodeRef', 'targetNodeId', 'target', 'to'])),
+          targetPort: pick(edge, ['targetPort', 'targetHandle', 'toPort', 'inputPort', 'input']),
+          sourceNodeRef: undefined,
+          targetNodeRef: undefined,
+          source: undefined,
+          target: undefined,
+        });
+      });
+    }
+  }
+
+  if (action.kind === 'update_workflow' && Array.isArray(action.graphEdits)) {
+    action.graphEdits = action.graphEdits.map((edit) => {
+      if (!isRecord(edit)) return edit;
+      const operation = typeof edit.operation === 'string'
+        ? OPERATION_ALIASES[snake(edit.operation)] ?? snake(edit.operation)
+        : edit.operation;
+      if (operation === 'add_node') {
+        const normalized = normalizeNode(edit);
+        return isRecord(normalized) ? { ...normalized, operation } : edit;
+      }
+      if (operation === 'connect') {
+        return omitUndefined({
+          ...edit,
+          operation,
+          sourceNodeRef: localKey(pick(edit, ['sourceNodeRef', 'sourceKey', 'sourceNodeId', 'source', 'from'])),
+          sourcePort: pick(edit, ['sourcePort', 'sourceHandle', 'fromPort', 'outputPort', 'output']),
+          targetNodeRef: localKey(pick(edit, ['targetNodeRef', 'targetKey', 'targetNodeId', 'target', 'to'])),
+          targetPort: pick(edit, ['targetPort', 'targetHandle', 'toPort', 'inputPort', 'input']),
+          sourceKey: undefined,
+          targetKey: undefined,
+          source: undefined,
+          target: undefined,
+        });
+      }
+      return { ...edit, operation };
+    });
+  }
+
+  return action;
+}
+
+const OPERATION_ALIASES: Record<string, string> = {
+  add: 'add_node',
+  add_step: 'add_node',
+  create_node: 'add_node',
+  new_node: 'add_node',
+  node: 'add_node',
+  update: 'update_node',
+  edit_node: 'update_node',
+  configure_node: 'update_node',
+  remove: 'remove_node',
+  delete: 'remove_node',
+  delete_node: 'remove_node',
+  add_edge: 'connect',
+  link: 'connect',
+  connect_nodes: 'connect',
+  remove_edge: 'disconnect',
+  delete_edge: 'disconnect',
+  unlink: 'disconnect',
+};
+
+function normalizeNode(node: unknown): unknown {
+  if (!isRecord(node)) return node;
+  const config = pick(node, ['config', 'settings', 'configuration']);
+  return omitUndefined({
+    ...node,
+    key: localKey(pick(node, ['key', 'id', 'ref', 'nodeKey'])),
+    type: typeof node.type === 'string' ? snake(node.type).toUpperCase() : node.type,
+    config: isRecord(config) ? config : node.config,
+    settings: undefined,
+    configuration: undefined,
+  });
+}
+
+/**
+ * A local node key, or whatever was there if it cannot be one.
+ *
+ * A uuid is left alone: connect edits address existing steps by id, and
+ * lowercasing hyphens into underscores there would point the edit at nothing.
+ */
+function localKey(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  if (UUID.test(value)) return value;
+  const key = snake(value).replace(/^[^a-z]+/, '').slice(0, 40);
+  return key || value;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** "addNode", "Add-Node" and "ADD NODE" all become "add_node". */
+function snake(value: string): string {
+  return value
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    .toLowerCase();
+}
+
+function pick(source: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    if (source[key] !== undefined && source[key] !== null) return source[key];
+  }
+  return undefined;
+}
+
+function omitUndefined(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 export type ProposedWorkflowNode = z.infer<typeof proposedWorkflowNodeSchema>;
 export type ProposedWorkflowEdge = z.infer<typeof proposedWorkflowEdgeSchema>;
 export type WorkflowGraphEdit = z.infer<typeof workflowGraphEditSchema>;
@@ -118,6 +263,14 @@ export function workflowAssistantSkill(): string {
     'For a video from three random existing folder images: MEDIA_LIBRARY.images → PICK.items, PICK.selection → BEAT_SLIDESHOW.images. For music, use MEDIA_LIBRARY.audio → another PICK.items, then PICK.item → BEAT_SLIDESHOW.audio.',
     'To label each cut with its own filename, add MEDIA_LIBRARY.imageTitles → PICK.labels and PICK.labels → BEAT_SLIDESHOW.titles, then TEXT_OVERLAY template "{index}. {title}".',
     'Do not add MUSIC_SELECTOR to new workflows; it is retained only so old saved workflows still run.',
+    // The one capability a model cannot infer from the port list, and the one
+    // most often asked for: "random themes", "varied topics", "do not repeat".
+    // Without this it wires an idea step into a Pick, which takes media and not
+    // text, and the whole proposal is rejected for a port that does not exist.
+    'IDEA_GENERATOR can pick its own subject: set themeMode "random", leave theme empty, and put one subject per entry in themePool. Each run draws one and skips whatever that step used most recently, so the subject keeps moving on its own.',
+    'Use themeMode "random" whenever the user asks for random, varied, rotating or non-repeating subjects, and write 12 to 30 concrete, distinct entries into themePool yourself rather than asking them for the list. themeMode "fixed" is for a workflow that should cover the same subject every run.',
+    'There is no way to select one text value at random with a step. PICK selects media, not text, so never wire a text output into PICK.items — a random subject is themeMode "random" on the idea step.',
+    'To copy, duplicate or clone an existing workflow, propose create_workflow with the same steps, settings and connections as the source workflow in WORKSPACE_CONTEXT, under a new name, changing only what the user asked to change. Never propose update_workflow for a copy: that edits the original.',
     'Node keys are local labels such as idea, images, library, or track. They are not database ids.',
     'For update_workflow, graphEdits can add, update, remove, connect, or disconnect steps. Existing steps use their workspace ids. New steps use a local key, and later connect edits refer to that key.',
     'Return the ordinary assistant envelope {"reply":string,"action":action|null}.',
@@ -132,6 +285,9 @@ export function workflowAssistantSkill(): string {
     'operation must be exactly one of add_node, update_node, remove_node, connect, disconnect. A node key is lowercase letters, digits and underscores, starting with a letter — "publish" or "yt_publish", never "Publish" or "publish-step".',
     'Worked example — appending a Publish step to an existing workflow and wiring it to the step that currently produces the finished video: {"kind":"update_workflow","summary":"Add a Publish step posting to the connected YouTube channel","workflowId":"<the workflow uuid from WORKSPACE_CONTEXT>","workflowName":"Treehouses","nodeUpdates":[],"graphEdits":[{"operation":"add_node","key":"publish","type":"PUBLISH","name":"Publish to YouTube","positionX":1900,"positionY":-150,"config":{"socialAccountIds":["<a channel id from WORKSPACE_CONTEXT channels>"],"caption":"","mode":"queue","requireApproval":true}},{"operation":"connect","sourceNodeRef":"<uuid of the step whose video output feeds it>","sourcePort":"video","targetNodeRef":"publish","targetPort":"video"}]}.',
     'In a connect edit, sourceNodeRef and targetNodeRef are either the uuid of an existing step or the local key of a step added earlier in the same graphEdits array.',
+    // Built from the template rather than written out by hand: an example that
+    // drifts from what validateProposedGraph accepts teaches the model to fail.
+    `Worked example — a complete create_workflow whose subject changes every run: ${JSON.stringify(exampleCreateWorkflowAction())}.`,
     'run_workflow action: {"kind":"run_workflow","summary":string,"workflowId":uuid,"workflowName":string}.',
     'CREATE_DRAFT and PUBLISH take title, caption, hashtags and firstComment as inputs as well as settings, and a connected input overrides the setting. Wire an IDEA_GENERATOR output into them when the user wants the copy written per run; leave the setting as typed text when the same wording should go out every time. Their mentions and link settings have no inputs and are typed only.',
     'IDEA_GENERATOR always outputs postTitle, caption and hashtags alongside prompts and titles, so connect those rather than adding additionalOutputs for them. To control how that copy reads, set its titleGuidance, captionGuidance or hashtagsGuidance settings — one instruction each, such as "two sentences, no emoji" — and leave them empty to let the model choose.',
@@ -141,16 +297,45 @@ export function workflowAssistantSkill(): string {
   ].join('\n');
 }
 
-export function weeklyReelTemplate(theme: string): {
+/**
+ * The create_workflow action the prompt shows the model.
+ *
+ * Generated from the same template the tests validate, so the example in the
+ * prompt is always a proposal this code would accept.
+ */
+function exampleCreateWorkflowAction() {
+  const graph = weeklyReelTemplate('architecture', [
+    'Brutalist civic buildings in soft light',
+    'Warm minimal interiors with oak and linen',
+    'Cliffside houses with deep overhangs',
+  ]);
+  return {
+    kind: 'create_workflow',
+    summary: `Create "${graph.name}"`,
+    name: graph.name,
+    description: graph.description,
+    scheduleEnabled: false,
+    scheduleWeekdays: [],
+    scheduleHour: 9,
+    scheduleMinute: 0,
+    nodes: graph.nodes,
+    edges: graph.edges,
+  };
+}
+
+export function weeklyReelTemplate(theme: string, themePool: string[] = []): {
   name: string;
   description: string;
   nodes: ProposedWorkflowNode[];
   edges: ProposedWorkflowEdge[];
 } {
   const trimmed = theme.trim().slice(0, 80) || 'weekly reel';
+  const pool = themePool.map((entry) => entry.trim()).filter(Boolean);
   return {
     name: `${trimmed} reel`,
-    description: `Generates stills from “${trimmed}”, cuts them to a track, labels each cut, and leaves a draft to review.`,
+    description: pool.length
+      ? `Draws a subject from ${pool.length} topics, generates stills for it, cuts them to a track, labels each cut, and leaves a draft to review.`
+      : `Generates stills from “${trimmed}”, cuts them to a track, labels each cut, and leaves a draft to review.`,
     nodes: [
       {
         key: 'idea',
@@ -158,7 +343,9 @@ export function weeklyReelTemplate(theme: string): {
         name: 'Theme ideas',
         positionX: 40,
         positionY: 40,
-        config: { mode: 'image', theme: trimmed, count: 8, styleSuffix: '' },
+        config: pool.length
+          ? { mode: 'image', themeMode: 'random', theme: '', themePool: pool, count: 8, styleSuffix: '' }
+          : { mode: 'image', theme: trimmed, count: 8, styleSuffix: '' },
       },
       {
         key: 'images',

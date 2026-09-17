@@ -39,6 +39,7 @@ import { assistantCapabilityReply, confirmProposal, executeProposal, sendAssista
 import { generateObject } from '@/lib/ai';
 import { buildSystemPrompt } from '@/lib/ai/brand-voice';
 import type { AssistantReply } from '@/lib/ai/schemas';
+import { weeklyReelTemplate } from '@/lib/workflows/assistant-graph';
 
 const POST_ID = '11111111-1111-4111-8111-111111111111';
 const CAMPAIGN_ID = '22222222-2222-4222-8222-222222222222';
@@ -447,10 +448,10 @@ describe('sendAssistantMessage conversation history', () => {
     // Models the database rather than returning a fixed slice, so a regression
     // back to ascending order fails here instead of passing silently.
     dbMock.aiMessage.findMany.mockImplementation(async (args: {
-      orderBy: { createdAt: 'asc' | 'desc' };
+      orderBy: Array<{ createdAt?: 'asc' | 'desc' }>;
       take: number;
     }) => {
-      const direction = args.orderBy.createdAt === 'desc' ? -1 : 1;
+      const direction = args.orderBy.some((clause) => clause.createdAt === 'desc') ? -1 : 1;
       return [...stored]
         .sort((a, b) => direction * (a.createdAt.getTime() - b.createdAt.getTime()))
         .slice(0, args.take);
@@ -477,6 +478,17 @@ describe('sendAssistantMessage conversation history', () => {
     expect(contents).toContain('msg-10');
     expect(contents).not.toContain('msg-0');
     expect(contents.at(-1)).toBe('And the one before that?');
+  });
+
+  it('orders a question and its answer by role when both carry the same instant', async () => {
+    await sendAssistantMessage({
+      workspaceId: 'ws', userId: 'user', conversationId: CONVERSATION_ID, content: 'Continue',
+    });
+    // Reversed back to chronological, so the query has to ask for the reverse.
+    expect(dbMock.aiMessage.findMany.mock.calls[0][0].orderBy).toEqual([
+      { createdAt: 'desc' },
+      { role: 'desc' },
+    ]);
   });
 
   it('keeps history in chronological order after the system prompt', async () => {
@@ -506,5 +518,99 @@ describe('sendAssistantMessage conversation history', () => {
     const contents = sentMessages().map((message) => message.content);
     expect(contents).toContain('msg-39');
     expect(contents.at(-1)).toBe('Give me three more ideas like that');
+  });
+});
+
+describe('a proposal Bridge88 refuses', () => {
+  const CONVERSATION_ID = '66666666-6666-4666-8666-666666666666';
+  const graph = weeklyReelTemplate('architecture', ['Interior design', 'Luxury homes']);
+  const createAction = (edges: typeof graph.edges) => ({
+    kind: 'create_workflow',
+    summary: 'Create an architecture reel',
+    name: graph.name,
+    description: graph.description,
+    scheduleEnabled: false,
+    scheduleWeekdays: [],
+    scheduleHour: 9,
+    scheduleMinute: 0,
+    nodes: graph.nodes,
+    edges,
+  });
+  /** The same graph with one connection pointing at a port that does not exist. */
+  const broken = createAction([
+    ...graph.edges.slice(1),
+    { sourceKey: 'idea', sourcePort: 'inventedPort', targetKey: 'images', targetPort: 'prompts' },
+  ]);
+  const valid = createAction(graph.edges);
+  const reply = (action: unknown) => ({
+    object: { reply: 'Here is the workflow.', action },
+    model: 'test',
+    usage: {},
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  }) as any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(buildSystemPrompt).mockResolvedValue('SYSTEM');
+    dbMock.aiConversation.findFirst.mockResolvedValue({ id: CONVERSATION_ID });
+    dbMock.aiConversation.update.mockResolvedValue({});
+    dbMock.aiMessage.findMany.mockResolvedValue([]);
+    dbMock.aiMessage.create.mockReturnValue({});
+    dbMock.$transaction.mockResolvedValue([{}, { id: 'reply' }, {}]);
+    for (const model of [dbMock.post, dbMock.campaign, dbMock.mediaAsset, dbMock.mediaFolder, dbMock.workflow, dbMock.socialAccount]) {
+      model.findMany.mockResolvedValue([]);
+    }
+  });
+
+  const send = () => sendAssistantMessage({
+    workspaceId: 'ws',
+    userId: 'user',
+    conversationId: CONVERSATION_ID,
+    content: 'Copy my reel workflow but make the theme random',
+  });
+
+  const storedAssistantMessage = () =>
+    dbMock.aiMessage.create.mock.calls.map((call) => call[0].data).find((data) => data.role === 'ASSISTANT');
+
+  it('hands the model the reason and keeps the workflow it fixes', async () => {
+    vi.mocked(generateObject)
+      .mockResolvedValueOnce(reply(broken))
+      .mockResolvedValueOnce(reply(valid));
+
+    await send();
+
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    const repairPrompt = vi.mocked(generateObject).mock.calls[1][0].messages.at(-1);
+    expect(repairPrompt?.role).toBe('system');
+    expect(repairPrompt?.content).toContain('Bridge88 checked that action and refused it');
+    expect(repairPrompt?.content).toContain('port');
+    const stored = storedAssistantMessage();
+    expect(stored?.proposalStatus).toBe('PENDING');
+    expect(stored?.content).toBe('Here is the workflow.');
+  });
+
+  it('still answers, saying what it could not do, once the repairs run out', async () => {
+    vi.mocked(generateObject).mockResolvedValue(reply(broken));
+
+    await send();
+
+    expect(generateObject).toHaveBeenCalledTimes(3);
+    const stored = storedAssistantMessage();
+    expect(stored?.proposal).toBeUndefined();
+    expect(stored?.proposalStatus).toBeNull();
+    expect(stored?.content).toContain('Here is the workflow.');
+    expect(stored?.content).toContain('nothing was proposed');
+  });
+});
+
+describe('requests that name automation rather than a one-off action', () => {
+  it('does not refuse a video pipeline just because it says video', () => {
+    expect(assistantCapabilityReply('Build me a workflow that makes videos for an architecture page')).toBeNull();
+    expect(assistantCapabilityReply('Automate the media production for my page')).toBeNull();
+  });
+
+  it('still refuses the one-off actions it cannot take', () => {
+    expect(assistantCapabilityReply('Generate an image of a kitchen')).toContain('AI studio');
+    expect(assistantCapabilityReply('Publish the launch post now')).toContain('Composer');
   });
 });

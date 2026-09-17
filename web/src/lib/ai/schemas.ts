@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  normalizeAssistantAction,
   proposedWorkflowEdgeSchema,
   proposedWorkflowNodeSchema,
   workflowGraphEditSchema,
@@ -82,8 +83,11 @@ export type CalendarPlan = z.infer<typeof calendarPlanSchema>;
  */
 export const assistantReplySchema = z.object({
   reply: z.string(),
+  // Preprocessed rather than described harder in the prompt: the model reaches
+  // for its own spelling of these field names often enough that repairing them
+  // is worth more than another paragraph of instructions telling it not to.
   action: z
-    .discriminatedUnion('kind', [
+    .preprocess(normalizeAssistantAction, z.discriminatedUnion('kind', [
       z.object({
         kind: z.literal('create_drafts'),
         summary: z.string().min(1).max(500),
@@ -183,7 +187,7 @@ export const assistantReplySchema = z.object({
         /** Filled after confirmation so the completed action links to live run details. */
         runId: z.string().uuid().optional(),
       }).strict(),
-    ])
+    ]))
     .nullable()
     .default(null),
 }).strict();

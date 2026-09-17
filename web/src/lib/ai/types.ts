@@ -89,7 +89,12 @@ export interface AiProvider {
    */
   completeObject<T>(input: {
     messages: AiMessage[];
-    schema: z.ZodType<T>;
+    /**
+     * Output type and input type are separate on purpose: a schema may repair
+     * what it is handed before validating it, so what the model sends is not
+     * the shape the caller gets back.
+     */
+    schema: z.ZodType<T, z.ZodTypeDef, unknown>;
     schemaName: string;
     temperature?: number;
   }): Promise<AiObjectResult<T>>;

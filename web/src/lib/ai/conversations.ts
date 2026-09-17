@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { generateObject } from '@/lib/ai';
 import { buildSystemPrompt } from '@/lib/ai/brand-voice';
 import { assistantReplySchema, contentIdeasSchema, type AssistantReply } from '@/lib/ai/schemas';
+import type { AiMessage } from '@/lib/ai/types';
 import { can } from '@/lib/auth/rbac';
 import { forbidden, invalid, notFound } from '@/lib/errors';
 import { assertPostNotLive, savePost } from '@/lib/posts/service';
@@ -13,11 +14,21 @@ import { startWorkflowRun } from '@/lib/workflows/engine';
 
 const PROPOSAL_TTL_MS = 30 * 60 * 1000;
 
+/**
+ * A turn's question and its answer are written in one transaction, so Postgres
+ * stamps both with the same instant and createdAt alone leaves their order to
+ * chance — which showed up as an answer sitting above the question that
+ * prompted it. AiRole declares USER before ASSISTANT, so ordering on the role
+ * breaks that tie the way the conversation actually happened, for rows already
+ * stored as well as new ones.
+ */
+const TRANSCRIPT_ORDER = [{ createdAt: 'asc' as const }, { role: 'asc' as const }];
+
 export async function listConversations(workspaceId: string, userId: string) {
   return db.aiConversation.findMany({
     where: { workspaceId, userId },
     orderBy: { updatedAt: 'desc' },
-    include: { messages: { orderBy: { createdAt: 'asc' } } },
+    include: { messages: { orderBy: TRANSCRIPT_ORDER } },
   });
 }
 
@@ -50,7 +61,9 @@ export async function sendAssistantMessage(input: {
   // conversation past that length stops carrying anything recent.
   const previous = (await db.aiMessage.findMany({
     where: { conversationId: conversation.id, workspaceId: input.workspaceId },
-    orderBy: { createdAt: 'desc' },
+    // Reversed transcript order, so reversing it back below restores the turns
+    // exactly as they happened rather than leaving a tied pair to chance.
+    orderBy: [{ createdAt: 'desc' }, { role: 'desc' }],
     take: 30,
   })).reverse();
   const history = previous
@@ -112,25 +125,16 @@ export async function sendAssistantMessage(input: {
     });
     return { conversationId: conversation.id, message };
   }
-  const result = await generateObject({
+  const { reply, action, rejection } = await proposeWithRepair({
     workspaceId: input.workspaceId,
     userId: input.userId,
-    operation: 'CHAT',
-    schema: assistantReplySchema,
-    schemaName: 'assistant_reply',
     messages: [
       { role: 'system', content: system },
       ...history,
       { role: 'user', content },
     ],
   });
-  const assistantReply = assistantReplySchema.parse(result.object);
-  const hydratedAction = assistantReply.action
-    ? await hydrateProposal(input.workspaceId, assistantReply.action)
-    : null;
-  const proposal = hydratedAction
-    ? (hydratedAction as unknown as Prisma.InputJsonValue)
-    : undefined;
+  const proposal = action ? (action as unknown as Prisma.InputJsonValue) : undefined;
   const [, message] = await db.$transaction([
     db.aiMessage.create({ data: { conversationId: conversation.id, workspaceId: input.workspaceId, role: 'USER', content } }),
     db.aiMessage.create({
@@ -138,7 +142,7 @@ export async function sendAssistantMessage(input: {
         conversationId: conversation.id,
         workspaceId: input.workspaceId,
         role: 'ASSISTANT',
-        content: assistantReply.reply,
+        content: rejection ? `${reply}\n\n${rejection}` : reply,
         proposal,
         proposalStatus: proposal ? 'PENDING' : null,
       },
@@ -146,6 +150,76 @@ export async function sendAssistantMessage(input: {
     db.aiConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } }),
   ]);
   return { conversationId: conversation.id, message };
+}
+
+/** How many times the model may be shown its own rejected action and try again. */
+const PROPOSAL_ATTEMPTS = 3;
+
+/**
+ * One assistant turn, with the rejected proposal handed back to the model.
+ *
+ * A proposed workflow is checked properly — step types, port kinds, loops, one
+ * writer per input, required inputs — and a model that gets any of that wrong
+ * used to take the whole turn down with it: the reply was discarded, nothing
+ * was stored, and the user read a validation sentence written for a developer.
+ * The rejection is the single most useful thing the model could be told, so it
+ * is told, and most second attempts land.
+ *
+ * After the last attempt the turn still completes. The reply is kept and the
+ * reason is appended to it, because "here is what I could not do" is worth more
+ * to the person reading it than an error where their answer should be.
+ */
+async function proposeWithRepair(input: {
+  workspaceId: string;
+  userId: string;
+  messages: AiMessage[];
+}): Promise<{
+  reply: string;
+  action: NonNullable<AssistantReply['action']> | null;
+  rejection: string | null;
+}> {
+  const messages = [...input.messages];
+  let reply = '';
+  let lastRejection = '';
+
+  for (let attempt = 1; attempt <= PROPOSAL_ATTEMPTS; attempt += 1) {
+    const result = await generateObject({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      operation: 'CHAT',
+      schema: assistantReplySchema,
+      schemaName: 'assistant_reply',
+      messages,
+    });
+    const parsed = assistantReplySchema.parse(result.object);
+    reply = parsed.reply;
+    if (!parsed.action) return { reply, action: null, rejection: null };
+
+    try {
+      const action = await hydrateProposal(input.workspaceId, parsed.action);
+      return { reply, action, rejection: null };
+    } catch (error) {
+      lastRejection = error instanceof Error ? error.message : 'That action is not valid in this workspace.';
+      if (attempt === PROPOSAL_ATTEMPTS) break;
+      messages.push(
+        { role: 'assistant', content: JSON.stringify(parsed) },
+        {
+          role: 'system',
+          content: [
+            `Bridge88 checked that action and refused it. Nothing was written. The reason: ${lastRejection}`,
+            'Send the whole envelope again with exactly that problem fixed, keeping the same intent.',
+            'Write the reply field as if proposing it for the first time: do not apologise, and do not mention this correction.',
+          ].join(' '),
+        },
+      );
+    }
+  }
+
+  return {
+    reply,
+    action: null,
+    rejection: `I could not put that together as a valid workflow, so nothing was proposed. ${lastRejection} Tell me how you would like that part handled and I will try again.`,
+  };
 }
 
 async function storeReply(input: {
@@ -176,8 +250,18 @@ async function storeReply(input: {
   return message;
 }
 
+/**
+ * Words that mean "build me the machine that does this", not "do this now".
+ *
+ * The refusals below are about one-off actions the conversation cannot take.
+ * A request phrased as automation is a workflow proposal instead, and matching
+ * only the literal word "workflow" sent people asking for a pipeline or an
+ * automation a refusal for something they had not asked for.
+ */
+const AUTOMATION_WORDS = /\b(workflow|workflows|pipeline|automation|automate|automated|recurring|step|steps|node|nodes)\b/i;
+
 export function assistantCapabilityReply(content: string): string | null {
-  if (/\b(publish|delete|remove)\b/i.test(content) && !/\bworkflow\b/i.test(content)) {
+  if (/\b(publish|delete|remove)\b/i.test(content) && !AUTOMATION_WORDS.test(content)) {
     // Mentions the workflow route as well: refusing outright reads as "this
     // product cannot publish", when a Publish step is exactly how it does.
     return 'I cannot publish or delete posts directly from this assistant. To publish once, open the post in Composer, where Bridge88 checks your permission and asks for confirmation. To publish automatically, ask me to add a Publish step to a workflow and pick the channels it should post to.';
@@ -185,7 +269,7 @@ export function assistantCapabilityReply(content: string): string | null {
   if (
     /\b(generate|create|find|search|make)\b.*\b(image|images|media|asset|video|clips?)\b/i.test(content)
     && !/\battach\b/i.test(content)
-    && !/\bworkflow\b/i.test(content)
+    && !AUTOMATION_WORDS.test(content)
   ) {
     return 'Media search, image generation, and video jobs are not connected to this assistant yet. Open Media to find an existing filename you can ask me to attach, or open AI studio to start a simulated media job. To automate that pipeline, ask me to create a workflow.';
   }
