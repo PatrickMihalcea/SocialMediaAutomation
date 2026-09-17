@@ -3,6 +3,8 @@ import { Platform } from '@prisma/client';
 import {
   buildInitialDraft,
   draftStorageKey,
+  versionContent,
+  versionsMatch,
   versionsToPayload,
   type ComposerAccount,
 } from '@/lib/posts/composer';
@@ -122,5 +124,77 @@ describe('composer helpers', () => {
       .toEqual(['asset-existing', 'asset-new']);
     const unchanged = buildInitialDraft(accounts, initial, 'asset-existing');
     expect(unchanged.versions[accounts[0].id].media).toHaveLength(1);
+  });
+});
+
+describe('one post across every channel', () => {
+  const platform = (socialAccountId: string, text: string, mediaAssetId?: string) => ({
+    socialAccountId,
+    platform: Platform.MOCK,
+    text,
+    firstComment: null,
+    hashtags: [],
+    mentions: [],
+    link: null,
+    media: mediaAssetId
+      ? [{ mediaAssetId, altText: null, thumbnailOffset: null }]
+      : [],
+  });
+
+  const initial = (...platforms: ReturnType<typeof platform>[]) => ({
+    title: 'Launch',
+    campaignId: null,
+    scheduledAt: null,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    status: 'DRAFT' as const,
+    platforms,
+  });
+
+  /**
+   * Opening a post whose channels already differ must not turn sharing on:
+   * doing so would silently overwrite all but one of them before anyone
+   * touched a field.
+   */
+  it('starts unshared when an existing post says different things per channel', () => {
+    const draft = buildInitialDraft(accounts, initial(
+      platform(accounts[0].id, 'One'),
+      platform(accounts[1].id, 'Something else'),
+    ));
+
+    expect(draft.samePost).toBe(false);
+  });
+
+  it('starts shared when they agree, and for a new post', () => {
+    const same = buildInitialDraft(accounts, initial(
+      platform(accounts[0].id, 'One'),
+      platform(accounts[1].id, 'One'),
+    ));
+
+    expect(same.samePost).toBe(true);
+    expect(buildInitialDraft(accounts).samePost).toBe(true);
+  });
+
+  it('notices a difference in media, not just wording', () => {
+    const draft = buildInitialDraft(accounts, initial(
+      platform(accounts[0].id, 'One', '33333333-3333-4333-8333-333333333333'),
+      platform(accounts[1].id, 'One'),
+    ));
+
+    expect(draft.samePost).toBe(false);
+  });
+
+  it('copies content without carrying the channel identity across', () => {
+    const draft = buildInitialDraft(accounts, initial(
+      platform(accounts[0].id, 'Source'),
+      platform(accounts[1].id, 'Target'),
+    ));
+    const merged = { ...draft.versions[accounts[1].id], ...versionContent(draft.versions[accounts[0].id]) };
+
+    expect(merged.text).toBe('Source');
+    // The channel it publishes to is not content, and copying it would post
+    // twice to one account and never to the other.
+    expect(merged.socialAccountId).toBe(accounts[1].id);
+    expect(merged.platform).toBe(accounts[1].platform);
+    expect(versionsMatch(merged, draft.versions[accounts[0].id])).toBe(true);
   });
 });

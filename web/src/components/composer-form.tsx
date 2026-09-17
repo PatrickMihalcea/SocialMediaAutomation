@@ -21,6 +21,7 @@ import { uploadMedia } from '@/lib/media/upload-client';
 import { loadMoreComposerAssetsAction, type ComposerState } from '@/app/actions/posts';
 import { PendingButton } from '@/components/action-ui';
 import { ComposerPreview } from '@/components/composer-preview';
+import { versionContent, versionsMatch } from '@/lib/posts/composer';
 import { PlatformGlyph } from '@/components/visuals';
 import { CAPABILITIES } from '@/lib/social/capabilities';
 import { PLATFORM_LABELS } from '@/lib/social/labels';
@@ -111,6 +112,7 @@ export function ComposerForm({
    * at the size it will be seen — so the audio drives whatever video the
    * preview is showing rather than a second copy of it.
    */
+  const [syncSource, setSyncSource] = useState<string | null>(null);
   const previewRef = useRef<HTMLElement>(null);
   const soundtrackAudioRef = useRef<HTMLAudioElement | null>(null);
   const [playingTrack, setPlayingTrack] = useState<{ url: string; start: number } | null>(null);
@@ -195,27 +197,36 @@ export function ComposerForm({
     setDraft((current) => ({ ...current, ...patch }));
   }
 
+  /**
+   * Every edit to a channel version goes through here, which is what makes the
+   * shared post one line rather than a special case in each field: while it is
+   * on, a write to a synced channel is a write to all of them. A channel that
+   * has broken out is edited alone, as is any channel when the toggle is off.
+   */
   function updateVersion(accountId: string, patch: Partial<PlatformVersionState>) {
-    setDraft((current) => ({
-      ...current,
-      versions: {
-        ...current.versions,
-        [accountId]: { ...current.versions[accountId], ...patch },
-      },
-    }));
+    setDraft((current) => {
+      const targets =
+        current.samePost && !current.customAccountIds.includes(accountId)
+          ? current.selectedAccountIds.filter((id) => !current.customAccountIds.includes(id))
+          : [accountId];
+      const versions = { ...current.versions };
+      for (const id of targets) {
+        if (versions[id]) versions[id] = { ...versions[id], ...patch };
+      }
+      return { ...current, versions };
+    });
   }
 
   function toggleMedia(accountId: string, assetId: string) {
-    setDraft((current) => {
-      const version = current.versions[accountId];
-      const exists = version.media.some((item) => item.mediaAssetId === assetId);
-      const media = exists
+    const version = draft.versions[accountId];
+    if (!version) return;
+    const exists = version.media.some((item) => item.mediaAssetId === assetId);
+    // Through updateVersion, so attaching media to a shared post attaches it
+    // everywhere rather than only to the tab that happened to be open.
+    updateVersion(accountId, {
+      media: exists
         ? version.media.filter((item) => item.mediaAssetId !== assetId)
-        : [...version.media, { mediaAssetId: assetId, altText: '', thumbnailOffset: '', audioAssetId: '', audioStart: '' }];
-      return {
-        ...current,
-        versions: { ...current.versions, [accountId]: { ...version, media } },
-      };
+        : [...version.media, { mediaAssetId: assetId, altText: '', thumbnailOffset: '', audioAssetId: '', audioStart: '' }],
     });
   }
 
@@ -261,6 +272,65 @@ export function ComposerForm({
     );
     updateVersion(accountId, { media });
     setReplacement(null);
+  }
+
+  const syncedAccountIds = draft.selectedAccountIds.filter(
+    (accountId) => !draft.customAccountIds.includes(accountId),
+  );
+
+  /**
+   * Turning sharing on when the channels already differ is a destructive edit
+   * to all but one of them, so it asks which one survives instead of picking.
+   */
+  function toggleSamePost(next: boolean) {
+    if (!next) return updateDraft({ samePost: false });
+    const versions = syncedAccountIds.map((id) => draft.versions[id]).filter(Boolean);
+    const differ = versions.some((version) => !versionsMatch(version, versions[0]));
+    if (differ) return setSyncSource(draft.activeAccountId);
+    updateDraft({ samePost: true });
+  }
+
+  /** Adopt one channel's content everywhere, and share from then on. */
+  function applySyncSource(accountId: string) {
+    setDraft((current) => {
+      const source = current.versions[accountId];
+      const versions = { ...current.versions };
+      for (const id of current.selectedAccountIds) {
+        if (!current.customAccountIds.includes(id) && versions[id]) {
+          versions[id] = { ...versions[id], ...versionContent(source) };
+        }
+      }
+      return { ...current, samePost: true, activeAccountId: accountId, versions };
+    });
+    setSyncSource(null);
+  }
+
+  function setChannelCustom(accountId: string, custom: boolean) {
+    if (!custom) {
+      const shared = draft.selectedAccountIds.find(
+        (id) => !draft.customAccountIds.includes(id) && id !== accountId,
+      );
+      const source = shared ? draft.versions[shared] : null;
+      if (
+        source &&
+        !versionsMatch(draft.versions[accountId], source) &&
+        !window.confirm('Re-syncing replaces this channel\'s own wording and media with the shared post. Continue?')
+      ) {
+        return;
+      }
+      setDraft((current) => ({
+        ...current,
+        customAccountIds: current.customAccountIds.filter((id) => id !== accountId),
+        versions: source
+          ? { ...current.versions, [accountId]: { ...current.versions[accountId], ...versionContent(source) } }
+          : current.versions,
+      }));
+      return;
+    }
+    updateDraft({
+      customAccountIds: [...draft.customAccountIds, accountId],
+      activeAccountId: accountId,
+    });
   }
 
   function toggleAccount(accountId: string, selected: boolean) {
@@ -416,6 +486,52 @@ export function ComposerForm({
   const hasPostActions = showSaveAction || showPublishAction || showScheduleAction || showApprovalAction;
   return (
     <>
+    <>
+    <Dialog
+      open={Boolean(syncSource)}
+      eyebrow="Same post everywhere"
+      title="These channels currently say different things"
+      onClose={() => setSyncSource(null)}
+      actions={
+        <>
+          <Button type="button" variant="tertiary" onClick={() => setSyncSource(null)}>Go back</Button>
+          <Button type="button" onClick={() => syncSource && applySyncSource(syncSource)}>
+            Use this one everywhere
+          </Button>
+        </>
+      }
+    >
+      <p className="b88-body-sm">
+        Sharing one post replaces the wording and media on every synced channel. Choose the version to
+        keep — the others are overwritten, and this cannot be undone.
+      </p>
+      <div className="mt-3 space-y-2">
+        {selectedAccounts
+          .filter((account) => !draft.customAccountIds.includes(account.id))
+          .map((account) => {
+            const version = draft.versions[account.id];
+            return (
+              <label key={account.id} className="flex cursor-pointer gap-3 rounded-md border border-hairline p-3">
+                <input
+                  type="radio"
+                  name="sync-source"
+                  className="b88-checkbox mt-1"
+                  checked={syncSource === account.id}
+                  onChange={() => setSyncSource(account.id)}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-[540]">
+                    {PLATFORM_LABELS[account.platform]} · {account.accountHandle ?? account.accountName}
+                  </span>
+                  <span className="b88-caption mt-1 block truncate">
+                    {version?.text.trim() || 'No caption'} · {version?.media.length ?? 0} media
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+      </div>
+    </Dialog>
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)]">
       <section className="b88-card">
         {postStatus === 'PUBLISHED' && (
@@ -472,22 +588,64 @@ export function ComposerForm({
                 const selected = draft.selectedAccountIds.includes(account.id);
                 const handle = account.accountHandle ?? account.accountName;
                 return (
-                  <Checkbox
-                    key={account.id}
-                    label={`${PLATFORM_LABELS[account.platform]} · ${handle}`}
-                    checked={selected}
-                    disabled={readOnly || (selected && draft.selectedAccountIds.length === 1)}
-                    onChange={(event) => toggleAccount(account.id, event.target.checked)}
-                  />
+                  <div key={account.id} className="flex items-center justify-between gap-2">
+                    <Checkbox
+                      label={`${PLATFORM_LABELS[account.platform]} · ${handle}`}
+                      checked={selected}
+                      disabled={readOnly || (selected && draft.selectedAccountIds.length === 1)}
+                      onChange={(event) => toggleAccount(account.id, event.target.checked)}
+                    />
+                    {/* Only meaningful while there is a shared post to break
+                        out of, and only for a channel actually being posted to. */}
+                    {selected && draft.samePost && !readOnly && (
+                      <Button
+                        type="button"
+                        variant="tertiary"
+                        onClick={() => setChannelCustom(account.id, !draft.customAccountIds.includes(account.id))}
+                      >
+                        {draft.customAccountIds.includes(account.id) ? 'Re-sync' : 'Customise'}
+                      </Button>
+                    )}
+                  </div>
                 );
               })}
+            </div>
+            <div className="mt-3 border-t border-hairline-soft pt-3">
+              <Checkbox
+                label="Same post everywhere"
+                description="One caption and the same media on every channel. Turn it off, or customise a single channel, to write for each one separately."
+                checked={draft.samePost}
+                disabled={readOnly}
+                onChange={(event) => toggleSamePost(event.target.checked)}
+              />
             </div>
           </div>
 
           <div>
-            <p className="b88-label">Edit version</p>
+            <p className="b88-label">
+              {draft.samePost && syncedAccountIds.length > 0 ? 'Editing' : 'Edit version'}
+            </p>
             <div className="flex flex-wrap gap-2">
-              {selectedAccounts.map((account) => {
+              {/* While sharing, the synced channels are one thing to edit, so
+                  they get one button rather than a row of tabs that all show
+                  the same words. */}
+              {draft.samePost && syncedAccountIds.length > 0 && (
+                <Button
+                  type="button"
+                  variant={syncedAccountIds.includes(draft.activeAccountId) ? 'primary' : 'secondary'}
+                  onClick={() => updateDraft({ activeAccountId: syncedAccountIds[0] })}
+                >
+                  <span className="font-[540]">
+                    {syncedAccountIds.length === 1
+                      ? PLATFORM_LABELS[accounts.find((a) => a.id === syncedAccountIds[0])!.platform]
+                      : `All ${syncedAccountIds.length} synced channels`}
+                  </span>
+                </Button>
+              )}
+              {(draft.samePost
+                ? selectedAccounts.filter((account) => draft.customAccountIds.includes(account.id))
+                : selectedAccounts
+              ).map((account) => {
                 const active = account.id === draft.activeAccountId;
                 const issues = fieldErrors[account.id]?.length ?? 0;
                 const handle = account.accountHandle ?? account.accountName;
@@ -870,6 +1028,7 @@ export function ComposerForm({
         ))}
       </aside>
     </div>
+    </>
     <Dialog
       open={publishConfirmOpen}
       eyebrow="Confirm publishing"
@@ -926,6 +1085,11 @@ function mergeDraft(base: ComposerDraft, stored: ComposerDraft, preserveInitialP
       ? requestedActiveAccountId
       : safeSelectedAccountIds[0],
     selectedAccountIds: safeSelectedAccountIds,
+    // ?? not ||: a restored draft that was deliberately unshared must stay so.
+    samePost: stored.samePost ?? base.samePost,
+    customAccountIds: (stored.customAccountIds ?? base.customAccountIds).filter((accountId) =>
+      safeSelectedAccountIds.includes(accountId),
+    ),
     sourceUpdatedAt: stored.sourceUpdatedAt ?? base.sourceUpdatedAt,
     versions,
   };

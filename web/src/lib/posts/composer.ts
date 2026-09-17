@@ -54,6 +54,13 @@ export type ComposerDraft = {
   scheduledAt: string;
   activeAccountId: string;
   selectedAccountIds: string[];
+  /**
+   * One post across every channel, which is what people almost always mean.
+   * Off means each channel is edited on its own.
+   */
+  samePost: boolean;
+  /** Channels that opted out of the shared post and keep their own content. */
+  customAccountIds: string[];
   sourceUpdatedAt: string | null;
   versions: Record<string, PlatformVersionState>;
 };
@@ -81,6 +88,46 @@ export type ComposerInitial = {
     }>;
   }>;
 };
+
+/**
+ * Whether two channel versions say the same thing.
+ *
+ * Compared field by field rather than by JSON string: key order is not
+ * meaningful, and media is compared by what it points at, not by the empty
+ * strings the form keeps beside it.
+ */
+export function versionsMatch(a: PlatformVersionState, b: PlatformVersionState): boolean {
+  return (
+    a.text === b.text &&
+    a.hashtags === b.hashtags &&
+    a.mentions === b.mentions &&
+    a.link === b.link &&
+    a.firstComment === b.firstComment &&
+    a.media.length === b.media.length &&
+    a.media.every((item, index) => {
+      const other = b.media[index];
+      return (
+        other &&
+        item.mediaAssetId === other.mediaAssetId &&
+        item.altText === other.altText &&
+        (item.audioAssetId ?? '') === (other.audioAssetId ?? '') &&
+        (item.audioStart ?? '') === (other.audioStart ?? '')
+      );
+    })
+  );
+}
+
+/** The content of one version, without the identity of the channel it is on. */
+export function versionContent(version: PlatformVersionState): Partial<PlatformVersionState> {
+  return {
+    text: version.text,
+    hashtags: version.hashtags,
+    mentions: version.mentions,
+    link: version.link,
+    firstComment: version.firstComment,
+    media: version.media.map((item) => ({ ...item })),
+  };
+}
 
 export function draftStorageKey(slug: string, postId?: string) {
   return `composer-draft:${slug}:${postId ?? 'new'}`;
@@ -164,8 +211,27 @@ export function buildInitialDraft(
         .filter((accountId) => accounts.some((account) => account.id === accountId)) ??
       accounts.slice(0, 1).map((account) => account.id),
     sourceUpdatedAt: initial?.updatedAt ?? null,
+    // A new post starts shared. An existing one starts however it was left: if
+    // its channels already say different things, turning this on would be an
+    // unasked-for edit to every one of them.
+    samePost: selectedVersionsMatch(initial, accounts, versions),
+    customAccountIds: [],
     versions,
   };
+}
+
+function selectedVersionsMatch(
+  initial: ComposerInitial | undefined,
+  accounts: ComposerAccount[],
+  versions: Record<string, PlatformVersionState>,
+): boolean {
+  if (!initial) return true;
+  const selected = initial.platforms
+    .map((platform) => platform.socialAccountId)
+    .filter((accountId) => accounts.some((account) => account.id === accountId))
+    .map((accountId) => versions[accountId])
+    .filter(Boolean);
+  return selected.every((version) => versionsMatch(version, selected[0]));
 }
 
 function mapVersion(version: PlatformVersionState): PostPlatformInput {
