@@ -49,7 +49,12 @@ const CUSTOM_VALUE = '__custom__';
 
 /** What the burnt-in label reads as on the first cut. */
 function previewOverlay(template: string): string {
-  const filled = template.replaceAll('{index}', '1').replaceAll('{title}', 'Coastal minimal');
+  // {choice} is retired from the picker but still lives in saved configs, and
+  // it now means the same number as {index}.
+  const filled = template
+    .replaceAll('{index}', '1')
+    .replaceAll('{choice}', '1')
+    .replaceAll('{title}', 'Coastal minimal');
   return filled.trim() || 'nothing';
 }
 

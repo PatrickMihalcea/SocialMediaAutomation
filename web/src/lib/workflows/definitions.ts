@@ -431,7 +431,11 @@ export const NODE_DEFINITIONS = {
     ],
     outputs: [{ id: 'video', label: 'Video', type: media([...VIDEOS]) }],
     configSchema: z.object({
-      /** {index} is the 1-based cut number; {choice} starts at 1 after an opening cut. */
+      /**
+       * {index} is the cut number from 1, counting only the cuts that carry a
+       * number — an opening card is not one of them. {choice} is a retired
+       * spelling of the same thing, kept because saved configs still hold it.
+       */
       template: z.string().max(200).default('{index}'),
       /** Optional text used only on the first cut, before template takes over. */
       firstTemplate: z.string().max(200).nullable().default(null),

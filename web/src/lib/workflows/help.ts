@@ -11,18 +11,16 @@ export interface WorkflowFieldHelp {
 
 export const TEXT_OVERLAY_PRESETS = [
   { label: 'Number', value: '{index}', example: '1' },
-  { label: 'Choice number after opening', value: '{choice}', example: '1' },
   { label: 'Title', value: '{title}', example: 'Coastal minimal' },
   { label: 'Number and title', value: '{index}. {title}', example: '1. Coastal minimal' },
   { label: 'No changing text', value: '', example: 'No overlay text' },
 ] as const;
 
 export const TEXT_OVERLAY_TOKENS = [
-  { token: '{index}', label: 'Number', description: 'The cut number, starting at 1.' },
   {
-    token: '{choice}',
-    label: 'Choice number',
-    description: 'Starts at 1 on the second cut, for videos with an opening card.',
+    token: '{index}',
+    label: 'Number',
+    description: 'The cut number, starting at 1. An opening card is not counted, so the first numbered cut after one is 1.',
   },
   {
     token: '{title}',
