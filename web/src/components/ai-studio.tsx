@@ -406,7 +406,7 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
               <button key={asset.id} type="button" data-asset-id={asset.id} onClick={() => setSelected(asset.id)} className="relative grid min-h-28 grid-cols-[80px_minmax(0,1fr)] items-center gap-3 rounded-lg border bg-canvas p-3 text-left transition-opacity hover:opacity-80 sm:block sm:rounded-[24px] sm:p-4" style={{ borderColor: selected === asset.id ? 'var(--ink)' : 'var(--hairline)' }}>
                 {selected === asset.id && <span className="absolute right-6 top-6 z-10 flex size-7 items-center justify-center rounded-full bg-ink text-canvas" aria-label="Selected"><Check size={16} /></span>}
                 {asset.type === 'IMAGE' ? (
-                  <img src={asset.url} alt={humanizeMachineValue(asset.filename)} className="size-20 rounded-md bg-surface-soft object-contain sm:aspect-square sm:size-auto sm:w-full" />
+                  <img src={asset.url} alt={humanizeMachineValue(asset.filename)} className="size-20 rounded-md bg-surface-soft object-contain sm:size-auto sm:h-auto sm:w-full" />
                 ) : asset.type === 'VIDEO' && !simulated ? (
                   <video src={asset.url} controls className="aspect-video w-full rounded-md bg-surface-soft object-contain" onClick={(event) => event.stopPropagation()} />
                 ) : asset.type === 'VIDEO' ? (

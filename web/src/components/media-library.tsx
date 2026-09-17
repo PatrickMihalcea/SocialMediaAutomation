@@ -638,7 +638,12 @@ function AssetPreview({ asset }: { asset: MediaLibraryAsset }) {
   const placeholderType = asset.type === 'IMAGE' || asset.type === 'GIF' ? 'image' : 'video';
   return (
     <MediaFrame
-      ratio="1:1"
+      // The asset's own shape, not a square. A 2:3 portrait in a 1:1 frame is
+      // letterboxed down to two thirds of the width it could have used, which
+      // reads as a crop and makes a vertical image harder to judge than the
+      // grid being perfectly even is worth. Square only when nothing was
+      // measured — a file still processing has no dimensions yet.
+      ratio={asset.width && asset.height ? `${asset.width} / ${asset.height}` : '1:1'}
       tone="mint"
       type={asset.previewUrl ? 'image' : placeholderType}
       src={asset.previewUrl || null}

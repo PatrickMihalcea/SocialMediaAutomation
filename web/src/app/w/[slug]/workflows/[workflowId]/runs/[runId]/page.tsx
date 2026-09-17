@@ -7,6 +7,7 @@ import { readSnapshot, toGraph } from '@/lib/workflows/snapshot';
 import { indegrees, successorsOf } from '@/lib/workflows/graph';
 import { WorkflowRunView } from '@/components/workflow-run-view';
 import { postsForRun } from '@/lib/workflows/run-posts';
+import { storage } from '@/lib/storage';
 
 export const metadata = { title: 'Workflow run' };
 
@@ -42,7 +43,21 @@ async function RunDetail({
         include: {
           producedAssets: {
             orderBy: [{ port: 'asc' }, { position: 'asc' }],
-            include: { mediaAsset: { select: { id: true, filename: true, type: true } } },
+            include: {
+              mediaAsset: {
+                // Dimensions and a key to sign: a run that generated pictures
+                // should show the pictures, not a list of filenames.
+                select: {
+                  id: true,
+                  filename: true,
+                  type: true,
+                  width: true,
+                  height: true,
+                  thumbnailKey: true,
+                  storageKey: true,
+                },
+              },
+            },
           },
         },
       },
@@ -52,6 +67,7 @@ async function RunDetail({
 
   const graph = toGraph(readSnapshot(run.graph));
   const posts = await postsForRun(ctx.workspace.id, run.nodeRuns);
+  const previews = await previewUrls(run.nodeRuns);
 
   return (
     <>
@@ -93,6 +109,9 @@ async function RunDetail({
               id: link.mediaAsset.id,
               filename: link.mediaAsset.filename,
               type: link.mediaAsset.type,
+              width: link.mediaAsset.width,
+              height: link.mediaAsset.height,
+              url: previews.get(link.mediaAsset.id) ?? null,
             })),
             // Read from the posts table, not from this node's frozen output:
             // approving a post has to stop this row saying "Waiting for you".
@@ -134,4 +153,29 @@ function levelsOf(graph: ReturnType<typeof toGraph>): string[][] {
   const orphans = graph.nodes.filter((n) => !seen.has(n.id)).map((n) => n.id);
   if (orphans.length) levels.push(orphans);
   return levels;
+}
+
+/**
+ * One signed URL per produced asset, thumbnail where there is one.
+ *
+ * Signed in a batch here rather than per row in the client: these expire, so
+ * they cannot be cached in the run snapshot, and a picture is the fastest way
+ * to see whether a generation step did what you asked.
+ */
+async function previewUrls(
+  nodeRuns: { producedAssets: { mediaAsset: { id: string; thumbnailKey: string | null; storageKey: string; type: string } }[] }[],
+): Promise<Map<string, string>> {
+  const assets = new Map<string, { key: string }>();
+  for (const node of nodeRuns) {
+    for (const link of node.producedAssets) {
+      const asset = link.mediaAsset;
+      // Audio has no still worth showing, and a signed URL for one is wasted work.
+      if (asset.type === 'AUDIO') continue;
+      assets.set(asset.id, { key: asset.thumbnailKey ?? asset.storageKey });
+    }
+  }
+  const signed = await Promise.all(
+    [...assets].map(async ([id, { key }]) => [id, await storage().signedUrl(key)] as const),
+  );
+  return new Map(signed);
 }

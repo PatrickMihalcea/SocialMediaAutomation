@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import type { WorkflowNodeRunStatus, WorkflowRunStatus } from '@prisma/client';
-import { Badge, Button, humanizeMachineValue, StatusMessage } from '@/bridge88/components';
+import { Badge, Button, humanizeMachineValue, MediaFrame, StatusMessage } from '@/bridge88/components';
 import { cancelRunAction, retryNodeAction } from '@/app/actions/workflows';
 import {
   NODE_STATUS_LABEL,
@@ -28,7 +28,7 @@ interface NodeRun {
   durationMs: number | null;
   error: string | null;
   /** Media this step emitted, in port then position order. */
-  produced?: { id: string; filename: string; type: string }[];
+  produced?: { id: string; filename: string; type: string; width?: number | null; height?: number | null; url?: string | null }[];
   /** Set by the draft and publish steps, which create a post. */
   post?: { id: string; awaitingApproval: boolean; releaseOnApproval: string | null } | null;
 }
@@ -251,6 +251,35 @@ export function WorkflowRunView({
                       reading a failure is to go fix the step that failed — both
                       were previously dead ends that left you navigating by hand.
                     */}
+                    {/*
+                      The pictures themselves. Reading "View treehouse-3.png"
+                      tells you a step finished; seeing the frame tells you
+                      whether it did what you asked, which is the only question
+                      anyone opens a run to answer.
+                    */}
+                    {!!(node.produced ?? []).some((asset) => asset.url) && (
+                      <div className="mt-3 flex flex-wrap gap-3">
+                        {(node.produced ?? [])
+                          .filter((asset) => asset.url)
+                          .slice(0, 6)
+                          .map((asset) => (
+                            <Link
+                              key={asset.id}
+                              href={`/w/${slug}/media?asset=${encodeURIComponent(asset.id)}`}
+                              className="w-24 shrink-0"
+                              title={humanizeMachineValue(asset.filename)}
+                            >
+                              <MediaFrame
+                                ratio={asset.width && asset.height ? `${asset.width} / ${asset.height}` : '1:1'}
+                                tone="mint"
+                                type="image"
+                                src={asset.url}
+                                alt={humanizeMachineValue(asset.filename)}
+                              />
+                            </Link>
+                          ))}
+                      </div>
+                    )}
                     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
                       {(node.produced ?? []).slice(0, 3).map((asset) => (
                         <Link
