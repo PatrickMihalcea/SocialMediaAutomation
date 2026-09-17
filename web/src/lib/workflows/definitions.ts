@@ -237,7 +237,14 @@ export const NODE_DEFINITIONS = {
       size: z.enum(IMAGE_SIZE_VALUES).default(DEFAULT_IMAGE_SIZE),
       /** Stops a runaway prompt list from spending the whole month's quota. */
       maxImages: z.number().int().min(1).max(20).default(8),
-      /** Per-step escape hatch for workflow QA: no paid image API call. */
+      /**
+       * Where the pixels come from, per step. They cost differently enough to
+       * be worth choosing: mock is free, the API bills per image, and codex
+       * spends a ChatGPT subscription but is the only one that renders a true
+       * 9:16. 'default' follows AI_IMAGE_PROVIDER.
+       */
+      provider: z.enum(['default', 'mock', 'openai', 'image-use']).default('default'),
+      /** Superseded by `provider`; kept so steps saved before it keep mocking. */
       useMockGeneration: z.boolean().default(false),
     }),
     longRunning: true,

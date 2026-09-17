@@ -30,6 +30,11 @@ Switch boundaries independently:
 - `AI_PROVIDER=openai` plus `OPENAI_API_KEY`
 - `AI_IMAGE_PROVIDER=mock` to keep that real text provider while using fast,
   deterministic local images for workflow QA (`inherit` is the default)
+- `AI_IMAGE_PROVIDER=image-use` to default image generation to the vendored
+  [image-use](https://github.com/leeguooooo/image-use) CLI on your own ChatGPT
+  subscription instead of a metered API key. The studio and each Image generator
+  step can override it per generation, and it is the only source that renders a
+  true 9:16. See step 5 of `docs/deploying.md`.
 - `STORAGE_DRIVER=s3` plus the `S3_*` / Cloudflare R2 variables
 - `QUEUE_DRIVER=bullmq` plus `REDIS_URL`
 - add platform OAuth credentials listed in `.env.example`
@@ -42,7 +47,9 @@ Official social APIs often need review beyond credentials:
 - TikTok: Content Posting API audit for public publishing
 - YouTube: Google API audit for public uploads beyond unverified quota
 
-No integration scrapes or automates a browser.
+No platform integration scrapes or automates a browser; the opt-in
+`image-use` image provider does drive your own signed-in Chrome, which is why
+it is off unless you configure it.
 
 ## Publishing reliability
 

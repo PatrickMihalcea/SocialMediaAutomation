@@ -499,6 +499,8 @@ export function MediaLibrary({
                 return (
                 <article
                   key={asset.id}
+                  data-asset-id={asset.id}
+                  data-asset-status={asset.status}
                   ref={(element) => {
                     if (element && asset.id === createdDerivativeId) {
                       element.scrollIntoView({ behavior: 'smooth', block: 'center' });

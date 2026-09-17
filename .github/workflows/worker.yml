@@ -119,6 +119,38 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_TEXT_MODEL: ${{ secrets.OPENAI_TEXT_MODEL }}
           OPENAI_IMAGE_MODEL: ${{ secrets.OPENAI_IMAGE_MODEL }}
+          # Images come from the vendored image-use CLI against the account's
+          # own ChatGPT subscription, so they cost no OpenAI API credit. Text
+          # stays on AI_PROVIDER above — image-use only makes pictures.
+          #
+          # This is the only place the setting is 'image-use'. The web tier has
+          # no CLI to run, so it leaves AI_IMAGE_PROVIDER pointing here and the
+          # studio queues a job for this worker instead of generating inline.
+          # Unconditional on purpose. Falling back to the API when the
+          # credential is missing would turn an expired secret into an
+          # unnoticed OpenAI bill — the one failure worth making loud. A
+          # credential problem pauses image generation and says how to fix it;
+          # posting and rendering are unaffected.
+          AI_IMAGE_PROVIDER: 'image-use'
+          IMAGE_USE_BIN: ${{ github.workspace }}/web/vendor/image-use/image-use
+          # Explicit rather than trusting the script's shebang: the exec bit and
+          # whichever python3 happens to be first on PATH are both easier to
+          # lose than one line here. setup-python above pins 3.12; the CLI needs 3.10+.
+          IMAGE_USE_PYTHON: 'python3'
+          # Forced, not 'auto'. The browser backend needs a Chrome signed in to
+          # chatgpt.com, which a throwaway runner cannot have, so auto would
+          # only probe for it and fall back here anyway.
+          IMAGE_USE_BACKEND: 'codex'
+          # Pinned deliberately. The CLI's default driver model is refused with
+          # "requires a newer version of Codex" unless the caller reports a very
+          # recent codex CLI, and a runner with no codex install reports the
+          # script's floor (0.130.0) — measured, not guessed. This model is
+          # accepted at that floor. Revisit if image generation starts 400ing.
+          IMAGE_USE_MODEL: 'gpt-5.5'
+          # The OAuth credential the codex backend runs on. The store holds the
+          # refreshed copy between runs; the bootstrap secret seeds it once.
+          CODEX_AUTH_STORE_KEY: 'system/codex-auth.enc'
+          CODEX_AUTH_BOOTSTRAP: ${{ secrets.CODEX_AUTH_JSON }}
           RENDER_DRIVER: 'ffmpeg'
           AUDIO_ANALYZER: 'librosa'
           PYTHON_BIN: '.venv-audio/bin/python'

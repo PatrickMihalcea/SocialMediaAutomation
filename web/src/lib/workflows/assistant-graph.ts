@@ -135,7 +135,7 @@ export function workflowAssistantSkill(): string {
     'run_workflow action: {"kind":"run_workflow","summary":string,"workflowId":uuid,"workflowName":string}.',
     'CREATE_DRAFT and PUBLISH take title, caption, hashtags and firstComment as inputs as well as settings, and a connected input overrides the setting. Wire an IDEA_GENERATOR output into them when the user wants the copy written per run; leave the setting as typed text when the same wording should go out every time. Their mentions and link settings have no inputs and are typed only.',
     'IDEA_GENERATOR always outputs postTitle, caption and hashtags alongside prompts and titles, so connect those rather than adding additionalOutputs for them. To control how that copy reads, set its titleGuidance, captionGuidance or hashtagsGuidance settings — one instruction each, such as "two sentences, no emoji" — and leave them empty to let the model choose.',
-    'IMAGE_GENERATOR and ANIMATE_IMAGE support useMockGeneration:true. Use it when the user is testing workflow structure or asks to avoid generation cost; leave it false for final creative output.',
+    'IMAGE_GENERATOR takes provider: "default" | "mock" | "openai" | "image-use". Use "mock" when the user is testing workflow structure or asks to avoid generation cost, "image-use" when they want their ChatGPT subscription rather than a per-image API bill (it is also the only one that renders size 1024x1820, a true 9:16 with no crop into vertical video), and leave it "default" for final creative output unless they say otherwise. ANIMATE_IMAGE still takes useMockGeneration:true for the same testing purpose.',
     'Catalogue:',
     ...lines,
   ].join('\n');

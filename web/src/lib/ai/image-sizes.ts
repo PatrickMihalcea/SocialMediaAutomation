@@ -1,11 +1,18 @@
+import type { ImageProviderName } from '@/lib/ai/provider-selection';
+
 /**
- * The sizes the image model will generate.
+ * The sizes an image provider will generate.
  *
- * The three ratios are fixed by the provider — 2:3, 3:2 and 1:1 — and none of
- * them is 9:16. So these are labelled by shape, not by destination: calling 2:3
- * "Reels" while the video presets call 9:16 "Reels" reads as a promise that the
- * two match, and they do not. `cropsInto` carries the real cost of composing
- * each shape into its matching video format, which the UI states outright.
+ * Which ones are available depends on the provider, and the difference is not
+ * cosmetic: the OpenAI image API offers 2:3, 3:2 and 1:1 and nothing else, so
+ * a vertical video frame has to be cropped out of a 2:3 image. The subscription
+ * backend honours a requested ratio instead — asking for 9:16 returned
+ * 941x1672, measured — which is an exact vertical frame and no crop at all.
+ *
+ * `requires` names the provider a size needs; null means every provider has it.
+ * The pixel count is a request either way — the subscription backend normalises
+ * it (1024x1024 came back 1254x1254) while keeping the ratio — so `cropsInto`
+ * describes the shape, not the resolution.
  *
  * Client-safe: imported by the AI studio and the workflow config panel.
  */
@@ -17,18 +24,29 @@ export const IMAGE_SIZE_PRESETS = [
     suits: 'vertical video (9:16)',
     /** Roughly how much a fill-frame render discards. 0 means an exact fit. */
     cropsInto: 16,
+    requires: null,
   },
   {
     id: '1536x1024',
     label: 'Landscape 3:2 · 1536×1024',
     suits: 'widescreen video (16:9)',
     cropsInto: 16,
+    requires: null,
   },
   {
     id: '1024x1024',
     label: 'Square 1:1 · 1024×1024',
     suits: 'square video (1:1)',
     cropsInto: 0,
+    requires: null,
+  },
+  {
+    id: '1024x1820',
+    label: 'Vertical 9:16 · 1024×1820',
+    suits: 'vertical video (9:16)',
+    cropsInto: 0,
+    /** Only the subscription backend renders a true 9:16; the API has no such size. */
+    requires: 'image-use',
   },
 ] as const;
 
@@ -59,4 +77,32 @@ export function imageSizeFitNote(size: string): string | null {
   if (!preset) return null;
   if (preset.cropsInto === 0) return `Fits ${preset.suits} exactly.`;
   return `Suits ${preset.suits}, which crops about ${preset.cropsInto}% unless Beat slideshow is set to show the full image.`;
+}
+
+/** The only sizes the OpenAI image API accepts. Anything else is a 400. */
+export const OPENAI_IMAGE_SIZES = ['1024x1024', '1536x1024', '1024x1536'] as const;
+export type OpenAiImageSize = (typeof OPENAI_IMAGE_SIZES)[number];
+
+export function isOpenAiImageSize(size: string): size is OpenAiImageSize {
+  return (OPENAI_IMAGE_SIZES as readonly string[]).includes(size);
+}
+
+/**
+ * Whether a provider can produce this shape.
+ *
+ * An unknown provider — a workflow step left on the deployment default — is
+ * allowed through, because the answer depends on configuration the browser
+ * cannot see. The provider itself refuses rather than silently reshaping.
+ */
+export function imageSizeAvailableFor(size: string, provider?: ImageProviderName): boolean {
+  const preset = IMAGE_SIZE_PRESETS.find((candidate) => candidate.id === size);
+  if (!preset) return false;
+  if (!preset.requires || !provider) return true;
+  return preset.requires === provider;
+}
+
+export function imageSizesFor(provider?: ImageProviderName): ImageSize[] {
+  return IMAGE_SIZE_PRESETS.filter((preset) => imageSizeAvailableFor(preset.id, provider)).map(
+    (preset) => preset.id,
+  );
 }

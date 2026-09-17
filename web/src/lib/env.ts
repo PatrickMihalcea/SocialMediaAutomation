@@ -64,7 +64,55 @@ const schema = z.object({
   // Allows workflow QA to keep real text reasoning while replacing the slow,
   // paid image call with deterministic local placeholders. "inherit" preserves
   // the old one-provider behavior.
-  AI_IMAGE_PROVIDER: z.enum(['inherit', 'mock', 'openai']).default('inherit'),
+  AI_IMAGE_PROVIDER: z.enum(['inherit', 'mock', 'openai', 'image-use']).default('inherit'),
+
+  /**
+   * Image generation by running the `image-use` CLI, which renders against the
+   * operator's own ChatGPT or Gemini subscription instead of a metered API key.
+   *
+   * Empty by default, and the provider reports itself unconfigured until the
+   * binary is named, so a checkout that never opts in cannot spawn anything.
+   * Every other IMAGE_USE_* knob the CLI documents (IMAGE_USE_PROJECT,
+   * IMAGE_USE_MODEL, IMAGE_USE_IMAGE_MODEL …) is passed through to the child
+   * process untouched — only the ones the app itself decides are listed here.
+   */
+  IMAGE_USE_BIN: z.string().default(''),
+  /**
+   * An interpreter to run the CLI with, for a machine whose `python3` predates
+   * the 3.10 it needs. Empty means execute the script directly.
+   */
+  IMAGE_USE_PYTHON: z.string().default(''),
+  IMAGE_USE_BACKEND: z.enum(['auto', 'web', 'codex', 'gemini', 'agy']).default('auto'),
+  IMAGE_USE_FORMAT: z.enum(['png', 'jpeg', 'webp']).default('png'),
+  /** Comma-separated saved style/character names to stack onto every prompt. */
+  IMAGE_USE_STYLE: z.string().default(''),
+  /** The CLI's own budget for one generation. Large images really do take minutes. */
+  IMAGE_USE_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+  /**
+   * How long a run may sit in the CLI's cross-process queue before the budget
+   * above even starts. The web backend allows one generation at a time machine
+   * wide, so a second job waits out the first; this is what stops the wrapper
+   * killing a run that is merely waiting its turn.
+   */
+  IMAGE_USE_QUEUE_WAIT_MS: z.coerce.number().int().nonnegative().default(120_000),
+
+  /**
+   * Where the refreshed codex credential is kept between runs, as an object
+   * storage key. Empty — the default — means the machine's own ~/.codex is
+   * authoritative, which is right for a laptop or a long-lived worker and
+   * wrong only for a runner that is destroyed after every pass.
+   *
+   * The object is AES-256-GCM ciphertext under TOKEN_ENCRYPTION_KEY, so a
+   * publicly readable media bucket does not expose it. Pick a key nothing else
+   * writes to, e.g. "system/codex-auth.enc".
+   */
+  CODEX_AUTH_STORE_KEY: z.string().default(''),
+  /**
+   * First-run seed: the literal contents of ~/.codex/auth.json. Read only when
+   * the store above is empty, and copied into it immediately. Holds a live
+   * OAuth refresh token — it belongs in a secret store, never in a file.
+   */
+  CODEX_AUTH_BOOTSTRAP: z.string().default(''),
 
   // --- rendering and audio analysis ---
   // Both default to off, so a fresh checkout with neither ffmpeg nor Python

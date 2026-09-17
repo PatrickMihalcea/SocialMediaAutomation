@@ -105,3 +105,18 @@ export class AiError extends Error {
     this.retryable = options.retryable ?? false;
   }
 }
+
+/**
+ * The provider's credential needs a person to renew it.
+ *
+ * Distinct from an ordinary failure because the response is different in kind:
+ * retrying cannot help, and silently generating on a different provider would
+ * turn an expired subscription token into an unasked-for API bill. Callers
+ * surface this and stop.
+ */
+export class AiCredentialError extends AiError {
+  constructor(message: string, options: { cause?: unknown } = {}) {
+    super(message, { retryable: false, cause: options.cause });
+    this.name = 'AiCredentialError';
+  }
+}

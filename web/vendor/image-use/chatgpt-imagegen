@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""chatgpt-imagegen — backwards-compatible alias for `image-use`.
+
+The tool was renamed to image-use once it grew backends beyond ChatGPT
+(Codex and two Gemini backends). This shim keeps existing installs, scripts
+and agent skills that still call `chatgpt-imagegen` working: it runs the
+`image-use` script with the same arguments, stdin/stdout/stderr and exit code.
+
+Lookup order for the real CLI: next to this file (the repo / skill layout),
+then `image-use` on $PATH. If neither exists — e.g. an old skill's self-heal
+downloaded only this file — it fetches `image-use` next to itself once.
+
+Project: https://github.com/leeguooooo/image-use
+"""
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+import urllib.request
+
+# Pre-rename installs read `__version__` and the WHATSNEW lines from this
+# file's URL to decide whether to update. It only has to be newer than the
+# last pre-rename release (0.27.0); after that update the install runs
+# image-use, which checks its own file. No need to bump it per release.
+__version__ = "0.28.0"
+# WHATSNEW[0.28.0]: 改名 image-use(现有 ChatGPT 网页 / Codex / 两个 Gemini 后端,不再只是 ChatGPT);`chatgpt-imagegen` 命令保留为兼容别名,CHATGPT_IMAGEGEN_* 环境变量继续有效(新名 IMAGE_USE_* 优先),风格库与配置目录不变
+
+CLI_NAME = "image-use"
+CLI_URL = "https://raw.githubusercontent.com/leeguooooo/image-use/main/image-use"
+
+
+def _find_cli() -> str | None:
+    here = os.path.dirname(os.path.realpath(__file__))
+    sibling = os.path.join(here, CLI_NAME)
+    if os.path.isfile(sibling):
+        return sibling
+    on_path = shutil.which(CLI_NAME)
+    if on_path and os.path.realpath(on_path) != os.path.realpath(__file__):
+        return on_path
+    return None
+
+
+def _fetch_cli() -> str | None:
+    dest = os.path.join(os.path.dirname(os.path.realpath(__file__)), CLI_NAME)
+    tmp = dest + ".download"
+    try:
+        with urllib.request.urlopen(CLI_URL, timeout=30) as r:
+            data = r.read()
+        if not data.startswith(b"#!"):
+            return None
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, dest)
+        return dest
+    except Exception:  # noqa: BLE001
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return None
+
+
+def main() -> int:
+    cli = _find_cli() or _fetch_cli()
+    if cli is None:
+        print("error: chatgpt-imagegen is now an alias for image-use, which "
+              "was not found next to this file or on PATH.\n"
+              f"  install it: curl -fsSL {CLI_URL} -o image-use && chmod +x image-use",
+              file=sys.stderr)
+        return 127
+    argv = [sys.executable, cli, *sys.argv[1:]]
+    if os.name == "nt":  # os.exec* on Windows does not replace the process
+        return subprocess.call(argv)
+    os.execv(sys.executable, argv)
+    return 0  # pragma: no cover - execv does not return
+
+
+if __name__ == "__main__":
+    sys.exit(main())

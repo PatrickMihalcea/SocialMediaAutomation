@@ -3,14 +3,28 @@ import { MediaType } from '@prisma/client';
 import { db } from '@/lib/db';
 import { generateImage } from '@/lib/ai';
 import type { ImageSize } from '@/lib/ai/image-sizes';
+import type { ImageProviderName } from '@/lib/ai/provider-selection';
 import { mediaKey, storage } from '@/lib/storage';
 import { PermanentJobError } from '@/lib/queue/runner';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
 
-interface Config {
+export interface Config {
   size: ImageSize;
   maxImages: number;
+  /** 'default' defers to the deployment; anything else pins this step. */
+  provider: 'default' | ImageProviderName;
+  /** Superseded by `provider`. Still read, so steps saved before it keep their choice. */
   useMockGeneration: boolean;
+}
+
+/**
+ * A step that was set to mock before this setting existed stays mocked. Getting
+ * this wrong in the other direction would quietly start spending real quota on
+ * a workflow somebody built specifically to avoid it.
+ */
+export function resolveStepProvider(config: Config): ImageProviderName | undefined {
+  if (config.provider && config.provider !== 'default') return config.provider;
+  return config.useMockGeneration ? 'mock' : undefined;
 }
 
 /**
@@ -48,7 +62,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       userId: ctx.userId,
       prompt,
       size: config.size,
-      forceMock: config.useMockGeneration,
+      provider: resolveStepProvider(config),
     });
 
     const extension = result.mimeType === 'image/svg+xml' ? 'svg' : 'png';

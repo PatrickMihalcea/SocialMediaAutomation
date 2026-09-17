@@ -103,6 +103,8 @@ works.
    `S3_SECRET_ACCESS_KEY` `TOKEN_ENCRYPTION_KEY` `YOUTUBE_CLIENT_ID`
    `YOUTUBE_CLIENT_SECRET` `YOUTUBE_PRIVACY_STATUS`
 
+   `CODEX_AUTH_JSON` is optional and covered in step 5.
+
    `DATABASE_URL` and `APP_URL` are the **Neon** and **Vercel** values, not the
    local ones.
 
@@ -117,7 +119,111 @@ Two schedules run from that one file: every five minutes for due posts and
 workflows, and every six hours with `RUN_ONCE_COARSE=1` for recurrence
 expansion and analytics refresh.
 
-## 5. Optional: make it feel instant
+## 5. Optional: images from your ChatGPT subscription
+
+By default images cost OpenAI API credit. The worker can instead render them
+with the vendored `image-use` CLI (`web/vendor/image-use/`) against your own
+ChatGPT subscription, which costs nothing per image beyond the plan you already
+pay for.
+
+It runs a local process, so it works **only where that process can run** — the
+Actions worker, never the Vercel function. Neither choice is global:
+
+- **AI studio** has a *Generate images with* dropdown: **API** generates inline
+  in the request, billed per image and back in seconds; **Codex** queues an
+  `IMAGE_GENERATE` job the worker runs, so it costs nothing per image and lands
+  in the Media Library about a minute later (step 6 makes that a minute rather
+  than up to five).
+- **An Image generator step** has the same choice plus mock, under *Generate
+  with*: `default` follows the deployment, `mock` is a free placeholder for
+  testing the graph, `api` bills per image, `codex` uses the subscription.
+- `AI_IMAGE_PROVIDER` sets what those controls **start on**, nothing more.
+  Setting it to `image-use` on Vercel too makes Codex the default in the studio;
+  leaving it unset there keeps the API as the default and Codex one click away.
+
+### When the credential goes stale
+
+It never falls back to the paid API. That is deliberate: a silent downgrade
+turns an expired secret into an OpenAI bill you find out about on an invoice.
+Instead image generation **pauses** and says so:
+
+- The job fails with what happened, that **nothing was charged to the OpenAI
+  API**, and how to fix it. The studio shows that text on the job.
+- Whoever asked for the image gets a notification, the same kind an expired
+  social connection raises.
+- The worker's log opens with `IMAGE GENERATION PAUSED`.
+- Everything else in that run is unaffected — due posts still publish, video
+  still renders.
+
+To get generating again, on a machine where you can sign in:
+
+```bash
+codex login                       # refreshes ~/.codex/auth.json
+pbcopy < ~/.codex/auth.json       # macOS; the whole file, braces included
+```
+
+Then paste it into **Settings → Secrets and variables → Actions →
+`CODEX_AUTH_JSON`** (Update secret). That is the whole job — the next run
+notices the secret changed and takes it over the copy in the bucket, which is
+otherwise preferred because it is the one the CLI keeps refreshed.
+
+If you would rather pay per image for now, switch the studio dropdown or the
+step's *Generate with* to **API**. That is an explicit choice, which is the
+only way this path ever spends API credit.
+
+`npm run doctor` reports the credential's state — whether it is present, and
+how long since it was last refreshed.
+
+Keep `OPENAI_API_KEY` set on Vercel either way — it is what the API option uses.
+
+### A true 9:16, only here
+
+Codex is the only source that renders **Vertical 9:16 · 1024×1820**. The OpenAI
+API offers 2:3, 3:2 and 1:1 and nothing else, so a vertical video frame has to
+be cropped out of a 2:3 image and loses about 16% of its width. A 9:16 image
+loses nothing. The size dropdown offers it only while the step or the studio is
+set to Codex, and switching back to API resets the shape rather than saving one
+the API will refuse.
+
+To turn it on:
+
+1. On a machine where you can sign in, once ever:
+
+   ```bash
+   npm i -g @openai/codex
+   codex login
+   ```
+
+2. Copy the **entire contents** of `~/.codex/auth.json` into a repo secret named
+   `CODEX_AUTH_JSON` (Settings → Secrets and variables → Actions). That file
+   holds a live OAuth access and refresh token for your ChatGPT account: treat
+   it exactly like a password, and run `codex login` again to rotate it if it
+   ever leaks.
+
+3. Set `AI_IMAGE_PROVIDER=image-use` in the Vercel project's environment so the
+   studio queues instead of billing the API, and redeploy.
+
+The worker restores that credential at the start of every run and writes it
+back to `system/codex-auth.enc` in your media bucket, encrypted with
+`TOKEN_ENCRYPTION_KEY`. That write-back is what keeps it working: the CLI
+refreshes the OAuth token as it expires, and a throwaway runner would otherwise
+lose the refreshed copy and eventually stop authenticating.
+
+Two things that will bite:
+
+- **`IMAGE_USE_MODEL` is pinned to `gpt-5.5` in `worker.yml`.** The CLI's own
+  default driver model is refused with *"requires a newer version of Codex"*
+  unless the caller reports a very recent codex CLI, and a runner with no codex
+  installed reports the script's floor. Measured, not guessed.
+- **Requested sizes are a hint, not a contract.** The subscription backend
+  normalises them — asking for 1024×1024 has come back 1254×1254. The aspect
+  ratio holds; the pixel count does not. Asset rows record what actually came
+  back, not what was asked for.
+
+If generation starts failing, the error text on the job says why. `python3
+vendor/image-use/image-use doctor` on any machine explains the rest.
+
+## 6. Optional: make it feel instant
 
 Without this, confirming "run this workflow" can sit up to five minutes before
 anything happens. With it, the app asks GitHub to start a run immediately.

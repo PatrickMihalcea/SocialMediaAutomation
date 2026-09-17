@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e:image": "node scripts/e2e/generate-image-loop.mjs",
     "worker": "NODE_OPTIONS=--conditions=react-server node --env-file=.env --import tsx --watch src/worker/index.ts",
     "worker:prod": "NODE_OPTIONS=--conditions=react-server node --env-file=.env --import tsx src/worker/index.ts",
     "db:push": "prisma db push",

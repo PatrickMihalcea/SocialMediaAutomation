@@ -26,7 +26,8 @@ import {
   type WorkflowMediaFolderOption,
 } from '@/lib/workflows/definitions';
 import { PLATFORM_LABELS } from '@/lib/social/labels';
-import { IMAGE_SIZE_LABELS, imageSizeFitNote } from '@/lib/ai/image-sizes';
+import { DEFAULT_IMAGE_SIZE, IMAGE_SIZE_LABELS, imageSizeFitNote, imageSizesFor, type ImageSize } from '@/lib/ai/image-sizes';
+import type { ImageProviderName } from '@/lib/ai/provider-selection';
 import {
   DEFAULT_VIDEO_OUTPUT_SIZE,
   VIDEO_OUTPUT_PRESETS,
@@ -324,20 +325,29 @@ export function NodeConfigPanel({
     }
 
     if (node.type === 'IMAGE_GENERATOR') {
-      return specs.map((field): FieldSpec =>
-        field.key === 'size'
-          ? {
-              ...field,
-              label: help.size?.label ?? 'Image format',
-              description: help.size?.description,
-              optionLabels: IMAGE_SIZE_LABELS,
-            }
-          : field,
-      );
+      const chosen = typeof config.provider === 'string' ? config.provider : 'default';
+      // 9:16 exists only on the subscription backend, so offering it while this
+      // step is pinned to the API would save a config the provider then refuses.
+      const sizes = imageSizesFor(chosen === 'default' ? undefined : (chosen as ImageProviderName));
+      return specs
+        // Replaced by `provider`, and showing both would put two answers to the
+        // same question on screen. Still in the schema so old steps keep theirs.
+        .filter((field) => field.key !== 'useMockGeneration')
+        .map((field): FieldSpec =>
+          field.key === 'size'
+            ? {
+                ...field,
+                label: help.size?.label ?? 'Image format',
+                description: help.size?.description,
+                options: sizes,
+                optionLabels: IMAGE_SIZE_LABELS,
+              }
+            : field,
+        );
     }
 
     return specs;
-  }, [definition, node.type]);
+  }, [definition, node.type, config.provider]);
 
   if (!definition) {
     return (
@@ -651,6 +661,15 @@ export function NodeConfigPanel({
                 return next;
               }
               next[field.key] = chosen;
+              // Switching an image step away from Codex takes 9:16 with it.
+              // Leaving the stale value would save a shape the chosen provider
+              // refuses, and the step would fail at run time instead of here.
+              if (node.type === 'IMAGE_GENERATOR' && field.key === 'provider') {
+                const allowed = imageSizesFor(chosen === 'default' ? undefined : (chosen as ImageProviderName));
+                if (typeof next.size === 'string' && !allowed.includes(next.size as ImageSize)) {
+                  next.size = DEFAULT_IMAGE_SIZE;
+                }
+              }
               return next;
             })
           }

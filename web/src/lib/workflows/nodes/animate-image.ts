@@ -44,7 +44,8 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       kind: 'VIDEO_ANIMATE',
       prompt: config.prompt,
       inputAssetIds: [images[index]],
-      forceMock: config.useMockGeneration,
+      // Video has no subscription backend; the choice here is only mock or not.
+      provider: config.useMockGeneration ? 'mock' : undefined,
     });
     await runAiMediaJob(job.id);
 

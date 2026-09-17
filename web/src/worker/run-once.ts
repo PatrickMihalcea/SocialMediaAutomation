@@ -4,6 +4,7 @@ import { runCoarseUpkeep } from '@/lib/scheduling/coarse';
 import { scanDueWorkflows } from '@/lib/workflows/schedule';
 import { sweepWorkflowRuns } from '@/lib/workflows/engine';
 import { runJob } from '@/lib/queue/runner';
+import { persistCodexAuth, restoreCodexAuth } from '@/lib/ai/codex-auth';
 import { JobStatus } from '@prisma/client';
 
 /**
@@ -43,6 +44,21 @@ async function main() {
   const inFlight = new Set<string>();
 
   console.log(`[run-once] starting, budget ${Math.round(budgetMs / 1000)}s`);
+
+  // Before any work, because an image job is what needs it — and never fatal.
+  // This pass also publishes due posts and renders video, none of which care
+  // about an image credential, so a broken one degrades image generation
+  // rather than stopping everything else. The jobs that need it fail with the
+  // provider's own error, which says what is missing.
+  const restored = await restoreCodexAuth().catch((error: unknown) => {
+    // Loud, and never a fallback to a provider that costs money. Image jobs
+    // fail with this same text; posting and rendering carry on regardless.
+    console.error(
+      `[run-once] IMAGE GENERATION PAUSED — ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return 'failed' as const;
+  });
+  if (restored !== 'disabled') console.log(`[run-once] codex credential restored from ${restored}`);
 
   // Recurrence and analytics ride a much slower schedule of their own, set by
   // whichever workflow started this pass. Repeating them is safe; repeating
@@ -93,9 +109,24 @@ async function main() {
   console.log(`[run-once] done — claimed ${processed} job(s)`);
 }
 
+/**
+ * Runs whether the pass succeeded or not: a refresh that happened before the
+ * failure is still the token the next run needs, and dropping it is how a
+ * working setup quietly stops working a fortnight later.
+ */
+async function persistCredential() {
+  try {
+    const persisted = await persistCodexAuth();
+    if (persisted === 'saved') console.log('[run-once] codex credential was refreshed; stored the new one');
+  } catch (error) {
+    console.error('[run-once] could not store the refreshed codex credential', error);
+  }
+}
+
 main()
   .catch((error) => {
     console.error('[run-once] failed', error);
     process.exitCode = 1;
   })
+  .finally(persistCredential)
   .finally(() => db.$disconnect());

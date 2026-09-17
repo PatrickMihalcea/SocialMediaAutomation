@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 import { env } from '@/lib/env';
 import { AiError, type AiImageResult, type AiObjectResult, type AiProvider, type AiTextResult, type AiMessage } from '@/lib/ai/types';
-import type { ImageSize } from '@/lib/ai/image-sizes';
+import { isOpenAiImageSize, OPENAI_IMAGE_SIZES, type ImageSize } from '@/lib/ai/image-sizes';
 
 /**
  * Generous because reasoning models are slow: gpt-5-mini answers a workflow
@@ -163,11 +163,20 @@ export class OpenAiProvider implements AiProvider {
   }
 
   async generateImage(input: { prompt: string; size?: ImageSize }): Promise<AiImageResult> {
+    const size = input.size ?? '1024x1024';
+    // Refused rather than quietly reshaped. This API has no 9:16, and silently
+    // substituting 2:3 would hand the video steps a frame that needs cropping
+    // while the workflow still claims the shape it asked for.
+    if (!isOpenAiImageSize(size)) {
+      throw new AiError(
+        `${this.imageModel} cannot generate ${size}. Choose a size it offers (${OPENAI_IMAGE_SIZES.join(', ')}), or generate this step with the subscription provider.`,
+      );
+    }
     try {
       const res = await this.sdk().images.generate({
         model: this.imageModel,
         prompt: input.prompt,
-        size: input.size ?? '1024x1024',
+        size,
         n: 1,
       });
       const b64 = res.data?.[0]?.b64_json;

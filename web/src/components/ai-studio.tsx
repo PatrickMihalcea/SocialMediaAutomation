@@ -13,7 +13,8 @@ import {
 } from '@/app/actions/ai';
 import type { AiMediaJobKind, JobStatus } from '@prisma/client';
 import { AI_MEDIA_JOB_LABELS, JOB_STATUS_LABELS } from '@/lib/ai/labels';
-import { IMAGE_SIZE_PRESETS, type ImageSize } from '@/lib/ai/image-sizes';
+import { DEFAULT_IMAGE_SIZE, IMAGE_SIZE_PRESETS, imageSizeAvailableFor, type ImageSize } from '@/lib/ai/image-sizes';
+import type { ImageProviderName } from '@/lib/ai/provider-selection';
 
 type Asset = { id: string; filename: string; type: string; url: string; generated: boolean };
 type Job = {
@@ -59,18 +60,35 @@ function ActionLabel({ idle, busy, isBusy }: { idle: string; busy: string; isBus
   );
 }
 
-export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetId, simulated }: {
+/**
+ * What the studio can generate an image with. Mock is not offered as a choice:
+ * it is what a demo deployment does, not something to pick per image.
+ */
+const IMAGE_SOURCES: Array<{ value: Exclude<ImageProviderName, 'mock'>; label: string }> = [
+  { value: 'openai', label: 'API — instant, billed per image' },
+  { value: 'image-use', label: 'Codex — ChatGPT subscription, queued' },
+];
+
+export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetId, simulated, imageSource }: {
   slug: string;
   initialAssets: Asset[];
   initialJobs: Job[];
   initialSourceAssetId?: string;
   simulated: boolean;
+  /** The image provider this deployment is configured for. */
+  imageSource: ImageProviderName;
 }) {
   const router = useRouter();
   const [prompt, setPrompt] = useState('A clean editorial workspace for planning social content');
   // Square, not the workflow default: a studio image is composed on its own,
   // not cropped into a vertical video.
   const [size, setSize] = useState<ImageSize>('1024x1024');
+  // Starts on whatever the deployment is configured for, so the common case is
+  // one click. 'mock' means this is a demo deployment and there is nothing to
+  // choose between — the banner above already says so.
+  const [source, setSource] = useState<Exclude<ImageProviderName, 'mock'>>(
+    imageSource === 'image-use' ? 'image-use' : 'openai',
+  );
   const [assets, setAssets] = useState(initialAssets);
   const [jobs, setJobs] = useState(initialJobs);
   const [selected, setSelected] = useState<string | undefined>(initialSourceAssetId);
@@ -131,7 +149,25 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
 
   function generate(action: Action, sourceAssetId?: string) {
     return run(action, async () => {
-      const asset = await generateStudioImageAction(slug, { prompt, size, sourceAssetId });
+      const result = await generateStudioImageAction(slug, { prompt, size, sourceAssetId, provider: imageSource === 'mock' ? undefined : source });
+      // Where the image provider is a local CLI, the server cannot generate
+      // inside the request — it queues instead, and the jobs panel below takes
+      // over from here.
+      if (result.queued) {
+        localJobIds.current.add(result.job.id);
+        setJobs((current) => [{
+          id: result.job.id,
+          kind: result.job.kind,
+          status: result.job.status,
+          error: null,
+          prompt,
+          outputAssetId: null,
+          createdAt: new Date().toISOString(),
+        }, ...current]);
+        setNotice('Image generation queued. You can leave this page; processing continues on the server.');
+        return;
+      }
+      const asset = result.asset;
       localAssetIds.current.add(asset.id);
       setAssets((current) => [{ id: asset.id, filename: asset.filename, type: asset.type, url: asset.url, generated: true }, ...current]);
       setSelected(asset.id);
@@ -229,11 +265,28 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
             onChange={(event) => setPrompt(event.target.value)}
             className="min-h-28"
           />
+          {imageSource !== 'mock' && (
+            <Dropdown
+              label="Generate images with"
+              containerClassName="mt-5"
+              value={source}
+              options={IMAGE_SOURCES}
+              onChange={(value) => {
+                const chosen = value as Exclude<ImageProviderName, 'mock'>;
+                setSource(chosen);
+                // 9:16 exists only on Codex, so leaving it selected while
+                // switching to the API would send a shape it refuses.
+                if (!imageSizeAvailableFor(size, chosen)) setSize(DEFAULT_IMAGE_SIZE);
+              }}
+            />
+          )}
           <Dropdown
             label="Image shape"
             containerClassName="mt-5"
             value={size}
-            options={IMAGE_SIZE_PRESETS.map((preset) => ({
+            options={IMAGE_SIZE_PRESETS.filter((preset) =>
+              imageSizeAvailableFor(preset.id, imageSource === 'mock' ? undefined : source),
+            ).map((preset) => ({
               value: preset.id,
               label: preset.label,
             }))}
@@ -306,7 +359,7 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
         {assets.length ? (
           <div className="mt-5 grid gap-3 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
             {visibleAssets.map((asset) => (
-              <button key={asset.id} type="button" onClick={() => setSelected(asset.id)} className="relative grid min-h-28 grid-cols-[80px_minmax(0,1fr)] items-center gap-3 rounded-lg border bg-canvas p-3 text-left transition-opacity hover:opacity-80 sm:block sm:rounded-[24px] sm:p-4" style={{ borderColor: selected === asset.id ? 'var(--ink)' : 'var(--hairline)' }}>
+              <button key={asset.id} type="button" data-asset-id={asset.id} onClick={() => setSelected(asset.id)} className="relative grid min-h-28 grid-cols-[80px_minmax(0,1fr)] items-center gap-3 rounded-lg border bg-canvas p-3 text-left transition-opacity hover:opacity-80 sm:block sm:rounded-[24px] sm:p-4" style={{ borderColor: selected === asset.id ? 'var(--ink)' : 'var(--hairline)' }}>
                 {selected === asset.id && <span className="absolute right-6 top-6 z-10 flex size-7 items-center justify-center rounded-full bg-ink text-canvas" aria-label="Selected"><Check size={16} /></span>}
                 {asset.type === 'IMAGE' ? (
                   <img src={asset.url} alt={humanizeMachineValue(asset.filename)} className="size-20 rounded-md bg-surface-soft object-contain sm:aspect-square sm:size-auto sm:w-full" />
@@ -365,7 +418,15 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
                   </Button>
                 </div>
               )}
-              {job.error && <p className="mt-2 text-sm">The generation stopped before the media was ready. Review the brief and try again.</p>}
+              {/* The provider's own words, not a guess at them. "Review the
+                  brief" is wrong and wastes the user's time when the real
+                  cause is an expired credential or a rate limit, and those are
+                  the failures worth acting on. */}
+              {job.error && (
+                <p className="mt-2 text-sm">
+                  {job.error.trim() || 'The generation stopped before the media was ready. Review the brief and try again.'}
+                </p>
+              )}
               {!ACTIVE_STATUSES.includes(job.status) && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {(job.status === 'FAILED' || job.status === 'CANCELLED') && (

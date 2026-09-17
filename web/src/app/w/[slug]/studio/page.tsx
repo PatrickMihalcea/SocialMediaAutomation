@@ -3,6 +3,7 @@ import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { storage } from '@/lib/storage';
 import { env } from '@/lib/env';
+import { resolveImageProviderName } from '@/lib/ai/provider-selection';
 
 export const metadata = { title: 'AI studio' };
 
@@ -80,6 +81,7 @@ export default async function StudioPage({
         initialJobs={jobs.map((job) => ({ ...job, createdAt: job.createdAt.toISOString() }))}
         initialSourceAssetId={validatedSource}
         simulated={env.AI_PROVIDER !== 'openai'}
+        imageSource={resolveImageProviderName(env.AI_PROVIDER, env.AI_IMAGE_PROVIDER)}
       />
     </>
   );

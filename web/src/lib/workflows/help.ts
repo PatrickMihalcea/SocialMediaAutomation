@@ -143,15 +143,21 @@ export const WORKFLOW_FIELD_HELP: Partial<
   IMAGE_GENERATOR: {
     size: {
       label: 'Image shape',
-      description: 'The model only offers 2:3, 3:2, and 1:1, so none of them is exactly 9:16. Pick the shape closest to your video format; Beat slideshow then crops to fill or shows the whole image over a blurred backdrop.',
+      description: 'The OpenAI API offers 2:3, 3:2 and 1:1 only, so a vertical frame has to be cropped out of 2:3. Codex adds a true 9:16 that needs no crop at all — it appears here once this step is set to generate with Codex.',
     },
     maxImages: {
       label: 'Maximum images',
       description: 'A cost guard. Extra incoming prompts are ignored after this number.',
     },
-    useMockGeneration: {
-      label: 'Use mock generation',
-      description: 'Creates deterministic local placeholders instead of calling the paid image provider. Use this to test the workflow; turn it off for final content.',
+    provider: {
+      label: 'Generate with',
+      description: 'Mock costs nothing and returns instantly, for testing the workflow. API bills your OpenAI key per image. Codex uses your ChatGPT subscription — no per-image bill, slower, and the only one that renders a true 9:16.',
+      optionLabels: {
+        default: 'Deployment default',
+        mock: 'Mock — free placeholder',
+        openai: 'API — billed per image',
+        'image-use': 'Codex — ChatGPT subscription',
+      },
     },
   },
   ANIMATE_IMAGE: {

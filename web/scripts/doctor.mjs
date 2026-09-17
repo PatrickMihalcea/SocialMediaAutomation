@@ -48,6 +48,7 @@ async function main() {
   await checkDatabase();
   await checkAppUrl(appUrl, local);
   await checkOpenAi();
+  await checkImageUse();
   await checkRender();
   await checkAudio();
   await checkYouTube(appUrl);
@@ -125,6 +126,56 @@ async function checkOpenAi() {
   } catch (error) {
     add(fail('OpenAI', shorten(error)));
   }
+}
+
+/**
+ * The subscription image path, which fails differently from an API key: there
+ * is no request that proves the credential still works without spending a
+ * generation, so this checks the things that go wrong silently — a missing
+ * binary, a python too old for it, and a credential that is absent, malformed,
+ * or has not been refreshed in long enough to be worth a second look.
+ */
+async function checkImageUse() {
+  const selected = e('AI_IMAGE_PROVIDER', 'inherit');
+  if (selected !== 'image-use') return;
+
+  const bin = e('IMAGE_USE_BIN');
+  if (!bin) {
+    return add(fail('image-use', 'AI_IMAGE_PROVIDER is "image-use" but IMAGE_USE_BIN is empty.',
+      'Set IMAGE_USE_BIN to web/vendor/image-use/image-use, or generate with the API instead'));
+  }
+
+  const python = e('IMAGE_USE_PYTHON', 'python3');
+  try {
+    const { stdout } = await run(python, [bin, '--version'], { timeout: 20000 });
+    add(ok('image-use', stdout.trim()));
+  } catch (error) {
+    return add(fail('image-use', `${bin} did not run — ${shorten(error)}`,
+      `Check the path, and that ${python} is 3.10 or newer (set IMAGE_USE_PYTHON if it is not)`));
+  }
+
+  // Deliberately never printed, only described. This file is a live OAuth
+  // token for a real ChatGPT account.
+  const authPath = `${process.env.HOME}/.codex/auth.json`;
+  let auth;
+  try {
+    auth = JSON.parse(await readFile(authPath, 'utf8'));
+  } catch {
+    return add(prod('image-use credential', `No usable ${authPath} on this machine.`,
+      'Run `codex login` here; on the worker, set the CODEX_AUTH_JSON secret to that file'));
+  }
+  if (typeof auth?.tokens?.access_token !== 'string') {
+    return add(fail('image-use credential', `${authPath} has no tokens.access_token.`,
+      'Run `codex login` again — an OPENAI_API_KEY in that file is not a substitute'));
+  }
+
+  const refreshed = Date.parse(auth.last_refresh ?? '');
+  const days = Number.isNaN(refreshed) ? null : Math.floor((Date.now() - refreshed) / 86_400_000);
+  if (days !== null && days > 30) {
+    return add(warn('image-use credential', `Present, last refreshed ${days} days ago.`,
+      'If generation starts failing, run `codex login` and update the CODEX_AUTH_JSON secret'));
+  }
+  add(ok('image-use credential', days === null ? 'Present.' : `Present, refreshed ${days} day(s) ago.`));
 }
 
 async function checkRender() {

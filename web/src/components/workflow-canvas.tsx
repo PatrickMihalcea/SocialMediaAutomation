@@ -896,10 +896,16 @@ function typedInput(config: unknown, portId: string): string | null {
   return value.trim();
 }
 
-const mockConfigured = (config: unknown) =>
-  typeof config === 'object' &&
-  config !== null &&
-  (config as { useMockGeneration?: unknown }).useMockGeneration === true;
+/** Both spellings: the step-level provider, and the flag it replaced. */
+const mockConfigured = (config: unknown) => {
+  if (typeof config !== 'object' || config === null) return false;
+  const { provider, useMockGeneration } = config as {
+    provider?: unknown;
+    useMockGeneration?: unknown;
+  };
+  if (provider === 'mock') return true;
+  return provider === undefined || provider === 'default' ? useMockGeneration === true : false;
+};
 
 /** A step on the canvas: a stroked card with a labelled port down each side. */
 function StepNode({ id, data, selected }: NodeProps<Node<StepData>>) {

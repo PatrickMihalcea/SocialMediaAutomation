@@ -4,8 +4,9 @@ import { AiMediaJobKind } from '@prisma/client';
 import { revalidatePath } from 'next/cache';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { confirmProposal, sendAssistantMessage } from '@/lib/ai/conversations';
-import { generateImage } from '@/lib/ai';
+import { generateImage, imageGenerationRunsInProcess } from '@/lib/ai';
 import type { ImageSize } from '@/lib/ai/image-sizes';
+import type { ImageProviderName } from '@/lib/ai/provider-selection';
 import { db } from '@/lib/db';
 import { mediaKey, storage } from '@/lib/storage';
 import { invalid } from '@/lib/errors';
@@ -43,16 +44,36 @@ export async function confirmAiProposalAction(slug: string, messageId: string) {
 
 export async function generateStudioImageAction(
   slug: string,
-  input: { prompt: string; size?: ImageSize; sourceAssetId?: string },
+  input: { prompt: string; size?: ImageSize; sourceAssetId?: string; provider?: ImageProviderName },
 ) {
   const ctx = await requireWorkspace(slug, 'ai:use');
   const prompt = input.prompt.trim();
   if (prompt.length < 3) throw invalid('Describe the image you want.');
+  const provider = imageSourceOf(input.provider);
+
+  // Generating here would block the request for a minute or more and, on a
+  // host without the CLI, could not succeed at all. Hand it to the worker and
+  // return the job — the studio already renders queued work and polls it.
+  if (!imageGenerationRunsInProcess(provider)) {
+    const job = await createAiMediaJob({
+      workspaceId: ctx.workspace.id,
+      userId: ctx.user.id,
+      kind: AiMediaJobKind.IMAGE_GENERATE,
+      prompt,
+      size: input.size,
+      provider,
+      inputAssetIds: input.sourceAssetId ? [input.sourceAssetId] : [],
+    });
+    revalidatePath(`/w/${slug}/studio`);
+    return { queued: true as const, job: { id: job.id, kind: job.kind, status: job.status } };
+  }
+
   const result = await generateImage({
     workspaceId: ctx.workspace.id,
     userId: ctx.user.id,
     prompt,
     size: input.size,
+    provider,
   });
   const filename = `ai-image-${Date.now()}.${result.mimeType === 'image/svg+xml' ? 'svg' : 'png'}`;
   const key = mediaKey(ctx.workspace.id, filename);
@@ -80,7 +101,7 @@ export async function generateStudioImageAction(
   });
   revalidatePath(`/w/${slug}/studio`);
   revalidatePath(`/w/${slug}/media`);
-  return { ...asset, url: await storage().signedUrl(asset.storageKey) };
+  return { queued: false as const, asset: { ...asset, url: await storage().signedUrl(asset.storageKey) } };
 }
 
 export async function createAiMediaJobAction(
@@ -161,4 +182,14 @@ export async function deleteGeneratedAssetAction(slug: string, assetId: string) 
   revalidatePath(`/w/${slug}/studio`);
   revalidatePath(`/w/${slug}/media`);
   return { id: asset.id };
+}
+
+/**
+ * The studio picks between the API and the subscription; anything else means
+ * no choice was made and the deployment's own setting stands. A client cannot
+ * elect 'mock' here — a free result is a deployment mode, not a request
+ * parameter, and honouring it would let the browser opt out of billing.
+ */
+function imageSourceOf(value: unknown): ImageProviderName | undefined {
+  return value === 'openai' || value === 'image-use' ? value : undefined;
 }
