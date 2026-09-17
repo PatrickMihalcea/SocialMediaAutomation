@@ -42,16 +42,20 @@ const STAGES = [
 /** How long a job can sit unclaimed before saying so is more useful than not. */
 const SLOW_QUEUE_MS = 120_000;
 
-function reached(job: ProgressJob): number {
-  if (job.status === 'COMPLETED') return 3;
-  if (job.status === 'RUNNING' || job.startedAt) return 2;
-  return 1;
+/** How many stages are behind this job, and which one it is sitting in. */
+function position(job: ProgressJob): { done: number; active: number } {
+  if (job.status === 'FAILED' || job.status === 'CANCELLED') return { done: 0, active: -1 };
+  // Completed fills every segment. Leaving the last one mid-flight — which is
+  // what "the stage it reached" literally means — showed finished work as
+  // still running.
+  if (job.status === 'COMPLETED') return { done: STAGES.length, active: -1 };
+  if (job.status === 'RUNNING' || job.startedAt) return { done: 1, active: 1 };
+  return { done: 0, active: 0 };
 }
 
 export function AiJobProgress({ job, now }: { job: ProgressJob; now: number }) {
   const stopped = job.status === 'FAILED' || job.status === 'CANCELLED';
-  const stage = reached(job);
-  const active = stopped ? -1 : stage - 1;
+  const { done: completed, active } = position(job);
   const since = new Date(job.startedAt ?? job.createdAt).getTime();
   const waitedTooLong =
     job.status === 'QUEUED' && now - new Date(job.createdAt).getTime() > SLOW_QUEUE_MS;
@@ -60,7 +64,7 @@ export function AiJobProgress({ job, now }: { job: ProgressJob; now: number }) {
     <div className="mt-3">
       <div className="flex gap-1.5" role="list" aria-label="Generation progress">
         {STAGES.map((entry, index) => {
-          const done = index < stage - (stopped ? 0 : 1) && !stopped;
+          const done = index < completed;
           const isActive = index === active;
           return (
             <Tooltip key={entry.key} content={entry.detail} side="top">
@@ -90,7 +94,9 @@ export function AiJobProgress({ job, now }: { job: ProgressJob; now: number }) {
       <p className="b88-caption mt-2">
         {stopped
           ? job.status === 'CANCELLED' ? 'Cancelled' : 'Stopped'
-          : `${STAGES[Math.max(0, active)].label}${job.status === 'COMPLETED' ? '' : ` · ${countUp(now - since)}`}`}
+          : job.status === 'COMPLETED'
+            ? STAGES[STAGES.length - 1].label
+            : `${STAGES[Math.max(0, active)].label} · ${countUp(now - since)}`}
         {job.provider === 'mock' && ' · demo placeholder, not model output'}
       </p>
 

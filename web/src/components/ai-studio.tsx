@@ -125,7 +125,19 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
   const visibleAssets = showAllAssets || !selectedAsset || firstAssets.some((asset) => asset.id === selectedAsset.id)
     ? (showAllAssets ? assets : firstAssets)
     : [selectedAsset, ...firstAssets.slice(0, 3)];
-  const visibleJobs = showAllJobs ? jobs : jobs.slice(0, 3);
+  /**
+   * This panel is about work in flight, not a log.
+   *
+   * Showing the three most recent rows meant a page opened months later led
+   * with three finished jobs and their buttons, which is noise in the place a
+   * person looks to see whether anything is happening. Anything still running,
+   * plus whatever this session started, and the full history stays one click
+   * away.
+   */
+  const sessionJobs = jobs.filter(
+    (job) => ACTIVE_STATUSES.includes(job.status) || localJobIds.current.has(job.id),
+  );
+  const visibleJobs = showAllJobs ? jobs : sessionJobs;
 
   useEffect(() => {
     setAssets((current) => mergeLocalFirst(initialAssets, current, localAssetIds.current));
@@ -439,7 +451,7 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
                 <Badge tone={statusTone(job.status)}>{JOB_STATUS_LABELS[job.status]}</Badge>
               </div>
               <p className="mt-2 line-clamp-2 text-sm">{job.prompt}</p>
-              <AiJobProgress job={job} now={now} />
+              {ACTIVE_STATUSES.includes(job.status) && <AiJobProgress job={job} now={now} />}
               {ACTIVE_STATUSES.includes(job.status) && (
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                   <span className="flex items-center gap-2 text-sm">
@@ -476,12 +488,16 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
               )}
             </div>
           ))}
-          {!jobs.length && <p className="py-4">No generation jobs</p>}
+          {!visibleJobs.length && (
+            <p className="py-4">
+              {jobs.length ? 'Nothing generating right now.' : 'No generation jobs'}
+            </p>
+          )}
         </div>
-        {jobs.length > 3 && (
+        {jobs.length > sessionJobs.length && (
           <div className="mt-4 flex justify-center">
             <Button type="button" variant="secondary" onClick={() => setShowAllJobs((current) => !current)}>
-              {showAllJobs ? 'Show recent jobs' : `View all ${jobs.length} jobs`}
+              {showAllJobs ? 'Show this session' : `View all ${jobs.length} jobs`}
             </Button>
           </div>
         )}
