@@ -1106,6 +1106,11 @@ export function Dialog({
           padding: 'var(--space-lg)',
           boxShadow: 'var(--elevation-3)',
           display: 'grid',
+          // minmax(0, 1fr), not the implicit auto: a grid track sized to
+          // min-content lets one long unbroken child stretch the dialog past
+          // its own maxWidth, taking the title and the buttons off screen with
+          // it. The track has to be allowed to shrink.
+          gridTemplateColumns: 'minmax(0, 1fr)',
           gap: 'var(--space-md)',
         }}
       >

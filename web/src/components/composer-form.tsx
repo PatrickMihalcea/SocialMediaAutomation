@@ -511,15 +511,21 @@ export function ComposerForm({
           .map((account) => {
             const version = draft.versions[account.id];
             return (
-              <label key={account.id} className="flex cursor-pointer gap-3 rounded-md border border-hairline p-3">
+              <label
+                key={account.id}
+                className="flex cursor-pointer items-start gap-3 rounded-md border p-3"
+                style={{ borderColor: syncSource === account.id ? 'var(--ink)' : 'var(--hairline)' }}
+              >
                 <input
                   type="radio"
                   name="sync-source"
-                  className="b88-checkbox mt-1"
                   checked={syncSource === account.id}
                   onChange={() => setSyncSource(account.id)}
+                  style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 2 }}
                 />
-                <span className="min-w-0">
+                {/* flex-1 and min-w-0 together: without both, the caption's
+                    max-content width wins and pushes the row out of the box. */}
+                <span className="min-w-0 flex-1">
                   <span className="block text-sm font-[540]">
                     {PLATFORM_LABELS[account.platform]} · {account.accountHandle ?? account.accountName}
                   </span>
