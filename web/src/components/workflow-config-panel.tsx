@@ -209,13 +209,6 @@ function LinesField({
           ? 'Separate with commas'
           : entries.length === 1 ? '1 entry' : `${entries.length} entries`}
       </p>
-      {/* Shown back as the list it parsed to. A comma-separated box is easy to
-          get subtly wrong — a trailing comma, a doubled one, an entry that was
-          meant to be two — and the count alone does not say which entry is
-          which. */}
-      {entries.length > 1 && (
-        <p className="b88-caption mt-1.5 break-words">{entries.join(' · ')}</p>
-      )}
     </div>
   );
 }
