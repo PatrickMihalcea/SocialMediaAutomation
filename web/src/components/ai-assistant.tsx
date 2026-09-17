@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { Bot, Copy, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Send } from 'lucide-react';
+import { Copy, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Send } from 'lucide-react';
 import { Button, Badge, Dialog, EmptyState, humanizeMachineValue, IconButton, LoadingState, StatusMessage, Toast } from '@/bridge88/components';
 import { confirmAiProposalAction, sendAssistantMessageAction } from '@/app/actions/ai';
 
@@ -130,6 +130,21 @@ export function AiAssistant({
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight });
   }, [active?.messages.length, pendingText]);
 
+  /**
+   * The composer grows with what is being written.
+   *
+   * A one-line field pinned to the control height hid everything above the last
+   * line of a multi-paragraph request — which is exactly the kind of request
+   * this assistant is for. It stops at ten lines or so and scrolls after that,
+   * so a long paste cannot push the transcript off the screen.
+   */
+  useEffect(() => {
+    const field = composerRef.current;
+    if (!field) return;
+    field.style.height = 'auto';
+    field.style.height = `${Math.min(field.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
+  }, [content]);
+
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(''), 4000);
@@ -211,18 +226,24 @@ export function AiAssistant({
     }
   }
 
-  function editMessage(message: Message) {
-    setContent(outputText(message));
+  function writeInComposer(text: string) {
+    setContent(text);
     composerRef.current?.focus();
     composerRef.current?.scrollIntoView({ block: 'nearest' });
   }
 
+  function startConversation() {
+    setActiveId(undefined);
+    setContent('');
+    setError('');
+  }
+
   return (
     <>
-      <div className={`grid min-h-0 grid-cols-1 items-stretch gap-6 ${showConversations ? 'xl:grid-cols-[280px_minmax(0,1fr)]' : 'xl:grid-cols-[auto_minmax(0,1fr)]'}`}>
+      <div className={`grid min-h-0 grid-cols-1 items-stretch gap-6 ${showConversations ? 'xl:grid-cols-[260px_minmax(0,1fr)]' : 'xl:grid-cols-[auto_minmax(0,1fr)]'}`}>
       {showConversations ? (
-        <aside className="b88-card min-w-0 xl:max-h-[680px] xl:overflow-y-auto">
-          <div className="mb-4 flex items-center gap-2">
+        <aside className="b88-card flex min-w-0 flex-col xl:max-h-[min(720px,calc(100dvh-96px))]">
+          <div className="flex items-center gap-2">
             <h2 className="b88-caption">Conversations</h2>
             <IconButton
               className="ml-auto"
@@ -231,22 +252,27 @@ export function AiAssistant({
               onClick={() => setShowConversations(false)}
             />
           </div>
-          <Button type="button" fullWidth onClick={() => { setActiveId(undefined); setContent(''); }}>
+          <Button type="button" fullWidth className="mt-4" onClick={startConversation}>
             <Plus size={16} /> New conversation
           </Button>
-          <div className="mt-4 max-h-40 space-y-1 overflow-y-auto xl:max-h-none">
+          <div className="mt-4 max-h-40 space-y-1 overflow-y-auto xl:max-h-none xl:flex-1">
             {conversations.map((conversation) => (
               <button
                 type="button"
                 key={conversation.id}
                 onClick={() => setActiveId(conversation.id)}
                 aria-current={activeId === conversation.id ? 'page' : undefined}
-                className="flex min-h-10 w-full items-center truncate rounded-pill px-4 py-2 text-left text-sm transition-opacity hover:opacity-80"
+                className="flex min-h-10 w-full items-center rounded-pill px-4 py-2 text-left text-sm transition-opacity hover:opacity-80"
                 style={activeId === conversation.id ? { background: 'var(--primary)', color: 'var(--on-primary)' } : undefined}
               >
-                {conversation.title}
+                {/* The span carries the ellipsis: text-overflow does nothing on
+                    a flex container, so the title was being cut mid-word. */}
+                <span className="min-w-0 truncate">{conversation.title}</span>
               </button>
             ))}
+            {conversations.length === 0 && (
+              <p className="b88-body-sm px-1 py-2">Nothing here yet. Your conversations are private to you.</p>
+            )}
           </div>
         </aside>
       ) : (
@@ -256,21 +282,25 @@ export function AiAssistant({
             label="Show conversations"
             onClick={() => setShowConversations(true)}
           />
-          <IconButton
-            icon={Plus}
-            label="New conversation"
-            onClick={() => { setActiveId(undefined); setContent(''); }}
-          />
+          <IconButton icon={Plus} label="New conversation" onClick={startConversation} />
         </div>
       )}
 
-      <section className="flex h-[min(680px,calc(100dvh-96px))] min-h-0 min-w-0 flex-col rounded-lg bg-[var(--block-cream)] p-5 md:p-6">
-        <div className="flex items-center gap-3 border-b border-hairline-soft pb-6">
-          <span className="flex size-11 items-center justify-center rounded-full bg-canvas"><Bot size={20} /></span>
-          <div className="min-w-0">
-            <h2 className="font-[540]">Workspace assistant</h2>
-            <p className="b88-caption mt-1">{simulated ? 'Simulated output · ' : ''}Confirmation required</p>
-          </div>
+      {/* Shorter on a phone, where the page heading above and the tab bar below
+          take the room a desktop window has to spare — at the full height the
+          composer sat under the tab bar and could not be reached. */}
+      <section className="flex h-[min(620px,max(380px,calc(100dvh-320px)))] min-h-0 min-w-0 flex-col rounded-lg bg-[var(--block-cream)] p-5 md:h-[min(720px,calc(100dvh-96px))] md:p-6">
+        {/* One line of chrome. The page title above already names this tool, so
+            repeating it here, with an avatar and a standing notice, spent the
+            top of the panel on things nobody reads twice. */}
+        <div className="flex shrink-0 items-center gap-3 border-b border-hairline-soft pb-4">
+          <h2 className="min-w-0 flex-1 truncate font-[540]">{active?.title ?? 'New conversation'}</h2>
+          {simulated && <Badge tone="cream">Simulated</Badge>}
+          {active && (
+            <Button type="button" size="sm" variant="secondary" onClick={startConversation}>
+              <Plus size={16} /> New
+            </Button>
+          )}
         </div>
         <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
         <div ref={transcriptRef} role="log" tabIndex={0} aria-label="Conversation" className="min-h-0 flex-1 space-y-4 overflow-y-auto py-6 pr-1">
@@ -279,10 +309,17 @@ export function AiAssistant({
               eyebrow="Workspace assistant"
               title="Ask for content, a schedule, or a workflow"
               action={(
-                <div className="flex flex-wrap justify-center gap-2">
-                  <Button href={`/w/${slug}/compose`} variant="secondary">Create post</Button>
-                  <Button href={`/w/${slug}/workflows`} variant="secondary">Open workflows</Button>
-                  <Button href={`/w/${slug}/studio`} variant="secondary">Open AI studio</Button>
+                <div className="flex flex-col items-stretch gap-2 text-left">
+                  {OPENERS.map((opener) => (
+                    <button
+                      key={opener}
+                      type="button"
+                      onClick={() => writeInComposer(opener)}
+                      className="rounded-md border border-hairline bg-canvas px-4 py-3 text-left text-sm transition-opacity hover:opacity-80 active:scale-[.97]"
+                    >
+                      {opener}
+                    </button>
+                  ))}
                 </div>
               )}
             >
@@ -290,40 +327,32 @@ export function AiAssistant({
             </EmptyState>
           )}
           {active?.messages.map((message) => (
-            <article key={message.id} aria-label={message.role === 'USER' ? 'You' : 'Assistant'} className={`max-w-[94%] rounded-lg p-4 md:max-w-[82%] ${message.role === 'USER' ? 'ml-auto bg-primary text-on-primary' : 'bg-canvas'}`}>
+            <article
+              key={message.id}
+              aria-label={message.role === 'USER' ? 'You' : 'Assistant'}
+              className={`group max-w-[94%] rounded-lg p-4 md:max-w-[82%] ${message.role === 'USER' ? 'ml-auto bg-primary text-on-primary' : 'bg-canvas'}`}
+            >
               <p className="whitespace-pre-wrap break-words">{messageContent(message)}</p>
-              {Boolean(message.proposal) && (
-                <div className="mt-4 border-t border-hairline-soft pt-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <Badge tone={message.proposalStatus === 'COMPLETED' ? 'lime' : 'lilac'}>
-                      {proposalStatusLabel(message.proposalStatus)}
-                    </Badge>
-                    {message.proposalStatus === 'PENDING' && (
-                      <Button type="button" onClick={() => setProposalToConfirm(message)} disabled={pending}>Review and confirm</Button>
-                    )}
-                  </div>
-                  <p className="mt-3 break-words text-sm">{proposalSummary(message.proposal)}</p>
-                  {message.proposalStatus === 'COMPLETED' && (
-                    <div className="mt-3">
-                      <Button
-                        href={proposalDestination(slug, message.proposal)}
-                        variant="secondary"
-                      >
-                        {proposalDestinationLabel(message.proposal)}
-                      </Button>
-                    </div>
-                  )}
-                </div>
+              {message.proposal && (
+                <ProposalBlock
+                  slug={slug}
+                  proposal={message.proposal}
+                  status={message.proposalStatus}
+                  reply={message.content}
+                  busy={pending}
+                  onReview={() => setProposalToConfirm(message)}
+                />
               )}
               {message.role === 'ASSISTANT' && (
-                <div className="mt-4 flex flex-wrap gap-2 border-t border-hairline-soft pt-3">
+                /* Held back until the message is hovered or tabbed into: three
+                   buttons under every reply competed with the reply itself. */
+                <div className="mt-3 hidden flex-wrap gap-2 focus-within:flex group-hover:flex">
                   <Button type="button" size="sm" variant="tertiary" onClick={() => copyMessage(message)}>
                     <Copy size={16} /> Copy
                   </Button>
-                  <Button type="button" size="sm" variant="tertiary" onClick={() => editMessage(message)}>
+                  <Button type="button" size="sm" variant="tertiary" onClick={() => writeInComposer(outputText(message))}>
                     <Pencil size={16} /> Edit in prompt
                   </Button>
-                  <Button href={`/w/${slug}/compose`} size="sm" variant="tertiary">Open composer</Button>
                 </div>
               )}
             </article>
@@ -338,24 +367,24 @@ export function AiAssistant({
           )}
         </div>
         {error && <StatusMessage tone="error" className="mb-4">{error}</StatusMessage>}
-        <div className="flex shrink-0 items-center gap-3 border-t border-hairline-soft pt-4">
-          {/* A textarea keeps Shift+Enter inserting a newline, but it has to be pinned to
-              --control-size and pill radius to match the Send button sharing this row:
-              .b88-input is a 48px, 8px-radius field and a textarea grows past it by rows. */}
+        <div className="shrink-0 rounded-md border border-hairline bg-canvas p-2 focus-within:border-ink focus-within:[outline:3px_solid_var(--ink)] focus-within:[outline-offset:3px]">
           <textarea
             ref={composerRef}
             rows={1}
             value={content}
             onChange={(event) => setContent(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); } }}
-            className="b88-input min-w-0 flex-1 basis-40 overflow-y-auto"
-            style={{ height: 'var(--control-size)', minHeight: 'var(--control-size)', borderRadius: 'var(--radius-pill)', padding: 'var(--space-xs) var(--space-md)', lineHeight: '22px', resize: 'none' }}
+            className="block w-full resize-none bg-transparent px-2 py-2 leading-[22px] outline-none"
+            style={{ maxHeight: COMPOSER_MAX_HEIGHT }}
             placeholder="Ask for content, a schedule, or a workflow"
             aria-label="Assistant message"
           />
-          <Button type="button" className="shrink-0" onClick={send} disabled={pending || !content.trim()} aria-busy={pendingTask === 'send'}>
-            <Send size={16} /> {pendingTask === 'send' ? 'Sending' : 'Send'}
-          </Button>
+          <div className="mt-1 flex items-center justify-between gap-3 px-2 pb-1">
+            <p className="b88-caption">Enter sends · Shift+Enter adds a line</p>
+            <Button type="button" onClick={send} disabled={pending || !content.trim()} aria-busy={pendingTask === 'send'}>
+              <Send size={16} /> {pendingTask === 'send' ? 'Sending' : 'Send'}
+            </Button>
+          </div>
         </div>
       </section>
     </div>
@@ -381,6 +410,60 @@ export function AiAssistant({
           toast parked over the composer for anyone not using a mouse. */}
       {notice && <Toast tone="success">{notice}</Toast>}
     </>
+  );
+}
+
+/** Ten lines of request, then it scrolls. */
+const COMPOSER_MAX_HEIGHT = 240;
+
+/** Openers that show what this assistant can actually be asked for. */
+const OPENERS = [
+  'Copy my reel workflow and draw a random subject each run',
+  'Write five drafts about what we shipped this month',
+  'Schedule my approved drafts for Tuesday mornings',
+];
+
+/**
+ * The proposed change attached to a reply.
+ *
+ * The summary is dropped when the reply already says the same thing, which it
+ * usually does — the model writes both from the same sentence, and printing
+ * them one under the other made every proposal read twice.
+ */
+function ProposalBlock({
+  slug,
+  proposal,
+  status,
+  reply,
+  busy,
+  onReview,
+}: {
+  slug: string;
+  proposal: Proposal;
+  status: string | null;
+  reply: string;
+  busy: boolean;
+  onReview: () => void;
+}) {
+  const summary = proposalSummary(proposal);
+  const restated = reply.toLowerCase().includes(summary.toLowerCase().slice(0, 40));
+  return (
+    <div className="mt-4 border-t border-hairline-soft pt-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <Badge tone={status === 'COMPLETED' ? 'lime' : 'lilac'}>{proposalStatusLabel(status)}</Badge>
+        {!restated && <p className="min-w-0 flex-1 break-words text-sm">{summary}</p>}
+        <div className="ml-auto flex gap-2">
+          {status === 'PENDING' && (
+            <Button type="button" size="sm" onClick={onReview} disabled={busy}>Review and confirm</Button>
+          )}
+          {status === 'COMPLETED' && (
+            <Button href={proposalDestination(slug, proposal)} size="sm" variant="secondary">
+              {proposalDestinationLabel(proposal)}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
