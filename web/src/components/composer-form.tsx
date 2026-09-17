@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { PostStatus } from '@prisma/client';
-import { ArrowDown, ArrowUp, CalendarClock, RefreshCw, Save, Send, Sparkles, Trash2, UserCheck } from 'lucide-react';
+import { ArrowDown, ArrowUp, CalendarClock, RefreshCw, Send, Sparkles, Trash2, UserCheck } from 'lucide-react';
 import {
   AssetTile,
   Badge,
@@ -152,6 +152,14 @@ export function ComposerForm({
   liveSnapshot.current = draftSnapshot;
   /** What was saved, so a confirmation stops claiming a later edit is stored. */
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+  /**
+   * The draft this composer created for itself, if it started out as a new
+   * post. Sent with every later save so typing leaves one draft behind rather
+   * than one per pause.
+   */
+  const [createdPostId, setCreatedPostId] = useState<string | null>(null);
+  /** True while the save in flight is one nobody asked for. */
+  const autosaving = useRef(false);
 
   useEffect(() => {
     if (state.status === 'success') {
@@ -160,9 +168,21 @@ export function ComposerForm({
       }
       setSavedSnapshot(liveSnapshot.current);
       clearStoredDraft(storageKey);
+      if (autosaving.current) {
+        // Autosaving must not navigate. Pushing the new post's URL would
+        // remount the form mid-sentence and take the caret with it, so the
+        // address is corrected in place and the id is remembered instead.
+        autosaving.current = false;
+        const created = state.redirectTo?.split('/').pop();
+        if (!postId && created && created !== createdPostId) {
+          setCreatedPostId(created);
+          window.history.replaceState(null, '', state.redirectTo!);
+        }
+        return;
+      }
       if (state.redirectTo) router.push(state.redirectTo);
     }
-  }, [router, state.redirectTo, state.savedUpdatedAt, state.status, storageKey]);
+  }, [createdPostId, postId, router, state.redirectTo, state.savedUpdatedAt, state.status, storageKey]);
 
   useEffect(() => {
     if (!isPending) setPendingIntent(null);
@@ -184,6 +204,28 @@ export function ComposerForm({
   const caps = activeAccount ? CAPABILITIES[activeAccount.platform] : null;
   const fieldErrors = state.fields ?? {};
   const readOnly = !lifecycleActions.includes('edit');
+
+  /**
+   * Saves the draft shortly after typing stops.
+   *
+   * The Save button was the only thing standing between a composed post and
+   * losing it to a closed tab, and it asked for a decision nobody wants to make
+   * — there is no version of "I would rather my work were not kept". Publishing
+   * and scheduling stay explicit, because those are decisions.
+   *
+   * Never while another intent is in flight: a publish and an autosave racing
+   * over the same row is how a post gets published and then overwritten by the
+   * draft that was on screen a second earlier.
+   */
+  useEffect(() => {
+    if (readOnly || isPending) return;
+    if (draftSnapshot === savedSnapshot) return;
+    const timer = window.setTimeout(() => submitWithIntent('draft', true), 1200);
+    return () => window.clearTimeout(timer);
+    // submitWithIntent reads the current draft when it runs, which is the point.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftSnapshot, savedSnapshot, isPending, readOnly]);
+
   const selectedAccounts = accounts.filter((account) => draft.selectedAccountIds.includes(account.id));
   // The channel being edited first, then the rest, so the pane reorders rather
   // than the edited preview jumping around as tabs change.
@@ -462,13 +504,15 @@ export function ComposerForm({
     }
   }
 
-  function submitWithIntent(intent: string) {
-    setPendingIntent(intent);
+  function submitWithIntent(intent: string, automatic = false) {
+    autosaving.current = automatic;
+    setPendingIntent(automatic ? null : intent);
     const formData = new FormData();
     formData.set('intent', intent);
     formData.set('title', draft.title);
     formData.set('campaignId', draft.campaignId);
     formData.set('scheduledAt', draft.scheduledAt);
+    if (createdPostId) formData.set('postId', createdPostId);
     if (draft.sourceUpdatedAt) formData.set('expectedUpdatedAt', draft.sourceUpdatedAt);
     formData.set('platforms', JSON.stringify(versionsToPayload(draft.versions, draft.selectedAccountIds)));
     startTransition(() => submit(formData));
@@ -478,12 +522,13 @@ export function ComposerForm({
 
   const accountErrors = fieldErrors[activeAccount.id] ?? [];
   const isPendingApproval = postStatus === 'PENDING_APPROVAL';
-  const showSaveAction = lifecycleActions.includes('edit');
   const showPublishAction = canPublish && lifecycleActions.includes('publish') && !isPendingApproval;
   const showScheduleAction = canSchedule
     && (lifecycleActions.includes('schedule') || lifecycleActions.includes('reschedule'));
   const showApprovalAction = canSubmitForApproval && lifecycleActions.includes('submitForApproval');
-  const hasPostActions = showSaveAction || showPublishAction || showScheduleAction || showApprovalAction;
+  // Saving is no longer an action, so a post that can only be edited has an
+  // empty bar rather than one holding a button that does nothing.
+  const hasPostActions = showPublishAction || showScheduleAction || showApprovalAction;
   return (
     <>
     <>
@@ -948,17 +993,7 @@ export function ComposerForm({
               role="region"
               aria-label="Post actions"
             >
-              {showSaveAction && <PendingButton
-                type="submit"
-                variant="secondary"
-                className="shrink-0 whitespace-nowrap"
-                pendingLabel="Saving"
-                disabled={readOnly || isPending}
-                aria-busy={pendingIntent === 'draft'}
-              >
-                <Save size={16} />
-                Save draft
-              </PendingButton>}
+
               {showPublishAction && (
                 <PendingButton
                   type="button"

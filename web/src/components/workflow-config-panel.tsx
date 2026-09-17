@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useTransition, type ReactNode } from 'react';
+import { type ReactNode, useEffect, useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { CircleHelp, X } from 'lucide-react';
 import { z } from 'zod';
@@ -286,6 +286,8 @@ export function NodeConfigPanel({
   const [error, setError] = useState('');
   /** The settings as they were when the save succeeded, or null before one. */
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+  /** What was stored when the panel opened, so an untouched panel saves nothing. */
+  const [openedSnapshot] = useState(() => snapshotOf(node.name, normalizeNodeConfig(node.type, node.config)));
   const [showHelp, setShowHelp] = useState(false);
   const [pending, startTransition] = useTransition();
 
@@ -349,6 +351,28 @@ export function NodeConfigPanel({
 
     return specs;
   }, [definition, node.type, config.provider]);
+
+  /**
+   * Saves by itself, shortly after typing stops.
+   *
+   * A Save button on a settings panel is a trap: the panel closes when another
+   * step is clicked, and everything typed into it goes with it. The delay is
+   * long enough that a sentence being typed is one request rather than forty,
+   * and short enough that clicking away lands after it.
+   *
+   * Keyed on the snapshot, so it fires once per distinct state and an edit made
+   * while a save is in flight is picked up on the next pass instead of racing.
+   */
+  const currentSnapshot = snapshotOf(name, config);
+  useEffect(() => {
+    if (!canEdit || pending) return;
+    if (savedSnapshot === null ? currentSnapshot === openedSnapshot : currentSnapshot === savedSnapshot) return;
+    const timer = window.setTimeout(() => save(), 700);
+    return () => window.clearTimeout(timer);
+    // save() closes over the current form state by design; re-running it on a
+    // later render is exactly what picks up an edit made mid-flight.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSnapshot, canEdit, pending, savedSnapshot, openedSnapshot]);
 
   if (!definition) {
     return (
@@ -422,18 +446,6 @@ export function NodeConfigPanel({
       }
     });
   }
-
-  /**
-   * "Saved." is a claim about what is stored, so it stands only while the panel
-   * still holds exactly what was sent. It used to be a flag set on success and
-   * cleared on the next submit, which left it sitting above a setting the user
-   * had just changed — telling them an unsaved edit was safe.
-   *
-   * Derived rather than cleared by each of the ten or so change handlers, so a
-   * new control cannot forget to reset it. Editing a value back to what was
-   * saved restores the message, which is correct: the form matches the record.
-   */
-  const saved = savedSnapshot !== null && savedSnapshot === snapshotOf(name, config);
 
   /**
    * Which settings this node is actually showing right now.
@@ -843,13 +855,9 @@ export function NodeConfigPanel({
       )}
 
       {error && <StatusMessage tone="error">{error}</StatusMessage>}
-      {saved && <StatusMessage tone="success">Saved.</StatusMessage>}
 
       {canEdit && (
         <div className="flex flex-wrap gap-3">
-          <Button onClick={save} disabled={pending}>
-            {pending ? 'Saving' : 'Save'}
-          </Button>
           <Button variant="secondary" onClick={onDelete} disabled={pending}>
             Remove step
           </Button>

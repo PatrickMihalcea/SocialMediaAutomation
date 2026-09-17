@@ -64,7 +64,17 @@ export async function createPostAction(
   _previous: ComposerState,
   formData: FormData,
 ): Promise<ComposerState> {
-  return persistPost(slug, undefined, formData);
+  /**
+   * A composer that has already saved itself sends back the id it was given,
+   * so the next autosave updates that draft instead of leaving a new one behind
+   * every time typing pauses.
+   *
+   * Safe to take from the client: persistPost scopes the lookup to the caller's
+   * workspace, demands post:update when an id is present, and refuses an id
+   * that is not there.
+   */
+  const alreadyCreated = String(formData.get('postId') || '').trim() || undefined;
+  return persistPost(slug, alreadyCreated, formData);
 }
 
 export async function updatePostAction(
