@@ -106,7 +106,7 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
     themePool: {
       label: 'Theme pool',
-      description: 'One theme per line. Each run draws one of them, skipping the ones this step used most recently, so a page keeps moving through its subjects instead of repeating one.',
+      description: 'Themes separated by commas. Each run draws one at random from the whole list, so the same theme can come up twice — the ideas will still differ, because the step is told what it already covered.',
       multiline: true,
     },
     count: {

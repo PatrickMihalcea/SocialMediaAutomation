@@ -188,29 +188,50 @@ function LinesField({
   disabled: boolean;
   onChange: (lines: string[]) => void;
 }) {
-  const [text, setText] = useState(() => value.join('\n'));
-  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const [text, setText] = useState(() => value.join(', '));
+  const entries = splitEntries(text);
   return (
     <div>
       <TextArea
         label={label}
         hint={hint}
-        rows={6}
+        rows={4}
         value={text}
         disabled={disabled}
-        placeholder={'Interior design\nLuxury homes\nBrutalist landmarks'}
+        placeholder="Interior design, Luxury homes, Brutalist landmarks"
         onChange={(event) => {
           setText(event.target.value);
-          onChange(event.target.value.split('\n').map((line) => line.trim()).filter(Boolean));
+          onChange(splitEntries(event.target.value));
         }}
       />
       <p className="b88-caption mt-1.5">
-        {lines.length === 0
-          ? 'One per line'
-          : lines.length === 1 ? '1 entry' : `${lines.length} entries`}
+        {entries.length === 0
+          ? 'Separate with commas'
+          : entries.length === 1 ? '1 entry' : `${entries.length} entries`}
       </p>
+      {/* Shown back as the list it parsed to. A comma-separated box is easy to
+          get subtly wrong — a trailing comma, a doubled one, an entry that was
+          meant to be two — and the count alone does not say which entry is
+          which. */}
+      {entries.length > 1 && (
+        <p className="b88-caption mt-1.5 break-words">{entries.join(' · ')}</p>
+      )}
     </div>
   );
+}
+
+/**
+ * Entries out of a comma-separated box.
+ *
+ * Newlines separate too. The field asks for commas and shows commas, but a list
+ * pasted from a document arrives with line breaks, and treating that as one
+ * 300-character entry is a silent wrong answer rather than a visible one.
+ */
+function splitEntries(text: string): string[] {
+  return text
+    .split(/[,\n]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function beatSlideshowSizeValue(config: Record<string, unknown>): string {

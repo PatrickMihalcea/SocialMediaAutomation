@@ -63,45 +63,81 @@ describe('resolveTheme', () => {
     expect(resolveTheme(
       { themeMode: 'random', theme: 'typed', themePool: pool },
       '  wired theme  ',
-      [],
       random(0),
     )).toBe('wired theme');
   });
 
   it('uses the typed theme when the step is not drawing at random', () => {
-    expect(resolveTheme({ themeMode: 'fixed', theme: 'coastal rooms', themePool: pool }, null, []))
+    expect(resolveTheme({ themeMode: 'fixed', theme: 'coastal rooms', themePool: pool }, null))
       .toBe('coastal rooms');
   });
 
-  it('draws from the pool, skipping what this step used recently', () => {
-    const chosen = resolveTheme(
-      { themeMode: 'random', theme: '', themePool: pool },
-      null,
-      ['Interior design', 'Luxury homes'],
-      random(0),
-    );
-    expect(chosen).toBe('Brutalist landmarks');
+  it('draws from the whole pool, indexed by the roll', () => {
+    expect(resolveTheme({ themeMode: 'random', theme: '', themePool: pool }, null, random(0)))
+      .toBe('Interior design');
+    expect(resolveTheme({ themeMode: 'random', theme: '', themePool: pool }, null, random(0.5)))
+      .toBe('Brutalist landmarks');
+    expect(resolveTheme({ themeMode: 'random', theme: '', themePool: pool }, null, random(0.999)))
+      .toBe('Cliffside houses');
   });
 
-  it('draws from the whole pool again once every theme has been used', () => {
-    const chosen = resolveTheme(
-      { themeMode: 'random', theme: '', themePool: pool },
-      null,
-      [...pool].reverse(),
-      random(0.99),
+  /**
+   * The behaviour this replaced excluded recently-used themes, which meant a
+   * pool of four only ever drew from three and the last theme could not come up
+   * again. A draw that cannot repeat is a shuffle, not a draw.
+   */
+  it('can draw the same theme twice running', () => {
+    const settings = { themeMode: 'random' as const, theme: '', themePool: pool };
+    expect(resolveTheme(settings, null, random(0))).toBe('Interior design');
+    expect(resolveTheme(settings, null, random(0))).toBe('Interior design');
+  });
+
+  it('reaches every entry in the pool across many draws', () => {
+    const settings = { themeMode: 'random' as const, theme: '', themePool: pool };
+    const seen = new Set(
+      Array.from({ length: 400 }, () => resolveTheme(settings, null)),
     );
-    expect(pool).toContain(chosen);
+    expect(seen).toEqual(new Set(pool));
+  });
+
+  it('never indexes past the end when the roll is one', () => {
+    expect(pool).toContain(
+      resolveTheme({ themeMode: 'random', theme: '', themePool: pool }, null, random(1)),
+    );
+  });
+
+  /**
+   * A real pool is pasted, not typed. The cap was 60, set when the field took
+   * one theme per line, and a pasted content calendar of a couple of hundred
+   * subjects was silently rejected by config validation.
+   */
+  it('accepts a pool of a few hundred themes and draws across all of it', () => {
+    const big = Array.from({ length: 179 }, (_, i) => `theme ${i + 1}`);
+    const parsed = parseConfig('IDEA_GENERATOR', {
+      themeMode: 'random',
+      theme: '',
+      themePool: big,
+      count: 6,
+    }) as { themePool: string[] };
+
+    expect(parsed.themePool).toHaveLength(179);
+
+    const settings = { themeMode: 'random' as const, theme: '', themePool: big };
+    expect(resolveTheme(settings, null, () => 0)).toBe('theme 1');
+    expect(resolveTheme(settings, null, () => 0.999)).toBe('theme 179');
+    // Every entry is reachable, not just the head of the list.
+    const seen = new Set(Array.from({ length: 4_000 }, () => resolveTheme(settings, null)));
+    expect(seen.size).toBeGreaterThan(150);
   });
 
   it('is empty when random mode has nothing to draw from, so the run says so', () => {
-    expect(resolveTheme({ themeMode: 'random', theme: 'ignored', themePool: [] }, null, [])).toBe('');
+    expect(resolveTheme({ themeMode: 'random', theme: 'ignored', themePool: [] }, null)).toBe('');
   });
 
   it('ignores blank and duplicated pool entries', () => {
     expect(resolveTheme(
       { themeMode: 'random', theme: '', themePool: ['  Luxury homes  ', 'Luxury homes', '   '] },
       null,
-      [],
       random(0.9),
     )).toBe('Luxury homes');
   });

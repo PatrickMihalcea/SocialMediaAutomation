@@ -80,7 +80,7 @@ export function buildIdeaInstruction(config: Config, recentTitles: string[] = []
 export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>> {
   const config = ctx.config as Config;
   const history = await recentRuns(ctx);
-  const theme = resolveTheme(config, ctx.inputs.theme, history.map((entry) => entry.theme));
+  const theme = resolveTheme(config, ctx.inputs.theme);
   if (theme.length < 3) {
     throw new PermanentJobError(
       config.themeMode === 'random'
@@ -149,14 +149,22 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
  * The theme this run works from.
  *
  * Three sources, most specific first: a connected input beats everything, a
- * random draw comes next, and the typed theme is the fallback. The draw skips
- * whatever this step used most recently, so a pool cycles instead of landing
- * on the same topic two runs running.
+ * random draw comes next, and the typed theme is the fallback.
+ *
+ * The draw is uniform over the whole pool, every run. It used to exclude the
+ * themes the step had most recently used, which made the sequence a shuffle
+ * rather than a draw — with a pool of four, the next theme was picked from
+ * three and the one just used could not come up at all. That is a cycle wearing
+ * randomness as a hat, and it is not what "random from a pool" says. Repeats
+ * are a property of drawing at random, not a bug in it.
+ *
+ * Runs still avoid repeating *ideas*: the recent titles for the drawn theme are
+ * named in the instruction, so landing on the same theme twice produces
+ * different angles rather than the same post.
  */
 export function resolveTheme(
   config: Pick<Config, 'themeMode' | 'theme' | 'themePool'>,
   connected: unknown,
-  recentThemes: string[],
   random: () => number = Math.random,
 ): string {
   const wired = String(connected ?? '').trim();
@@ -165,15 +173,9 @@ export function resolveTheme(
 
   const pool = [...new Set((config.themePool ?? []).map((entry) => entry.trim()).filter(Boolean))];
   if (pool.length === 0) return '';
-  if (pool.length === 1) return pool[0];
-
-  // Never exclude the whole pool: with four themes and a long history, an
-  // unbounded exclusion list would leave nothing to draw and the step would
-  // fall back to the same arbitrary first entry every time.
-  const avoid = new Set(recentThemes.slice(0, Math.min(pool.length - 1, 12)));
-  const candidates = pool.filter((entry) => !avoid.has(entry));
-  const choices = candidates.length ? candidates : pool;
-  return choices[Math.min(choices.length - 1, Math.floor(random() * choices.length))];
+  // Clamped because a random() of exactly 1 would index past the end. Math
+  // .random never returns it, but this is also the seam the tests drive.
+  return pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
 }
 
 /** Themes and titles this step produced before, newest first. */

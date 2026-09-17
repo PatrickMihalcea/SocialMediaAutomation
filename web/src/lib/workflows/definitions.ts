@@ -214,11 +214,19 @@ export const NODE_DEFINITIONS = {
       themeMode: z.enum(['fixed', 'random']).default('fixed'),
       theme: z.string().max(2000).default(''),
       /**
-       * Candidate themes for random mode, one per line in the panel. The run
-       * avoids whatever this step used recently, so a pool of twenty topics
-       * cycles rather than landing on the same one twice in a week.
+       * Candidate themes for random mode, comma-separated in the panel. Each
+       * run draws one uniformly from the whole pool — repeats included, because
+       * that is what drawing at random means. Repetition of *ideas* is handled
+       * separately, by naming recent titles in the instruction.
        */
-      themePool: z.array(z.string().trim().min(1).max(300)).max(60).default([]),
+      themePool: z.array(z.string().trim().min(1).max(300))
+        // 60 was set when the pool was typed one per line, which made a long
+        // list tedious enough that nobody built one. A comma-separated box is
+        // pasted, not typed, and a real content calendar runs to a few hundred
+        // subjects — the cap is here to stop an accidental paste of a document,
+        // not to ration themes.
+        .max(500, 'A theme pool can hold up to 500 themes.')
+        .default([]),
       count: z.number().int().min(1).max(20).default(8),
       /** Appended to every prompt; the old pipeline hardcoded a 4k-realism suffix. */
       styleSuffix: z.string().max(500).default(''),
