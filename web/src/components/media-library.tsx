@@ -1205,7 +1205,7 @@ function FolderTree({
 
         return (
           <div key={folder.id}>
-            <div className="group flex items-center gap-1" style={{ paddingLeft: depth * 14 }}>
+            <div className="group relative flex items-center gap-1" style={{ paddingLeft: depth * 14 }}>
               {hasChildren ? (
                 <button
                   type="button"
@@ -1237,29 +1237,29 @@ function FolderTree({
               </FolderLink>
 
               {canEdit && (
-                // Visible on hover, and on focus so the keyboard can reach
-                // them; always visible on the folder you are looking at.
-                <span
-                  className={`flex shrink-0 gap-0.5 transition-opacity focus-within:opacity-100 group-hover:opacity-100 ${isActive ? '' : 'opacity-0'}`}
-                >
+                // Absolutely positioned, so it costs the name no width. Hidden
+                // rather than transparent for the same reason: an invisible
+                // button that still occupies 120px of a 240px sidebar is why
+                // every folder here read as "Mu…" and "Tree…".
+                <span className="absolute right-1 hidden items-center gap-0.5 rounded-pill bg-canvas px-1 shadow-sm focus-within:flex group-hover:flex">
                   <IconButton
                     icon={Plus}
                     label={`New folder inside ${folder.name}`}
-                    className="size-8"
+                    style={{ width: 28, height: 28 }}
                     disabled={pending}
                     onClick={() => onCreateIn(folder.id)}
                   />
                   <IconButton
                     icon={Pencil}
                     label={`Rename ${folder.name}`}
-                    className="size-8"
+                    style={{ width: 28, height: 28 }}
                     disabled={pending}
                     onClick={() => onRename(folder.id)}
                   />
                   <IconButton
                     icon={Trash2}
                     label={`Delete ${folder.name}`}
-                    className="size-8"
+                    style={{ width: 28, height: 28 }}
                     disabled={pending}
                     onClick={() => onDelete(folder)}
                   />

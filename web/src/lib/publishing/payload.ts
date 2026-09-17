@@ -1,7 +1,7 @@
 import 'server-only';
 import type { MediaAsset, PostMedia, PostPlatform } from '@prisma/client';
 import { storage } from '@/lib/storage';
-import { soundtrackedAsset } from '@/lib/media/audio-mux-derivative';
+import { renderSoundtrackedMedia } from '@/lib/media/audio-mux-derivative';
 import type { OutgoingMedia, OutgoingPost } from '@/lib/social/types';
 
 type MediaRow = PostMedia & { mediaAsset: MediaAsset };
@@ -33,27 +33,32 @@ export async function toOutgoingMedia(row: MediaRow): Promise<OutgoingMedia> {
   // The soundtrack is rendered here, at the last possible moment, because this
   // is the first point where it is certain the post is actually going out.
   // While it was being composed it was only a choice, and choices change.
-  const asset = row.audioAssetId
-    ? await soundtrackedAsset({
+  const asset = row.mediaAsset;
+  const soundtracked = row.audioAssetId
+    ? await renderSoundtrackedMedia({
         sourceAssetId: row.mediaAssetId,
         audioAssetId: row.audioAssetId,
         startSeconds: row.audioStart ?? 0,
       })
-    : row.mediaAsset;
-  const url = await storage().signedUrl(asset.storageKey, 60 * 60 * 6);
+    : null;
+  // The rendered bytes stand in for the asset's, but the asset row is what the
+  // library keeps — no second copy of the video appears there because someone
+  // put a song on a post.
+  const storageKey = soundtracked?.storageKey ?? asset.storageKey;
+  const url = await storage().signedUrl(storageKey, 60 * 60 * 6);
   return {
     id: asset.id,
     // A soundtracked still is a video, and the adapters have to be told so:
     // they choose an upload endpoint from this.
-    type: row.audioAssetId ? 'VIDEO' : asset.type,
-    mimeType: asset.mimeType,
-    filename: asset.filename,
-    size: asset.size,
-    width: asset.width,
-    height: asset.height,
-    durationSeconds: asset.duration,
+    type: soundtracked ? 'VIDEO' : asset.type,
+    mimeType: soundtracked?.mimeType ?? asset.mimeType,
+    filename: soundtracked?.filename ?? asset.filename,
+    size: soundtracked?.size || asset.size,
+    width: soundtracked?.width ?? asset.width,
+    height: soundtracked?.height ?? asset.height,
+    durationSeconds: soundtracked?.duration ?? asset.duration,
     altText: row.altText ?? asset.altText,
     url,
-    read: () => storage().get(asset.storageKey),
+    read: () => storage().get(storageKey),
   };
 }
