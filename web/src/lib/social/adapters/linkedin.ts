@@ -228,6 +228,9 @@ export class LinkedInAdapter extends BaseAdapter {
     item: OutgoingMedia,
     kind: 'images' | 'videos',
   ): Promise<string> {
+    // Once, before initializing: the declared size must describe these exact
+    // bytes, and reading twice would pull a large video out of storage twice.
+    const bytes = await item.read();
     const init = await platformJson<{
       value: { uploadUrl?: string; image?: string; video?: string; uploadInstructions?: { uploadUrl: string }[] };
     }>({
@@ -238,7 +241,7 @@ export class LinkedInAdapter extends BaseAdapter {
       body: JSON.stringify({
         initializeUploadRequest: {
           owner: account.externalAccountId,
-          ...(kind === 'videos' ? { fileSizeBytes: item.size, uploadCaptions: false } : {}),
+          ...(kind === 'videos' ? { fileSizeBytes: bytes.byteLength, uploadCaptions: false } : {}),
         },
       }),
     });
@@ -255,7 +258,6 @@ export class LinkedInAdapter extends BaseAdapter {
       });
     }
 
-    const bytes = await item.read();
     await platformFetch({
       platform: this.platform,
       method: 'PUT',

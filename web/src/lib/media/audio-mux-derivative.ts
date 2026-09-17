@@ -60,12 +60,16 @@ export async function renderSoundtrackedMedia(input: {
     sourceUpdatedAt: source.updatedAt.toISOString(),
   });
 
-  const already = await storage().exists(key);
-  if (already) {
+  if (await storage().exists(key)) {
+    // Measured, not guessed. Returning 0 here let the caller fall back to the
+    // source asset's size while serving these bytes, and an upload that
+    // declares one length and sends another is rejected outright — YouTube
+    // says so in exactly those words.
+    const cached = await storage().get(key);
     return {
       storageKey: key,
       mimeType: 'video/mp4',
-      size: 0,
+      size: cached.byteLength,
       width: source.width,
       height: source.height,
       duration: source.duration,

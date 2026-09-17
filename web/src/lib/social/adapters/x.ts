@@ -190,6 +190,9 @@ export class XAdapter extends BaseAdapter {
   /** Chunked upload: INIT, APPEND each 4 MB chunk, FINALIZE, then wait if async. */
   private async uploadMedia(token: string, item: OutgoingMedia): Promise<string> {
     const isVideo = item.type === 'VIDEO';
+    // Read first: total_bytes has to describe the bytes actually appended, and
+    // the stored size predates any re-encode the asset has been through since.
+    const bytes = await item.read();
     const init = await platformJson<{ media_id_string: string }>({
       platform: this.platform,
       method: 'POST',
@@ -197,14 +200,13 @@ export class XAdapter extends BaseAdapter {
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         command: 'INIT',
-        total_bytes: String(item.size),
+        total_bytes: String(bytes.byteLength),
         media_type: item.mimeType,
         media_category: isVideo ? 'tweet_video' : 'tweet_image',
       }).toString(),
     });
     const mediaId = init.media_id_string;
 
-    const bytes = await item.read();
     const chunkSize = 4 * 1024 * 1024;
     for (let i = 0, segment = 0; i < bytes.length; i += chunkSize, segment++) {
       const form = new FormData();

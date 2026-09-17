@@ -53,7 +53,10 @@ export async function toOutgoingMedia(row: MediaRow): Promise<OutgoingMedia> {
     type: soundtracked ? 'VIDEO' : asset.type,
     mimeType: soundtracked?.mimeType ?? asset.mimeType,
     filename: soundtracked?.filename ?? asset.filename,
-    size: soundtracked?.size || asset.size,
+    // ?? not ||: a genuinely zero-byte render is a broken render, and
+    // quietly substituting the original's size hides it until a platform
+    // rejects the mismatch.
+    size: soundtracked?.size ?? asset.size,
     width: soundtracked?.width ?? asset.width,
     height: soundtracked?.height ?? asset.height,
     durationSeconds: soundtracked?.duration ?? asset.duration,

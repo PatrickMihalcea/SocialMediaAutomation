@@ -197,6 +197,14 @@ export class YouTubeAdapter extends BaseAdapter {
       status: { privacyStatus: env.YOUTUBE_PRIVACY_STATUS, selfDeclaredMadeForKids: false },
     };
 
+    // Read before opening the session, not after: the session is opened with a
+    // declared length, and YouTube rejects the upload outright if the body does
+    // not match it to the byte. Taking that number from the stored asset row —
+    // written when the file was uploaded, before any re-encode — is how a post
+    // fails with "there were N byte(s) (or more) in the request body ... there
+    // should have been M according to the Content-Range header".
+    const bytes = await video.read();
+
     // Step 1 — open a resumable session.
     const session = await platformFetch({
       platform: this.platform,
@@ -206,7 +214,7 @@ export class YouTubeAdapter extends BaseAdapter {
         authorization: `Bearer ${token}`,
         'content-type': 'application/json',
         'X-Upload-Content-Type': video.mimeType,
-        'X-Upload-Content-Length': String(video.size),
+        'X-Upload-Content-Length': String(bytes.byteLength),
       },
       body: JSON.stringify(metadata),
     });
@@ -221,7 +229,6 @@ export class YouTubeAdapter extends BaseAdapter {
     }
 
     // Step 2 — send the bytes.
-    const bytes = await video.read();
     const result = await platformJson<{ id: string }>({
       platform: this.platform,
       method: 'PUT',
