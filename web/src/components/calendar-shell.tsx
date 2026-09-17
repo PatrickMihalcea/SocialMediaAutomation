@@ -34,7 +34,7 @@ import {
 } from '@/app/actions/queue';
 import { PlatformGlyph, StatusGlyph } from '@/components/visuals';
 import { legalPostActions } from '@/lib/posts/lifecycle';
-import { POST_STATUS_LABELS } from '@/lib/posts/labels';
+import { postStatusLabel } from '@/lib/posts/labels';
 import { timezoneLabel } from '@/lib/scheduling/time';
 
 export type CalendarPost = {
@@ -559,7 +559,7 @@ export function CalendarShell({
         {selectedPost && (
           <div className="max-h-[65vh] overflow-y-auto pr-2">
             {message?.tone === 'error' && <StatusMessage tone="error" className="mt-6">{message.text}</StatusMessage>}
-            <div className="mt-6 flex flex-wrap gap-2"><Badge tone={tones[selectedPost.status] ?? 'outline'}>{POST_STATUS_LABELS[selectedPost.status]}</Badge>{selectedPost.platforms.map((p) => <Badge key={p} tone="outline">{p}</Badge>)}</div>
+            <div className="mt-6 flex flex-wrap gap-2"><Badge tone={tones[selectedPost.status] ?? 'outline'}>{postStatusLabel(selectedPost.status, selectedPost.scheduledAt)}</Badge>{selectedPost.platforms.map((p) => <Badge key={p} tone="outline">{p}</Badge>)}</div>
             {selectedPost.status === 'PUBLISHED' && (
               <StatusMessage tone="success" className="mt-6">
                 Published via a simulated integration.
@@ -725,7 +725,7 @@ function PostList({ posts, selected, setSelected, slug, timezone }: {
           <td><Button type="button" variant="tertiary" href={`/w/${slug}/compose/${post.id}`}><PenLine size={15} strokeWidth={1.75} /> {post.title}</Button></td>
           <td>{post.platforms.join(', ') || '—'}</td>
           <td>{post.scheduledAt ? DateTime.fromISO(post.scheduledAt).setZone(timezone).toFormat('ccc d LLL, HH:mm') : 'Not scheduled'}</td>
-          <td><Badge tone={tones[post.status] ?? 'outline'}>{POST_STATUS_LABELS[post.status]}</Badge></td><td>{post.campaign ?? '—'}</td>
+          <td><Badge tone={tones[post.status] ?? 'outline'}>{postStatusLabel(post.status, post.scheduledAt)}</Badge></td><td>{post.campaign ?? '—'}</td>
         </tr>)}</tbody>
       </table>
     </section>

@@ -218,9 +218,11 @@ export async function approvalAction(
       CHANGES_REQUESTED: 'Changes were requested',
     }[decision],
     body: releaseError
-      ? `${body} It was approved but not scheduled: ${releaseError}`
+      ? `${body} It was approved but not released: ${releaseError}`
       : released
-        ? `${body} It is now scheduled to publish.`
+        // "Scheduled" for a publish-now is how someone concludes their post
+        // did not go out.
+        ? `${body} ${releaseMode === 'now' ? 'It is publishing now.' : 'It is now scheduled to publish.'}`
         : body,
     href: `/w/${slug}/posts/${postId}`,
   });
@@ -229,6 +231,20 @@ export async function approvalAction(
   revalidatePath(`/w/${slug}/calendar`);
   revalidatePath(`/w/${slug}/posts/${postId}`);
   revalidatePath(`/w/${slug}/history`);
+
+  // Back to the same page, carrying what happened. The reviewer pressed a
+  // button and the row simply vanished: no confirmation, nothing saying the
+  // post was on its way, and nowhere pointing at where to watch it.
+  const outcome = releaseError
+    ? 'release-failed'
+    : decision !== 'APPROVED'
+      ? 'reviewed'
+      : releaseMode === 'now'
+        ? 'publishing'
+        : releaseMode === 'queue'
+          ? 'queued'
+          : 'approved';
+  redirect(`/w/${slug}/team?outcome=${outcome}&post=${postId}`);
 }
 
 export async function replyToApprovalCommentAction(

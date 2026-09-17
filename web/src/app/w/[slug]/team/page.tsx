@@ -30,7 +30,7 @@ export default function TeamPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ ownershipTransferred?: string }>;
+  searchParams: Promise<{ ownershipTransferred?: string; outcome?: string; post?: string }>;
 }) {
   return (
     <>
@@ -46,7 +46,7 @@ async function TeamData({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ ownershipTransferred?: string }>;
+  searchParams: Promise<{ ownershipTransferred?: string; outcome?: string; post?: string }>;
 }) {
   const { slug } = await params;
   const query = await searchParams;
@@ -104,6 +104,28 @@ async function TeamData({
       {query.ownershipTransferred === '1' && (
         <StatusMessage tone="success" className="mt-6">
           Ownership transferred. Your role is now Admin.
+        </StatusMessage>
+      )}
+      {/* The review row vanishes on a decision, which on its own is
+          indistinguishable from nothing having happened. This says what was
+          done and where to watch it. */}
+      {query.outcome && (
+        <StatusMessage tone={query.outcome === 'release-failed' ? 'error' : 'success'} className="mt-6">
+          {{
+            publishing: 'Approved and publishing now. It goes out within a minute or so — follow it on the post.',
+            queued: 'Approved and added to the queue. It publishes at the next posting time.',
+            approved: 'Approved. It has no release set, so schedule it when you are ready.',
+            reviewed: 'Your review was recorded and the author has been notified.',
+            'release-failed': 'Approved, but it could not be released. Open the post to see why and try again.',
+          }[query.outcome] ?? 'Your review was recorded.'}
+          {query.post && (
+            <>
+              {' '}
+              <Link href={`/w/${slug}/posts/${query.post}`} className="underline underline-offset-4">
+                Open the post
+              </Link>
+            </>
+          )}
         </StatusMessage>
       )}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,.8fr)]">

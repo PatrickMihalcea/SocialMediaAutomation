@@ -13,7 +13,7 @@ import { notFound } from 'next/navigation';
 import type { PostStatus } from '@prisma/client';
 import { legalPostActions, type PostLifecycleAction } from '@/lib/posts/lifecycle';
 import { replyToApprovalCommentAction } from '@/app/actions/team';
-import { APPROVAL_DECISION_LABELS, POST_PLATFORM_STATUS_LABELS, POST_STATUS_LABELS } from '@/lib/posts/labels';
+import { APPROVAL_DECISION_LABELS, POST_PLATFORM_STATUS_LABELS, postStatusLabel } from '@/lib/posts/labels';
 import { approvalOutcome, describeOrigin, postOriginInclude } from '@/lib/posts/origin';
 
 /**
@@ -125,7 +125,7 @@ export default async function PostDetailPage({
           <p className="b88-eyebrow">Post detail</p>
           <h1 className="b88-page-title mt-3 break-words">{title}</h1>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Badge tone={statusTone[post.status]}>{POST_STATUS_LABELS[post.status]}</Badge>
+            <Badge tone={statusTone[post.status]}>{postStatusLabel(post.status, post.scheduledAt)}</Badge>
             {post.campaign && <Badge tone="outline">{post.campaign.name}</Badge>}
           </div>
         </div>
