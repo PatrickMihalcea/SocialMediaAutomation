@@ -19,6 +19,8 @@ export type ComposerAsset = {
   id: string;
   filename: string;
   type: string;
+  /** PROCESSING means a render is still filling this in. */
+  status?: string;
   thumbnailUrl: string;
 };
 

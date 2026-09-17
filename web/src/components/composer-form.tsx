@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { PostStatus } from '@prisma/client';
-import { ArrowDown, ArrowUp, CalendarClock, Music, RefreshCw, Save, Send, Sparkles, Trash2, UserCheck } from 'lucide-react';
+import { ArrowDown, ArrowUp, CalendarClock, RefreshCw, Save, Send, Sparkles, Trash2, UserCheck } from 'lucide-react';
 import {
   AssetTile,
   Badge,
@@ -101,8 +101,6 @@ export function ComposerForm({
   const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
   const [replacement, setReplacement] = useState<{ accountId: string; index: number } | null>(null);
   const [libraryAssets, setLibraryAssets] = useState(assets);
-  /** Which attached item is choosing a track, if any. */
-  const [soundtrackFor, setSoundtrackFor] = useState<{ accountId: string; index: number } | null>(null);
   const [soundtrackPending, setSoundtrackPending] = useState(false);
   const [soundtrackNotice, setSoundtrackNotice] = useState<{ tone: 'neutral' | 'error'; text: string } | null>(null);
   const [assetOffset, setAssetOffset] = useState(12);
@@ -253,7 +251,6 @@ export function ComposerForm({
         i === index ? { ...entry, mediaAssetId: created.id } : entry,
       );
       updateVersion(accountId, { media });
-      setSoundtrackFor(null);
       setSoundtrackNotice({
         tone: 'neutral',
         text: `${humanizeMachineValue(track?.filename ?? 'Track')} is rendering onto this media and will finish in the background${created.wasImage ? '. The image becomes a video, which is the only way a platform carries audio' : ''}.`,
@@ -722,20 +719,6 @@ export function ComposerForm({
                           >
                             <ArrowDown size={16} />Move down
                           </Button>
-                          {(asset?.type === 'IMAGE' || asset?.type === 'VIDEO') && (
-                            <Button
-                              type="button"
-                              variant="tertiary"
-                              disabled={readOnly || !audioTracks.length}
-                              onClick={() =>
-                                setSoundtrackFor(
-                                  soundtrackFor?.index === index ? null : { accountId: activeAccount.id, index },
-                                )
-                              }
-                            >
-                              <Music size={16} />Add music
-                            </Button>
-                          )}
                           <Button
                             type="button"
                             variant="tertiary"
@@ -751,14 +734,19 @@ export function ComposerForm({
                           This asset is no longer available. Remove it before saving.
                         </StatusMessage>
                       )}
-                      {soundtrackFor?.accountId === activeAccount.id && soundtrackFor.index === index && (
-                        <SoundtrackPicker
+                      {asset?.status === 'PROCESSING' && (
+                        <StatusMessage tone="neutral">
+                          Still rendering. You can keep editing and save — it finishes in the background.
+                        </StatusMessage>
+                      )}
+                      {(asset?.type === 'IMAGE' || asset?.type === 'VIDEO') && !!audioTracks.length && (
+                        <SoundtrackRow
                           tracks={audioTracks}
-                          isImage={asset?.type === 'IMAGE'}
+                          isImage={asset.type === 'IMAGE'}
                           pending={soundtrackPending}
-                          onCancel={() => setSoundtrackFor(null)}
-                          onChoose={(audioId, startSeconds, seconds) =>
-                            addSoundtrack(activeAccount.id, index, audioId, startSeconds, seconds)
+                          disabled={readOnly}
+                          onChoose={(audioId, startSeconds) =>
+                            addSoundtrack(activeAccount.id, index, audioId, startSeconds, null)
                           }
                         />
                       )}
@@ -952,90 +940,59 @@ function mergeDraft(base: ComposerDraft, stored: ComposerDraft, preserveInitialP
 }
 
 /**
- * Choosing the track, and where in it the post starts.
+ * One row: pick a track, optionally say where in it to start.
  *
- * The start offset is the point of this: songs rarely open on the part anyone
- * wants, and without it every post begins on an intro. Length applies to a
- * still only — a video keeps its own, and trimming someone's footage to fit a
- * song is a decision they did not ask for.
+ * Choosing applies it — there is no confirm button, because there is nothing to
+ * confirm that the dropdown has not already said. The start offset is the only
+ * other thing worth setting: songs rarely open on the part anyone wants, and
+ * without it every post begins on an intro.
  */
-function SoundtrackPicker({
+function SoundtrackRow({
   tracks,
   isImage,
   pending,
+  disabled,
   onChoose,
-  onCancel,
 }: {
   tracks: ComposerAsset[];
   isImage: boolean;
   pending: boolean;
-  onChoose: (audioId: string, startSeconds: number, seconds: number | null) => void;
-  onCancel: () => void;
+  disabled: boolean;
+  onChoose: (audioId: string, startSeconds: number) => void;
 }) {
-  const [audioId, setAudioId] = useState(tracks[0]?.id ?? '');
   const [start, setStart] = useState('0');
-  const [length, setLength] = useState('');
-  const track = tracks.find((entry) => entry.id === audioId);
 
   return (
-    <div className="rounded-md border border-hairline p-3">
-      <p className="b88-caption">Soundtrack</p>
+    <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <Select
-        label="Track"
-        value={audioId}
-        onChange={(event) => setAudioId(event.target.value)}
-        disabled={pending}
+        label="Music"
+        value=""
+        disabled={disabled || pending}
+        hint={
+          isImage
+            ? 'Adds the track and turns this still into a video — the only shape a platform carries audio in.'
+            : 'Adds the track in place of any audio this video already has.'
+        }
+        onChange={(event) => {
+          if (event.target.value) onChoose(event.target.value, Number(start) || 0);
+        }}
       >
+        <option value="">{pending ? 'Adding…' : 'No music'}</option>
         {tracks.map((entry) => (
           <option key={entry.id} value={entry.id}>
             {humanizeMachineValue(entry.filename)}
           </option>
         ))}
       </Select>
-      {/* Preview before committing to a render that takes a minute. */}
-      {track?.url && <audio className="mt-3 w-full" src={track.url} controls preload="none" />}
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <Field
-          label="Start at (seconds)"
-          type="number"
-          min="0"
-          step="0.5"
-          value={start}
-          onChange={(event) => setStart(event.target.value)}
-          disabled={pending}
-        />
-        {isImage && (
-          <Field
-            label="Length (seconds)"
-            type="number"
-            min="1"
-            max="90"
-            placeholder="Rest of the track"
-            value={length}
-            onChange={(event) => setLength(event.target.value)}
-            disabled={pending}
-          />
-        )}
-      </div>
-      {isImage && (
-        <p className="b88-body-sm mt-2">
-          An image with a soundtrack is published as a video — no platform has a post type that is a
-          photograph with sound.
-        </p>
-      )}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button
-          type="button"
-          disabled={pending || !audioId}
-          onClick={() => onChoose(audioId, Number(start) || 0, length ? Number(length) : null)}
-        >
-          <Music size={16} />
-          {pending ? 'Adding…' : 'Add this track'}
-        </Button>
-        <Button type="button" variant="tertiary" disabled={pending} onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
+      <Field
+        label="Start at (seconds)"
+        type="number"
+        min="0"
+        step="0.5"
+        value={start}
+        onChange={(event) => setStart(event.target.value)}
+        disabled={disabled || pending}
+      />
     </div>
   );
 }

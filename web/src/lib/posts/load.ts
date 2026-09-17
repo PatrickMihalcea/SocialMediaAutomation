@@ -50,6 +50,7 @@ export async function loadComposerContext(
     thumbnailKey: true,
     storageKey: true,
     type: true,
+    status: true,
   } as const;
   const attachedMediaIds = [
     ...new Set(post?.platforms.flatMap((platform) =>
@@ -65,7 +66,10 @@ export async function loadComposerContext(
     }),
     attachedMediaIds.length
       ? db.mediaAsset.findMany({
-          where: { workspaceId, id: { in: attachedMediaIds }, status: 'READY' },
+          // Attached media includes anything still rendering. Filtering to
+          // READY made an asset the composer had only just created read as
+          // "no longer available", which is both wrong and alarming.
+          where: { workspaceId, id: { in: attachedMediaIds }, status: { in: ['READY', 'PROCESSING'] } },
           select: mediaSelect,
         })
       : Promise.resolve([]),
@@ -115,6 +119,7 @@ export async function loadComposerContext(
       id: asset.id,
       filename: asset.filename,
       type: asset.type,
+      status: asset.status,
       url: await mediaStorage.signedUrl(asset.storageKey),
       thumbnailUrl: await mediaStorage.signedUrl(asset.thumbnailKey ?? asset.storageKey),
     })),
@@ -125,6 +130,7 @@ export async function loadComposerContext(
       id: asset.id,
       filename: asset.filename,
       type: asset.type,
+      status: asset.status,
       url: await mediaStorage.signedUrl(asset.storageKey),
       thumbnailUrl: await mediaStorage.signedUrl(asset.thumbnailKey ?? asset.storageKey),
     })),
