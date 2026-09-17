@@ -105,6 +105,15 @@ export function ComposerForm({
   const [loadingMoreAssets, setLoadingMoreAssets] = useState(false);
   const [, startTransition] = useTransition();
   const hydrated = useRef(false);
+  /**
+   * The soundtrack plays against the preview pane, not a thumbnail beside the
+   * picker. What is being judged is the post — the track over the actual frame,
+   * at the size it will be seen — so the audio drives whatever video the
+   * preview is showing rather than a second copy of it.
+   */
+  const previewRef = useRef<HTMLElement>(null);
+  const soundtrackAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [playingTrack, setPlayingTrack] = useState<{ url: string; start: number } | null>(null);
   const errorSummaryRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -208,6 +217,29 @@ export function ComposerForm({
         versions: { ...current.versions, [accountId]: { ...version, media } },
       };
     });
+  }
+
+  function stopSoundtrack() {
+    soundtrackAudioRef.current?.pause();
+    previewRef.current?.querySelectorAll('video').forEach((video) => video.pause());
+    setPlayingTrack(null);
+  }
+
+  function playSoundtrack(url: string, start: number) {
+    setPlayingTrack({ url, start });
+    // After the audio element has the new src; seeking a stale one plays the
+    // previous track from the new offset.
+    window.setTimeout(() => {
+      const audio = soundtrackAudioRef.current;
+      if (!audio) return;
+      audio.currentTime = start;
+      void audio.play().catch(() => {});
+      previewRef.current?.querySelectorAll('video').forEach((video) => {
+        video.muted = true;
+        video.currentTime = 0;
+        void video.play().catch(() => {});
+      });
+    }, 0);
   }
 
   function chooseMedia(accountId: string, assetId: string) {
@@ -686,9 +718,14 @@ export function ComposerForm({
                           tracks={audioTracks}
                           isImage={asset.type === 'IMAGE'}
                           disabled={readOnly}
-                          mediaUrl={asset.url}
                           audioAssetId={item.audioAssetId ?? ''}
                           audioStart={item.audioStart ?? ''}
+                          playing={Boolean(
+                            playingTrack &&
+                            playingTrack.url === audioTracks.find((t) => t.id === item.audioAssetId)?.url,
+                          )}
+                          onPlay={playSoundtrack}
+                          onStop={stopSoundtrack}
                           onChange={(next) => {
                             const media = activeVersion.media.map((entry, i) =>
                               i === index ? { ...entry, ...next } : entry,
@@ -814,7 +851,15 @@ export function ComposerForm({
           hid the thing the composer exists to check — that the same post reads
           correctly on every channel it is going to. The channel being edited
           leads, so the pane still follows the editor. */}
-      <aside className="space-y-6 self-start">
+      {playingTrack && (
+        <audio
+          ref={soundtrackAudioRef}
+          src={playingTrack.url}
+          onEnded={stopSoundtrack}
+          className="hidden"
+        />
+      )}
+      <aside ref={previewRef} className="space-y-6 self-start">
         {previewAccounts.map((account) => (
           <ComposerPreview
             key={account.id}
@@ -887,13 +932,14 @@ function mergeDraft(base: ComposerDraft, stored: ComposerDraft, preserveInitialP
 }
 
 /**
- * Pick a track and hear it against the media, without rendering anything.
+ * Pick a track and hear it against the post preview, without rendering
+ * anything.
  *
  * The preview is the whole point: finding the right few seconds of a song means
- * trying eight of them, and an encode per attempt would make that cost minutes
- * and litter the library with abandoned files. Playing the track over a muted
- * clip is what the finished post will sound like, because the render replaces
- * the video's audio with exactly this.
+ * trying eight of them, and an encode per attempt would cost minutes and litter
+ * the library with abandoned files. It plays over the preview pane — the post
+ * at the size it will be seen — because a thumbnail beside the dropdown tells
+ * you nothing about whether the track fits the thing you are making.
  *
  * Nothing here touches the server. The choice is saved with the post and
  * rendered once, when it publishes.
@@ -902,46 +948,25 @@ function SoundtrackRow({
   tracks,
   isImage,
   disabled,
-  mediaUrl,
   audioAssetId,
   audioStart,
+  playing,
+  onPlay,
+  onStop,
   onChange,
 }: {
   tracks: ComposerAsset[];
   isImage: boolean;
   disabled: boolean;
-  mediaUrl: string;
   audioAssetId: string;
   audioStart: string;
+  playing: boolean;
+  onPlay: (url: string, start: number) => void;
+  onStop: () => void;
   onChange: (next: { audioAssetId?: string; audioStart?: string }) => void;
 }) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [playing, setPlaying] = useState(false);
   const track = tracks.find((entry) => entry.id === audioAssetId);
   const start = Number(audioStart) || 0;
-
-  function stop() {
-    audioRef.current?.pause();
-    videoRef.current?.pause();
-    setPlaying(false);
-  }
-
-  async function play() {
-    const audio = audioRef.current;
-    if (!audio) return;
-    // Seeking before play is what makes trying a different offset instant:
-    // nothing is fetched or encoded, the element just moves its playhead.
-    audio.currentTime = start;
-    const video = videoRef.current;
-    if (video) {
-      video.currentTime = 0;
-      video.muted = true;
-      await video.play().catch(() => {});
-    }
-    await audio.play().catch(() => {});
-    setPlaying(true);
-  }
 
   return (
     <div className="space-y-3">
@@ -956,7 +981,7 @@ function SoundtrackRow({
               : 'Replaces this video’s own audio when the post publishes.'
           }
           onChange={(event) => {
-            stop();
+            onStop();
             onChange({ audioAssetId: event.target.value });
           }}
         >
@@ -977,23 +1002,24 @@ function SoundtrackRow({
             disabled={disabled}
             onChange={(event) => {
               onChange({ audioStart: event.target.value });
-              // Follow the number as it is typed, so the ear can find the spot.
-              if (audioRef.current) audioRef.current.currentTime = Number(event.target.value) || 0;
+              // Retarget while it is playing, so the ear can walk the number to
+              // the right spot without stopping and starting.
+              if (playing && track?.url) onPlay(track.url, Number(event.target.value) || 0);
             }}
           />
         )}
       </div>
       {!!track && (
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="button" variant="secondary" onClick={() => (playing ? stop() : play())}>
-            {playing ? 'Stop preview' : 'Preview from here'}
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={disabled}
+            onClick={() => (playing ? onStop() : onPlay(track.url, start))}
+          >
+            {playing ? 'Stop' : 'Play over the preview'}
           </Button>
           <span className="b88-caption">Nothing is rendered until the post publishes</span>
-          <audio ref={audioRef} src={track.url} onEnded={stop} preload="none" className="hidden" />
-          {/* Muted on purpose: the track is what the post will carry. */}
-          {!isImage && mediaUrl && (
-            <video ref={videoRef} src={mediaUrl} muted playsInline className="h-24 rounded-md" />
-          )}
         </div>
       )}
     </div>

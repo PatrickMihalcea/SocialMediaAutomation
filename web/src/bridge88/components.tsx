@@ -1133,9 +1133,20 @@ export function Checkbox({
   containerClassName,
   style,
   disabled,
+  hideLabel = false,
   'aria-describedby': describedBy,
   ...props
-}: InputHTMLAttributes<HTMLInputElement> & { label: string; description?: string; containerClassName?: string }) {
+}: InputHTMLAttributes<HTMLInputElement> & {
+  label: string;
+  description?: string;
+  containerClassName?: string;
+  /**
+   * Keeps the label for assistive tech but takes it off screen, for a checkbox
+   * in a row whose meaning is the row itself — a visible "Select Untitled post"
+   * beside every draft is noise, and no label at all is unusable.
+   */
+  hideLabel?: boolean;
+}) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const descriptionId = `${inputId}-description`;
@@ -1170,7 +1181,7 @@ export function Checkbox({
           margin: 0,
         }}
       />
-      <span>
+      <span className={hideLabel ? 'sr-only' : undefined}>
         <span className="block text-sm font-[480] leading-5">{label}</span>
         {description && <span id={descriptionId} className="b88-caption mt-1 block">{description}</span>}
       </span>

@@ -184,6 +184,45 @@ function composerIntentLabel(intent: ComposerIntent) {
   }[intent];
 }
 
+/**
+ * Deletes several drafts at once.
+ *
+ * Clearing out a list meant confirming one row at a time, which for a workflow
+ * that produced twenty near-identical drafts is twenty confirmations for one
+ * decision.
+ *
+ * Posts the lifecycle will not let go of are left alone rather than failing the
+ * batch: a selection that happens to include a published post should still
+ * delete the drafts around it, and say what it skipped.
+ */
+export async function deletePostsAction(slug: string, postIds: string[]) {
+  const ctx = await requireWorkspace(slug, 'post:delete');
+  const ids = [...new Set(postIds)].filter(Boolean);
+  if (!ids.length) throw invalid('Select at least one draft.');
+
+  const posts = await db.post.findMany({
+    where: { id: { in: ids }, workspaceId: ctx.workspace.id },
+    select: { id: true, status: true, title: true },
+  });
+  const deletable = posts.filter((post) => isPostActionLegal(post.status, 'delete'));
+  if (deletable.length) {
+    await db.post.deleteMany({
+      where: { id: { in: deletable.map((post) => post.id) }, workspaceId: ctx.workspace.id },
+    });
+  }
+
+  revalidatePath(`/w/${slug}/drafts`);
+  revalidatePath(`/w/${slug}/calendar`);
+  const skipped = posts.length - deletable.length;
+  return {
+    deleted: deletable.length,
+    skipped,
+    message: `${deletable.length} ${deletable.length === 1 ? 'draft' : 'drafts'} deleted.${
+      skipped ? ` ${skipped} could not be deleted at ${skipped === 1 ? 'its' : 'their'} current status.` : ''
+    }`,
+  };
+}
+
 export async function postCommandAction(
   slug: string,
   postId: string,

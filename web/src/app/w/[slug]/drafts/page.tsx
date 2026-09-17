@@ -1,16 +1,14 @@
-import Link from 'next/link';
+
 import { redirect } from 'next/navigation';
-import { Badge, Button, EmptyState } from '@/bridge88/components';
-import { StatusGlyph } from '@/components/visuals';
+import { Button, EmptyState } from '@/bridge88/components';
+import { DraftsList, type DraftRow } from '@/components/drafts-list';
+import { storage } from '@/lib/storage';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { PLATFORM_LABELS } from '@/lib/social/registry';
 import { formatInZone } from '@/lib/scheduling/time';
 import type { Prisma } from '@prisma/client';
-import { POST_STATUS_LABELS } from '@/lib/posts/labels';
 import { isPostActionLegal } from '@/lib/posts/lifecycle';
-import { postCommandAction } from '@/app/actions/posts';
-import { ConfirmationButton } from '@/components/action-ui';
 
 const PAGE_SIZE = 30;
 
@@ -41,7 +39,28 @@ export default async function DraftsPage({
       where,
       include: {
         campaign: { select: { name: true } },
-        platforms: { select: { platform: true, text: true } },
+        platforms: {
+          select: {
+            platform: true,
+            text: true,
+            // Enough to tell one generated draft from eleven others like it.
+            media: {
+              orderBy: { position: 'asc' },
+              select: {
+                mediaAsset: {
+                  select: {
+                    id: true,
+                    type: true,
+                    width: true,
+                    height: true,
+                    thumbnailKey: true,
+                    storageKey: true,
+                  },
+                },
+              },
+            },
+          },
+        },
         queueItem: { select: { id: true } },
       },
       orderBy: { updatedAt: 'desc' },
@@ -52,6 +71,34 @@ export default async function DraftsPage({
   ]);
   const canDelete = ctx.can('post:delete');
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // Signed here, in one pass, because they expire and a client cannot mint them.
+  const rows: DraftRow[] = await Promise.all(drafts.map(async (post) => {
+    const platforms = [...new Set(post.platforms.map((item) => PLATFORM_LABELS[item.platform]))];
+    // || not ??: an untitled draft has an empty string, not null, and would
+    // otherwise render a blank row.
+    const preview = post.title?.trim() || post.platforms[0]?.text.trim().slice(0, 70) || 'Untitled post';
+    const assets = [...new Map(
+      post.platforms.flatMap((platform) => platform.media.map(({ mediaAsset }) => [mediaAsset.id, mediaAsset])),
+    ).values()];
+    return {
+      id: post.id,
+      preview,
+      status: post.status,
+      channels: platforms.length ? platforms.join(', ') : 'No channel',
+      meta: `${post.campaign ? `${post.campaign.name} · ` : ''}Edited ${formatInZone(post.updatedAt, ctx.workspace.timezone)}`,
+      queued: Boolean(post.queueItem),
+      deletable: isPostActionLegal(post.status, 'delete'),
+      mediaCount: assets.length,
+      media: await Promise.all(assets.slice(0, 3).map(async (asset) => ({
+        id: asset.id,
+        type: asset.type,
+        width: asset.width,
+        height: asset.height,
+        url: await storage().signedUrl(asset.thumbnailKey ?? asset.storageKey),
+      }))),
+    };
+  }));
   if (page > pageCount) redirect(`/w/${slug}/drafts?page=${pageCount}`);
 
   return (
@@ -65,74 +112,8 @@ export default async function DraftsPage({
       </div>
 
       {drafts.length ? (
-        <section className="b88-card mt-8">
-          {drafts.map((post) => {
-            const platforms = [...new Set(post.platforms.map((item) => PLATFORM_LABELS[item.platform]))];
-            // || not ??: an untitled draft has an empty string, not null, and would
-            // otherwise render a blank row.
-            const preview = post.title?.trim() || post.platforms[0]?.text.trim().slice(0, 70) || 'Untitled post';
-            return (
-              <article
-                key={post.id}
-                className="flex items-center gap-4 border-t border-hairline-soft py-4 first:border-0"
-              >
-                <span className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[var(--block-cream)]">
-                  <StatusGlyph status={post.status} size={19} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <Link
-                    href={`/w/${slug}/compose/${post.id}`}
-                    className="flex min-h-11 items-center truncate font-[480] transition-opacity hover:opacity-80"
-                  >
-                    {preview}
-                  </Link>
-                  <p className="b88-caption mt-1">
-                    {platforms.length ? platforms.join(', ') : 'No channel'}
-                    {' · '}
-                    {post.campaign ? `${post.campaign.name} · ` : ''}
-                    Edited {formatInZone(post.updatedAt, ctx.workspace.timezone)}
-                  </p>
-                </div>
-                <Link
-                  href={`/w/${slug}/posts/${post.id}`}
-                  className="flex min-h-10 shrink-0 items-center rounded-pill px-2 text-sm font-[480] transition-opacity hover:opacity-80 sm:px-3"
-                  aria-label={`View details for ${preview}`}
-                >
-                  <span className="sm:hidden">Details</span>
-                  <span className="hidden sm:inline">View details</span>
-                </Link>
-                {post.queueItem && <Badge tone="lilac">Queued</Badge>}
-                <Badge tone={post.status === 'PENDING_APPROVAL' ? 'cream' : post.status === 'APPROVED' ? 'mint' : 'outline'}>
-                  {POST_STATUS_LABELS[post.status]}
-                </Badge>
-                {/*
-                  Clearing out drafts had meant opening each one and deleting it
-                  from its own page. The lifecycle check is not decoration: it
-                  is the same table the action enforces, so the button is never
-                  offered for a post the server would refuse to delete.
-                */}
-                {canDelete && isPostActionLegal(post.status, 'delete') && (
-                  <form
-                    action={async () => {
-                      'use server';
-                      await postCommandAction(slug, post.id, 'delete', undefined, `/w/${slug}/drafts`);
-                    }}
-                    className="shrink-0"
-                  >
-                    <ConfirmationButton
-                      type="submit"
-                      variant="tertiary"
-                      confirmMessage={`Delete "${preview}" permanently?`}
-                      pendingLabel="Deleting"
-                      aria-label={`Delete ${preview}`}
-                    >
-                      Delete
-                    </ConfirmationButton>
-                  </form>
-                )}
-              </article>
-            );
-          })}
+        <>
+          <DraftsList slug={slug} drafts={rows} canDelete={canDelete} />
           {pageCount > 1 && (
             <nav className="mt-4 flex items-center justify-between gap-3 border-t border-hairline-soft pt-4" aria-label="Draft pages">
               <Button href={`/w/${slug}/drafts?page=${page - 1}`} variant="secondary" className={page <= 1 ? 'pointer-events-none opacity-40' : ''}>
@@ -144,7 +125,7 @@ export default async function DraftsPage({
               </Button>
             </nav>
           )}
-        </section>
+        </>
       ) : (
         <div className="mt-8">
           <EmptyState
