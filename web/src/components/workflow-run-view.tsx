@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
-import { ChevronDown, Play } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Play } from 'lucide-react';
 import type { WorkflowNodeRunStatus, WorkflowRunStatus } from '@prisma/client';
 import { Badge, Button, Dialog, humanizeMachineValue, MediaFrame, StatusMessage, VideoPlayer } from '@/bridge88/components';
 import { cancelRunAction, getNodeRunOutputAction, retryNodeAction } from '@/app/actions/workflows';
@@ -105,8 +105,69 @@ export function WorkflowRunView({
    * Previously each thumbnail linked to the media library, which answered
    * "did this work" by leaving the run — and on a run still in flight, losing
    * the page you were watching. The picture is the answer, so it opens here.
+   *
+   * The whole set is held rather than the one clicked: a step that made eight
+   * pictures is judged by looking through them, and closing and reopening a
+   * dialog seven times is not looking through them.
    */
-  const [preview, setPreview] = useState<ProducedAsset | null>(null);
+  const [preview, setPreview] = useState<{ assets: ProducedAsset[]; index: number } | null>(null);
+  const previewAsset = preview ? preview.assets[preview.index] ?? null : null;
+
+  /**
+   * The height available to the preview, measured rather than assumed.
+   *
+   * The dialog's width has to be derived from it: a 2:3 still capped at 64% of
+   * a short window is about 380px wide, and a fixed 760px card around it is
+   * mostly empty paper. Remeasured on resize so the card does not keep a width
+   * that suited the old window.
+   */
+  const [viewportHeight, setViewportHeight] = useState(900);
+  useEffect(() => {
+    const measure = () => setViewportHeight(window.innerHeight);
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
+  /**
+   * Arrow keys step through the set.
+   *
+   * A gallery that can only be driven by clicking a 40px target is a gallery
+   * nobody looks all the way through. Escape is the Dialog's own.
+   */
+  useEffect(() => {
+    if (!preview || preview.assets.length < 2) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      step(event.key === 'ArrowLeft' ? -1 : 1);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+    // step reads the latest state through the updater, so it needs no dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview?.assets.length, Boolean(preview)]);
+  /**
+   * Wide enough for the picture and no wider. A portrait still in a card built
+   * for a landscape one is the empty-margins look; clamped so a panorama cannot
+   * fill the screen and a very tall still cannot collapse the card.
+   */
+  const previewHasStrip = Boolean(preview && preview.assets.length > 1);
+  const previewWidth = previewAsset?.width && previewAsset.height
+    ? Math.max(360, Math.min(900,
+        Math.round(mediaHeight(viewportHeight, previewHasStrip) * (previewAsset.width / previewAsset.height))
+          + DIALOG_CHROME))
+    : 560;
+
+  /** Wraps on purpose: a gallery that dead-ends at both edges makes you aim. */
+  function step(delta: number) {
+    setPreview((current) => {
+      if (!current) return current;
+      const count = current.assets.length;
+      return { ...current, index: (current.index + delta + count) % count };
+    });
+  }
+
   const [outputs, setOutputs] = useState<Record<string, {
     open: boolean;
     loading: boolean;
@@ -325,12 +386,12 @@ export function WorkflowRunView({
                         {(node.produced ?? [])
                           .filter((asset) => asset.url)
                           .slice(0, 8)
-                          .map((asset) => (
+                          .map((asset, assetIndex, shown) => (
                             <button
                               key={asset.id}
                               type="button"
                               className="w-24 shrink-0 text-left transition-opacity hover:opacity-80"
-                              onClick={() => setPreview(asset)}
+                              onClick={() => setPreview({ assets: shown, index: assetIndex })}
                               title={humanizeMachineValue(asset.filename)}
                             >
                               <MediaFrame
@@ -421,44 +482,87 @@ export function WorkflowRunView({
 
       {/*
         The picture, at a size worth judging, without leaving the run.
-        Dialog is the kit's only modal — 24px card over the scrim — and the
-        media sits in the kit's frame, so a generated 9:16 still is shown at
-        its own ratio rather than letterboxed into a square.
+
+        Sized by height, not width. A fixed-width dialog turns a 9:16 still into
+        a column about a thousand pixels tall — it ran off the bottom of the
+        screen and took the buttons with it. Height is the scarce dimension, so
+        it is the one that is capped and the width follows the image's own
+        shape.
       */}
       <Dialog
-        open={Boolean(preview)}
-        eyebrow={preview ? MEDIA_KIND[preview.type] ?? 'Media' : undefined}
-        title={preview ? humanizeMachineValue(preview.filename) : undefined}
-        width={560}
+        open={Boolean(previewAsset)}
+        eyebrow={previewAsset
+          ? `${MEDIA_KIND[previewAsset.type] ?? 'Media'}${preview && preview.assets.length > 1 ? ` · ${preview.index + 1} of ${preview.assets.length}` : ''}`
+          : undefined}
+        title={previewAsset ? humanizeMachineValue(previewAsset.filename) : undefined}
+        width={previewWidth}
         onClose={() => setPreview(null)}
-        actions={preview ? (
+        actions={previewAsset ? (
           <>
-            <Button variant="secondary" size="sm" href={`/w/${slug}/media?asset=${encodeURIComponent(preview.id)}`}>
+            <Button variant="secondary" size="sm" href={`/w/${slug}/media?asset=${encodeURIComponent(previewAsset.id)}`}>
               Open in library
             </Button>
-            <Button variant="primary" size="sm" onClick={() => setPreview(null)}>Close</Button>
+            <Button variant="primary" size="sm" onClick={() => setPreview(null)}>Done</Button>
           </>
         ) : undefined}
       >
-        {preview && (preview.type === 'VIDEO' ? (
-          <VideoPlayer
-            src={preview.url ?? undefined}
-            ratio={ratioOf(preview)}
-          />
-        ) : preview.type === 'AUDIO' ? (
-          // No still worth showing, so the player is the whole preview.
-          <audio src={preview.url ?? undefined} controls className="w-full" />
-        ) : (
-          <MediaFrame
-            ratio={ratioOf(preview)}
-            tone="mint"
-            type="image"
-            src={preview.url ?? undefined}
-            alt={humanizeMachineValue(preview.filename)}
-          />
-        ))}
-        {preview?.width && preview.height ? (
-          <p className="b88-caption mt-3">{preview.width} × {preview.height}</p>
+        {previewAsset && (
+          <div className="relative mx-auto w-fit max-w-full">
+            {previewAsset.type === 'VIDEO' ? (
+              <VideoPlayer
+                src={previewAsset.url ?? undefined}
+                ratio={ratioOf(previewAsset)}
+                style={mediaFit(viewportHeight, previewHasStrip)}
+              />
+            ) : previewAsset.type === 'AUDIO' ? (
+              <audio src={previewAsset.url ?? undefined} controls className="w-80 max-w-full" />
+            ) : (
+              <MediaFrame
+                ratio={ratioOf(previewAsset)}
+                tone="mint"
+                type="image"
+                src={previewAsset.url ?? undefined}
+                alt={humanizeMachineValue(previewAsset.filename)}
+                style={mediaFit(viewportHeight, previewHasStrip)}
+              />
+            )}
+
+            {/*
+              Over the media, as the kit documents for previous and next: the
+              circular control at ~58% black. Flanking the picture rather than
+              sitting under it, so looking through a set is one target the
+              pointer never leaves.
+            */}
+            {preview && preview.assets.length > 1 && (
+              <>
+                <StepThrough side="left" label="Previous" onClick={() => step(-1)} />
+                <StepThrough side="right" label="Next" onClick={() => step(1)} />
+              </>
+            )}
+          </div>
+        )}
+        {preview && preview.assets.length > 1 && (
+          // "See them all" is the other half of a carousel: the arrows move,
+          // the strip says how many there are and which one is open.
+          <div className="mt-3 flex flex-wrap justify-center gap-2">
+            {preview.assets.map((asset, index) => (
+              <button
+                key={asset.id}
+                type="button"
+                aria-label={`Show ${humanizeMachineValue(asset.filename)}`}
+                aria-current={index === preview.index}
+                onClick={() => setPreview((current) => (current ? { ...current, index } : current))}
+                className={`size-12 shrink-0 overflow-hidden rounded-md border transition-opacity hover:opacity-80 ${
+                  index === preview.index ? 'border-ink' : 'border-hairline opacity-60'
+                }`}
+              >
+                {asset.url && <img src={asset.url} alt="" className="size-full object-cover" />}
+              </button>
+            ))}
+          </div>
+        )}
+        {previewAsset?.width && previewAsset.height ? (
+          <p className="b88-caption mt-3 text-center">{previewAsset.width} × {previewAsset.height}</p>
         ) : null}
       </Dialog>
     </div>
@@ -506,4 +610,57 @@ function withStablePreviewUrls(previous: RunStatus, next: RunStatus): RunStatus 
       })),
     })),
   };
+}
+
+/** Side padding of the card, added to the media's own width. */
+const DIALOG_CHROME = 48;
+
+/**
+ * How tall the media may be, so the whole card fits the window.
+ *
+ * Everything else in the card is fixed height — the scrim's padding, the
+ * eyebrow and title, the dimensions line, the action row, and the filmstrip
+ * when there is more than one asset — so the media takes what is left. Measured
+ * against the real window because a fixed cap put the buttons off-screen on a
+ * laptop, which is where this is actually read.
+ */
+function mediaHeight(viewportHeight: number, hasStrip: boolean): number {
+  // Measured against the rendered card, not estimated: the scrim's own padding
+  // (48), the eyebrow and title (110), the dimensions line (40), the action row
+  // (72), and the filmstrip when shown (80).
+  const chrome = 48 + 110 + 40 + 72 + (hasStrip ? 80 : 0);
+  return Math.max(220, Math.min(viewportHeight - chrome, 620));
+}
+
+function mediaFit(viewportHeight: number, hasStrip: boolean) {
+  return {
+    width: 'auto',
+    height: `${mediaHeight(viewportHeight, hasStrip)}px`,
+    maxWidth: '100%',
+    margin: '0 auto',
+  } as const;
+}
+
+/** The documented previous/next control: a circle at ~58% black over the media. */
+function StepThrough({
+  side,
+  label,
+  onClick,
+}: {
+  side: 'left' | 'right';
+  label: string;
+  onClick: () => void;
+}) {
+  const Glyph = side === 'left' ? ChevronLeft : ChevronRight;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className={`absolute top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-pill bg-[rgba(0,0,0,0.58)] text-white transition-opacity hover:opacity-80 active:scale-[.97] ${side === 'left' ? 'left-3' : 'right-3'}`}
+    >
+      <Glyph size={18} />
+    </button>
+  );
 }
