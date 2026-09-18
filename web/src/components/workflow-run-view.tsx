@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
+import { ChevronDown, Play } from 'lucide-react';
 import type { WorkflowNodeRunStatus, WorkflowRunStatus } from '@prisma/client';
-import { Badge, Button, humanizeMachineValue, MediaFrame, StatusMessage } from '@/bridge88/components';
+import { Badge, Button, Dialog, humanizeMachineValue, MediaFrame, StatusMessage, VideoPlayer } from '@/bridge88/components';
 import { cancelRunAction, getNodeRunOutputAction, retryNodeAction } from '@/app/actions/workflows';
 import { WorkflowNodeOutput } from '@/components/workflow-node-output';
 import {
@@ -15,6 +16,15 @@ import {
   isNodeTerminal,
   isRunTerminal,
 } from '@/lib/workflows/labels';
+
+interface ProducedAsset {
+  id: string;
+  filename: string;
+  type: string;
+  width?: number | null;
+  height?: number | null;
+  url?: string | null;
+}
 
 interface NodeRun {
   id: string;
@@ -29,9 +39,15 @@ interface NodeRun {
   durationMs: number | null;
   error: string | null;
   /** Media this step emitted, in port then position order. */
-  produced?: { id: string; filename: string; type: string; width?: number | null; height?: number | null; url?: string | null }[];
+  produced?: ProducedAsset[];
   /** Set by the draft and publish steps, which create a post. */
   post?: { id: string; awaitingApproval: boolean; releaseOnApproval: string | null } | null;
+  /**
+   * Whether this step recorded anything worth reading. False for a step whose
+   * output is only the ids of things already on the row — a draft's post, a
+   * generator's pictures — where the control would cost a click to show a uuid.
+   */
+  hasOutput?: boolean;
 }
 
 interface RunStatus {
@@ -83,6 +99,14 @@ export function WorkflowRunView({
    * A finished step's output never changes, so re-opening it costs nothing and
    * closing it does not discard what was already loaded.
    */
+  /**
+   * The asset shown in the preview dialog.
+   *
+   * Previously each thumbnail linked to the media library, which answered
+   * "did this work" by leaving the run — and on a run still in flight, losing
+   * the page you were watching. The picture is the answer, so it opens here.
+   */
+  const [preview, setPreview] = useState<ProducedAsset | null>(null);
   const [outputs, setOutputs] = useState<Record<string, {
     open: boolean;
     loading: boolean;
@@ -136,7 +160,7 @@ export function WorkflowRunView({
         etag.current = response.headers.get('etag');
         const next = (await response.json()) as RunStatus;
         skew.current = next.serverNow - Date.now();
-        setStatus(next);
+        setStatus((previous) => withStablePreviewUrls(previous, next));
       } catch {
         // A dropped poll is not worth surfacing; the next tick retries.
       }
@@ -300,38 +324,39 @@ export function WorkflowRunView({
                       <div className="mt-3 flex flex-wrap gap-3">
                         {(node.produced ?? [])
                           .filter((asset) => asset.url)
-                          .slice(0, 6)
+                          .slice(0, 8)
                           .map((asset) => (
-                            <Link
+                            <button
                               key={asset.id}
-                              href={`/w/${slug}/media?asset=${encodeURIComponent(asset.id)}`}
-                              className="w-24 shrink-0"
+                              type="button"
+                              className="w-24 shrink-0 text-left transition-opacity hover:opacity-80"
+                              onClick={() => setPreview(asset)}
                               title={humanizeMachineValue(asset.filename)}
                             >
                               <MediaFrame
                                 ratio={asset.width && asset.height ? `${asset.width} / ${asset.height}` : '1:1'}
                                 tone="mint"
-                                type="image"
-                                src={asset.url}
+                                type={asset.type === 'VIDEO' ? 'video' : 'image'}
+                                src={asset.url ?? undefined}
                                 alt={humanizeMachineValue(asset.filename)}
+                                overlay={asset.type === 'VIDEO'
+                                  ? <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                                      <span className="flex size-9 items-center justify-center rounded-pill bg-[rgba(0,0,0,0.58)] text-white">
+                                        <Play size={15} />
+                                      </span>
+                                    </span>
+                                  : undefined}
                               />
-                            </Link>
+                            </button>
                           ))}
+                        {(node.produced?.length ?? 0) > 8 && (
+                          <span className="b88-caption self-center">
+                            +{(node.produced?.length ?? 0) - 8} more
+                          </span>
+                        )}
                       </div>
                     )}
                     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-                      {(node.produced ?? []).slice(0, 3).map((asset) => (
-                        <Link
-                          key={asset.id}
-                          href={`/w/${slug}/media?asset=${encodeURIComponent(asset.id)}`}
-                          className="b88-body-sm underline underline-offset-4"
-                        >
-                          {asset.type === 'VIDEO' ? 'Watch' : 'View'} {humanizeMachineValue(asset.filename)}
-                        </Link>
-                      ))}
-                      {(node.produced?.length ?? 0) > 3 && (
-                        <span className="b88-caption">+{(node.produced?.length ?? 0) - 3} more</span>
-                      )}
                       {node.post && (
                         <Link
                           href={`/w/${slug}/posts/${node.post.id}`}
@@ -352,20 +377,24 @@ export function WorkflowRunView({
                         {node.status === 'FAILED' ? 'Fix this step' : 'Step settings'}
                       </Link>
                       {/* Only once a step has finished: before that there is
-                          nothing recorded to show. */}
-                      {isNodeTerminal(node.status) && (
-                        <button
+                          nothing recorded to show. A disclosure rather than two
+                          sentences — the chevron carries the open/closed state,
+                          so the label can stay one steady word. */}
+                      {isNodeTerminal(node.status) && node.hasOutput && (
+                        <Button
                           type="button"
-                          className="b88-body-sm underline underline-offset-4"
+                          variant="tertiary"
                           onClick={() => toggleOutput(node.id)}
                           aria-expanded={Boolean(outputs[node.id]?.open)}
+                          aria-busy={Boolean(outputs[node.id]?.loading)}
                         >
-                          {outputs[node.id]?.open
-                            ? 'Hide what it made'
-                            : outputs[node.id]?.loading
-                              ? 'Loading'
-                              : 'See what it made'}
-                        </button>
+                          <ChevronDown
+                            size={15}
+                            className={`transition-transform ${outputs[node.id]?.open ? 'rotate-180' : ''}`}
+                            aria-hidden="true"
+                          />
+                          Output
+                        </Button>
                       )}
                       {canRun && isNodeTerminal(node.status) && node.status !== 'SUCCEEDED' && (
                         <Button variant="secondary" onClick={() => retry(node.id)} disabled={pending}>
@@ -389,6 +418,92 @@ export function WorkflowRunView({
           </li>
         ))}
       </ol>
+
+      {/*
+        The picture, at a size worth judging, without leaving the run.
+        Dialog is the kit's only modal — 24px card over the scrim — and the
+        media sits in the kit's frame, so a generated 9:16 still is shown at
+        its own ratio rather than letterboxed into a square.
+      */}
+      <Dialog
+        open={Boolean(preview)}
+        eyebrow={preview ? MEDIA_KIND[preview.type] ?? 'Media' : undefined}
+        title={preview ? humanizeMachineValue(preview.filename) : undefined}
+        width={560}
+        onClose={() => setPreview(null)}
+        actions={preview ? (
+          <>
+            <Button variant="secondary" size="sm" href={`/w/${slug}/media?asset=${encodeURIComponent(preview.id)}`}>
+              Open in library
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => setPreview(null)}>Close</Button>
+          </>
+        ) : undefined}
+      >
+        {preview && (preview.type === 'VIDEO' ? (
+          <VideoPlayer
+            src={preview.url ?? undefined}
+            ratio={ratioOf(preview)}
+          />
+        ) : preview.type === 'AUDIO' ? (
+          // No still worth showing, so the player is the whole preview.
+          <audio src={preview.url ?? undefined} controls className="w-full" />
+        ) : (
+          <MediaFrame
+            ratio={ratioOf(preview)}
+            tone="mint"
+            type="image"
+            src={preview.url ?? undefined}
+            alt={humanizeMachineValue(preview.filename)}
+          />
+        ))}
+        {preview?.width && preview.height ? (
+          <p className="b88-caption mt-3">{preview.width} × {preview.height}</p>
+        ) : null}
+      </Dialog>
     </div>
   );
+}
+
+const MEDIA_KIND: Record<string, string> = {
+  IMAGE: 'Image',
+  VIDEO: 'Video',
+  AUDIO: 'Audio',
+  GIF: 'GIF',
+};
+
+/** The asset's own shape, so nothing is letterboxed or cropped to fit a guess. */
+function ratioOf(asset: ProducedAsset): string {
+  return asset.width && asset.height ? `${asset.width} / ${asset.height}` : '1:1';
+}
+
+/**
+ * The next status, reusing the preview URL already on screen for any asset that
+ * still has one.
+ *
+ * Each poll signs fresh URLs, and a signed URL carries its own expiry, so the
+ * string differs every time even when the picture does not. Taking it verbatim
+ * changes every `src` twice a second and the browser refetches and flashes the
+ * whole grid. The bytes behind a given asset id never change, so the first URL
+ * seen for it is kept and only genuinely new assets take the one just signed.
+ */
+function withStablePreviewUrls(previous: RunStatus, next: RunStatus): RunStatus {
+  const known = new Map<string, string>();
+  for (const node of previous.nodes) {
+    for (const asset of node.produced ?? []) {
+      if (asset.url) known.set(asset.id, asset.url);
+    }
+  }
+  if (known.size === 0) return next;
+
+  return {
+    ...next,
+    nodes: next.nodes.map((node) => ({
+      ...node,
+      produced: node.produced?.map((asset) => ({
+        ...asset,
+        url: known.get(asset.id) ?? asset.url,
+      })),
+    })),
+  };
 }

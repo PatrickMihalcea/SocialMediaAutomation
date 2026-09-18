@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Badge, Button, humanizeMachineValue, StatusMessage } from '@/bridge88/components';
+import { reviewableOutput } from '@/lib/workflows/node-output';
 
 /**
  * What a step actually produced, in a form a person can read.
@@ -22,8 +23,11 @@ export function WorkflowNodeOutput({ output }: { output: unknown }) {
     return <StatusMessage tone="neutral">This step recorded no output.</StatusMessage>;
   }
 
+  // Raw JSON stays the whole thing — that is what it is for. The readable view
+  // drops the ids, which are pointers to rows already on the page.
   const json = JSON.stringify(output, null, 2);
-  const entries = isPlainObject(output) ? Object.entries(output) : null;
+  const readable = reviewableOutput(output);
+  const entries = readable ? Object.entries(readable) : isPlainObject(output) ? Object.entries(output) : null;
 
   return (
     <div className="mt-3 rounded-md border border-hairline bg-canvas p-4">
