@@ -100,6 +100,8 @@ export class ImageUseProvider implements AiProvider {
       if (result.code !== 0) {
         const credential = credentialFailure(result.stderr);
         if (credential) throw credential;
+        const exhausted = usageLimitFailure(result.stderr);
+        if (exhausted) throw exhausted;
         throw new AiError(`image-use exited with ${result.code ?? result.signal}: ${lastLines(result.stderr)}`, {
           retryable: isRetryable(result.stderr),
         });
@@ -242,8 +244,38 @@ export function credentialFailure(stderr: string): AiCredentialError | null {
   );
 }
 
+/**
+ * The subscription's quota is spent until it resets.
+ *
+ * Arrives as HTTP 429, the same status as a momentary throttle, so the body is
+ * what separates them — and the difference matters: a throttle clears in
+ * seconds and is worth retrying, while this one does not change for weeks. Left
+ * as retryable it burned the node's whole attempt budget and reported the
+ * failure three attempts later than it was known.
+ */
+export function usageLimitFailure(stderr: string): AiError | null {
+  if (!/usage_limit_reached|usage limit has been reached/i.test(stderr)) return null;
+
+  const seconds = Number(/"resets_at"\s*:\s*(\d+)/.exec(stderr)?.[1]);
+  // Stamped UTC because this string is written on the server and read wherever
+  // the reader happens to be: the same instant is the 15th in New York and the
+  // 16th in UTC, and an unlabelled date off by one is worse than a labelled one.
+  const resetsAt = Number.isFinite(seconds) && seconds > 0
+    ? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'long', timeZone: 'UTC' }).format(seconds * 1000)} UTC`
+    : null;
+
+  return new AiError(
+    `The ChatGPT subscription's image quota is used up${resetsAt ? `, and resets on ${resetsAt}` : ''}. `
+      + 'No image was generated and nothing was charged to the OpenAI API. '
+      + 'To keep generating now, set this step or the studio to generate with API.',
+    { retryable: false },
+  );
+}
+
 /** Worth another attempt: a slow render, a wedged backend, a momentary rate limit. */
 function isRetryable(stderr: string): boolean {
+  // Checked first: an exhausted quota is a 429 that no retry can help.
+  if (usageLimitFailure(stderr)) return false;
   return /timed out|stalled|HTTP 429|too many requests|rate-limit|temporarily/i.test(stderr);
 }
 

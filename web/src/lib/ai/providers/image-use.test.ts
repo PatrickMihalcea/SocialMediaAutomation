@@ -195,6 +195,40 @@ describe('ImageUseProvider', () => {
     expect((broken as AiError).retryable).toBe(false);
   });
 
+  /**
+   * The quota and a throttle both arrive as HTTP 429, and only the body tells
+   * them apart. Retrying an exhausted subscription cannot succeed — this one
+   * resets in about four weeks — so treating it as a momentary rate limit
+   * burned the node's whole attempt budget and delayed the real answer.
+   */
+  it('treats an exhausted subscription quota as permanent, and says when it resets', async () => {
+    process.env.FAKE_MODE = 'fail';
+    process.env.FAKE_STDERR =
+      '[ 0.0s] requesting image (backend=codex size=1024x1820 format=png timeout=300s) | HTTP 429: '
+      + '{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached",'
+      + '"plan_type":"go","resets_at":1792116910,"resets_in_seconds":2428854}}';
+
+    const failure = await new ImageUseProvider()
+      .generateImage({ prompt: 'a cat' })
+      .catch((error: AiError) => error) as AiError;
+
+    expect(failure.retryable).toBe(false);
+    expect(failure.message).toMatch(/quota is used up/);
+    expect(failure.message).toMatch(/16 October 2026 UTC/);
+    expect(failure.message).toMatch(/nothing was charged to the OpenAI API/);
+  });
+
+  it('still retries a plain 429 throttle, which clears on its own', async () => {
+    process.env.FAKE_MODE = 'fail';
+    process.env.FAKE_STDERR = 'HTTP 429: too many requests';
+
+    const failure = await new ImageUseProvider()
+      .generateImage({ prompt: 'a cat' })
+      .catch((error: AiError) => error) as AiError;
+
+    expect(failure.retryable).toBe(true);
+  });
+
   /** A CLI that never exits would otherwise hold the job — and its Chrome — forever. */
   it('kills a run that outlives its budget and the queue wait', async () => {
     process.env.FAKE_MODE = 'hang';
