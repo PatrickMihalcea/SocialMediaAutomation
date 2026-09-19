@@ -162,6 +162,12 @@ export function checkAddedEdge(
   if (own) return own;
 
   for (const edge of graph.edges) {
+    // Skipped for the same reason whole-graph validation skips it: an edge to a
+    // port a release retired is not something this connection breaks, and it is
+    // not something the person drawing the new one can fix. Checking it here
+    // refused *every* new connection in a graph holding one — the candidate
+    // itself is still checked strictly, just above.
+    if (portMissing(next, edge)) continue;
     const problem = checkEdge(next, edge);
     if (problem) {
       return { reason: `That would break a later connection. ${describeEdgeProblem(next, edge, problem)}` };

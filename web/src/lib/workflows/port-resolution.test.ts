@@ -150,6 +150,7 @@ describe('a graph holding an edge to a retired port', () => {
     nodes: [
       { id: 'idea', type: 'IDEA_GENERATOR', config: {} },
       { id: 'images', type: 'IMAGE_GENERATOR', config: {} },
+      { id: 'pick', type: 'PICK', config: {} },
     ],
     edges: [
       { sourceNodeId: 'idea', sourcePort: 'prompts', targetNodeId: 'images', targetPort: 'prompts' },
@@ -159,6 +160,22 @@ describe('a graph holding an edge to a retired port', () => {
 
   it('validates, so the workflow still runs', () => {
     expect(checkGraphTypes(graph)).toBeNull();
+  });
+
+  /**
+   * The symptom that found this: an Image generator could not be connected to
+   * a Select items step at all. Adding an edge re-checks every existing one,
+   * and the retired titles edge sitting in the graph failed that check — so
+   * every new connection anywhere in the workflow was refused, with the drag
+   * simply not sticking and nothing said.
+   */
+  it('still lets a new, unrelated connection be made', () => {
+    expect(checkAddedEdge(graph, {
+      sourceNodeId: 'images',
+      sourcePort: 'images',
+      targetNodeId: 'pick',
+      targetPort: 'items',
+    })).toBeNull();
   });
 
   it('still refuses a new edge onto a port that does not exist', () => {
