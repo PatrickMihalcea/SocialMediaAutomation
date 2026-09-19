@@ -202,12 +202,6 @@ export const NODE_DEFINITIONS = {
         type: text(),
         description: 'The theme this run actually worked from, which is worth connecting when the theme is drawn at random.',
       },
-      {
-        id: 'reference',
-        label: 'Layout reference',
-        type: media([...IMAGES]),
-        description: 'The sketch paired with the theme this run drew, when it has one. Connect it to an Image generator.',
-      },
     ],
     configSchema: z.object({
       /** What the prompts are written to produce — the wording differs a lot. */

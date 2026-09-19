@@ -129,9 +129,12 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     // could not be shown on the video, written into the caption, or read back
     // by the next run deciding what not to repeat.
     theme,
-    // The sketch paired with whichever theme was drawn. Null rather than
-    // omitted, so a downstream step sees "this theme has none" rather than a
-    // port that sometimes does not exist.
+    // The sketch paired with whichever theme was drawn.
+    //
+    // Recorded in the output but not declared as a port: it reaches the Image
+    // generator by riding along with the prompts, so a connector for it would
+    // be one nothing can be plugged into. The ride-along reads this value off
+    // the upstream run's output, which is why it still has to be written here.
     reference: config.themeImages[theme] ?? null,
     postTitle: object.postTitle.trim(),
     caption: (object.caption ?? '').trim(),
