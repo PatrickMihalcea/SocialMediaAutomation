@@ -27,7 +27,12 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   // Either name: they ride in as `titles` with the items, and an edge saved
   // from the old Titles port still delivers them as `labels`.
   const incoming = ctx.inputs.titles ?? ctx.inputs.labels;
-  const labels = Array.isArray(incoming) ? incoming.map(String) : null;
+  // Labels are optional, so an empty list means the same as none at all. Read
+  // as "zero labels supplied" it fails the count check below against any items
+  // — which is what a track picker fed by the Media library hit, since that
+  // step names its images and a track selection has none.
+  const provided = Array.isArray(incoming) && incoming.length > 0 ? incoming : null;
+  const labels = provided ? provided.map(String) : null;
   if (items.length === 0) throw new PermanentJobError('Nothing reached this step to select from.');
 
   // A mismatched label list is a wiring mistake. Trimming or padding to fit

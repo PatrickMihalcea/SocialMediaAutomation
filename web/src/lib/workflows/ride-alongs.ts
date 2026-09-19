@@ -26,40 +26,63 @@
  * unwired input". That general rule would start moving values between steps in
  * graphs already built, on nothing more than a shared name.
  */
-const RIDE_ALONGS: ReadonlyArray<{ port: string; with: string; from?: string }> = [
-  // Idea generator to Image generator.
-  { port: 'reference', with: 'prompts' },
-  { port: 'titles', with: 'prompts' },
-  // Anything producing media to a step that labels or cuts it.
-  { port: 'titles', with: 'images' },
-  { port: 'titles', with: 'media' },
-  // Select items, which reorders them with its selection.
-  { port: 'titles', with: 'items' },
-  // Combine media takes up to four lists, each with its own titles. `from`
-  // because the port is numbered per slot while every producer emits `titles`.
-  { port: 'titles1', with: 'media1', from: 'titles' },
-  { port: 'titles2', with: 'media2', from: 'titles' },
-  { port: 'titles3', with: 'media3', from: 'titles' },
-  { port: 'titles4', with: 'media4', from: 'titles' },
+/** Outputs that titles describe. Audio and video lists have none of their own. */
+const TITLED_LISTS = ['images', 'media', 'selection', 'item', 'prompts'] as const;
+
+/**
+ * A port filled from the step that fed another port, rather than from a wire.
+ *
+ * `whenTargetPort` says which connection carries it and which slot it fills;
+ * `whenSourcePortIn` says which outputs the value actually belongs to. Both are
+ * needed. Keyed on the target alone, a Media library feeding its audio into a
+ * track picker also handed over the titles of its images — a list describing
+ * something else entirely, and long enough that the picker refused the count.
+ */
+const RIDE_ALONGS: ReadonlyArray<{
+  whenTargetPort: string;
+  whenSourcePortIn: readonly string[];
+  fills: string;
+  fromKey: string;
+}> = [
+  // Idea generator to Image generator: the title written for each prompt, and
+  // the sketch the drawn theme carries.
+  { whenTargetPort: 'prompts', whenSourcePortIn: ['prompts'], fills: 'titles', fromKey: 'titles' },
+  { whenTargetPort: 'prompts', whenSourcePortIn: ['prompts'], fills: 'reference', fromKey: 'reference' },
+  // Any titled list into a step that labels or cuts it.
+  { whenTargetPort: 'images', whenSourcePortIn: TITLED_LISTS, fills: 'titles', fromKey: 'titles' },
+  { whenTargetPort: 'items', whenSourcePortIn: TITLED_LISTS, fills: 'titles', fromKey: 'titles' },
+  // Combine media's four slots, each from its own list.
+  ...[1, 2, 3, 4].map((slot) => ({
+    whenTargetPort: `media${slot}`,
+    whenSourcePortIn: TITLED_LISTS,
+    fills: `titles${slot}`,
+    fromKey: 'titles',
+  })),
 ];
 
 export function applyRideAlongs(
-  edges: ReadonlyArray<{ targetPort: string; sourceNodeId: string }>,
+  edges: ReadonlyArray<{ targetPort: string; sourcePort: string; sourceNodeId: string }>,
   byNode: Map<string, { output: unknown }>,
   inputs: Record<string, unknown>,
 ): void {
   for (const rider of RIDE_ALONGS) {
     // An explicit wire always wins, where one is possible: someone who
-    // connected titles by hand means those, not whatever the prompts arrived
-    // with. The Image generator has no port for a reference at all, so that one
-    // only ever comes from here.
-    if (inputs[rider.port] != null) continue;
+    // connected titles by hand means those.
+    if (inputs[rider.fills] != null) continue;
 
-    const carrier = edges.find((edge) => edge.targetPort === rider.with);
+    const carrier = edges.find(
+      (edge) => edge.targetPort === rider.whenTargetPort
+        && rider.whenSourcePortIn.includes(edge.sourcePort),
+    );
     if (!carrier) continue;
 
     const output = (byNode.get(carrier.sourceNodeId)?.output ?? {}) as Record<string, unknown>;
-    const value = output[rider.from ?? rider.port];
-    if (value != null) inputs[rider.port] = value;
+    const value = output[rider.fromKey];
+    // An empty list is nothing to carry, and carrying it is not harmless: a
+    // step reading "some titles, zero of them" refuses the count against any
+    // items at all.
+    if (value == null) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    inputs[rider.fills] = value;
   }
 }
