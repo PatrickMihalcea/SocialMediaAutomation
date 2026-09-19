@@ -159,10 +159,78 @@ select.b88-input,.b88-pill-select,.b88-filter-control{appearance:none;background
    one — otherwise finding a valid target is guesswork. */
 .b88-canvas .react-flow__handle[data-compatible="true"]{width:18px;height:18px;background:var(--success);animation:b88-port-pulse 1.2s ease-in-out infinite}
 .b88-canvas .react-flow__handle[data-compatible="false"]{opacity:.18}
+.b88-canvas .react-flow__handle[data-connected="true"]{box-shadow:0 0 0 3px var(--surface-soft)}
 .b88-canvas .react-flow__handle.connectingto[data-compatible="true"]{width:22px;height:22px;animation:none;box-shadow:0 0 0 6px color-mix(in srgb,var(--success) 30%,transparent)}
 .b88-canvas .react-flow__connection-path{stroke:var(--accent-magenta);stroke-width:2.5}
 @keyframes b88-port-pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--success) 55%,transparent)}60%{box-shadow:0 0 0 9px transparent}}
 @keyframes b88-spin{to{transform:rotate(360deg)}}
+
+/* Workflow editor rails.
+   The canvas always gets the flexible track. Library and settings widths are
+   preferences supplied by the editor; below desktop they become ordinary
+   stacked sections so a resized rail can never squeeze the canvas off-screen. */
+.b88-workflow-editor{display:grid;gap:var(--space-lg);min-width:0}
+.b88-workflow-library-list{margin-top:var(--space-md)}
+.b88-workflow-resizer{display:none}
+@media(min-width:1280px){
+  .b88-workflow-editor[data-can-edit][data-has-inspector]{
+    grid-template-columns:var(--workflow-library-width) minmax(360px,1fr) var(--workflow-inspector-width)
+  }
+  .b88-workflow-editor[data-can-edit]:not([data-has-inspector]){
+    grid-template-columns:var(--workflow-library-width) minmax(360px,1fr)
+  }
+  .b88-workflow-editor:not([data-can-edit])[data-has-inspector]{
+    grid-template-columns:minmax(360px,1fr) var(--workflow-inspector-width)
+  }
+  .b88-workflow-editor:not([data-can-edit]):not([data-has-inspector]){
+    grid-template-columns:minmax(0,1fr)
+  }
+  /* Both rails stand as tall as the canvas beside them. The library scrolls its
+     list under a pinned header; the settings panel scrolls inside its own card,
+     so the card's border stays a closed box rather than being clipped by a
+     scroller wrapped around it. */
+  .b88-workflow-library,.b88-workflow-inspector{
+    display:flex;
+    flex-direction:column;
+    max-height:clamp(560px,72vh,820px)
+  }
+  .b88-workflow-library-head{flex:none}
+  .b88-workflow-library-list{
+    flex:1 1 auto;
+    min-height:0;
+    overflow-y:auto;
+    padding-right:var(--space-xxs)
+  }
+  .b88-workflow-inspector > :not(.b88-workflow-resizer){
+    flex:1 1 auto;
+    min-height:0;
+    overflow-y:auto
+  }
+  .b88-workflow-resizer{display:block}
+}
+.b88-workflow-resizer{
+  position:absolute;
+  inset-block:0;
+  left:calc(var(--space-lg) / -2 - 5px);
+  width:10px;
+  cursor:col-resize;
+  touch-action:none;
+  z-index:20;
+}
+.b88-workflow-resizer::after{
+  content:"";
+  position:absolute;
+  inset-block:0;
+  left:4px;
+  width:2px;
+  border-radius:var(--radius-pill);
+  background:var(--hairline);
+  transition:background-color var(--duration-fast) var(--ease-standard),width var(--duration-fast) var(--ease-standard)
+}
+.b88-workflow-resizer:hover::after,.b88-workflow-resizer:focus-visible::after{
+  width:3px;
+  background:var(--ink)
+}
 @media(max-width:900px){
   .b88-app{padding-left:0;padding-bottom:var(--mobile-nav-height)}
   .b88-main{padding:var(--space-xl) var(--gutter-mobile) var(--space-3xl)}

@@ -174,6 +174,16 @@ describe('node catalogue', () => {
     expect(() => parseConfig('BEAT_SLIDESHOW', { width: 1920 })).toThrow();
   });
 
+  it('names overlay structure instead of a freeform per-cut template', () => {
+    expect(parseConfig('TEXT_OVERLAY', {})).toMatchObject({ structure: 'numbered', template: '{index}' });
+    expect(parseConfig('TEXT_OVERLAY', {
+      template: '{index}',
+      firstTemplate: 'Which treehouse would you choose?',
+    })).toMatchObject({ structure: 'opening-numbered' });
+    expect(getDefinition('TEXT_OVERLAY')?.inputs.find((port) => port.id === 'template')?.label)
+      .toBe('Overlay text');
+  });
+
   it('does not apply video export presets to image generation size', () => {
     expect(parseConfig('IMAGE_GENERATOR', {})).toEqual(
       expect.objectContaining({ size: '1024x1536', useMockGeneration: false }),

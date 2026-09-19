@@ -8,6 +8,7 @@ import {
   resolveVideoOutputDimensions,
   type VideoOutputSize,
 } from '@/lib/workflows/video-output-presets';
+import { inferOverlayStructure } from '@/lib/workflows/text-overlay-template';
 
 /**
  * The node catalogue.
@@ -201,6 +202,12 @@ export const NODE_DEFINITIONS = {
         type: text(),
         description: 'The theme this run actually worked from, which is worth connecting when the theme is drawn at random.',
       },
+      {
+        id: 'reference',
+        label: 'Layout reference',
+        type: media([...IMAGES]),
+        description: 'The sketch paired with the theme this run drew, when it has one. Connect it to an Image generator.',
+      },
     ],
     configSchema: z.object({
       /** What the prompts are written to produce — the wording differs a lot. */
@@ -219,6 +226,15 @@ export const NODE_DEFINITIONS = {
        * that is what drawing at random means. Repetition of *ideas* is handled
        * separately, by naming recent titles in the instruction.
        */
+      /**
+       * Layout sketch per theme, keyed by the theme's own text.
+       *
+       * Keyed by text rather than by position, so reordering or re-pasting the
+       * pool keeps every pairing. The cost is that rewording a theme drops its
+       * sketch — visible immediately, because the thumbnail leaves that row
+       * with it.
+       */
+      themeImages: z.record(z.string(), z.string().uuid()).default({}),
       themePool: z.array(z.string().trim().min(1).max(300))
         // 60 was set when the pool was typed one per line, which made a long
         // list tedious enough that nobody built one. A comma-separated box is
@@ -228,8 +244,6 @@ export const NODE_DEFINITIONS = {
         .max(500, 'A theme pool can hold up to 500 themes.')
         .default([]),
       count: z.number().int().min(1).max(20).default(8),
-      /** Appended to every prompt; the old pipeline hardcoded a 4k-realism suffix. */
-      styleSuffix: z.string().max(500).default(''),
       /**
        * Per-field direction for the copy this step writes. Empty means the
        * model decides, which is why these are separate from `theme`: the theme
@@ -238,6 +252,12 @@ export const NODE_DEFINITIONS = {
       // 2000, not 500: these hold pasted prompts, and 500 rejected an ordinary
       // one. Each carries its own message because the generic schema error is
       // no use when three fields on the panel have the same limit.
+      /**
+       * Direction for the prompts themselves, which had none — the other three
+       * guidance fields steer the post copy, and the thing the step exists to
+       * write was the one output nobody could say anything about.
+       */
+      promptGuidance: z.string().max(2_000, 'How to write the prompts must be 2,000 characters or fewer.').default(''),
       titleGuidance: z.string().max(2_000, 'How to write the title must be 2,000 characters or fewer.').default(''),
       captionGuidance: z.string().max(2_000, 'How to write the caption must be 2,000 characters or fewer.').default(''),
       hashtagsGuidance: z.string().max(2_000, 'How to pick hashtags must be 2,000 characters or fewer.').default(''),
@@ -258,6 +278,12 @@ export const NODE_DEFINITIONS = {
     inputs: [
       { id: 'prompts', label: 'Prompts', type: text(true), required: true },
       { id: 'titles', label: 'Titles', type: text(true) },
+      {
+        id: 'reference',
+        label: 'Layout reference',
+        type: media([...IMAGES]),
+        description: 'A rough sketch or frame whose framing and placement every image should follow. Used by Codex only; the API generates from the prompt alone.',
+      },
     ],
     outputs: [
       { id: 'images', label: 'Images', type: media([...IMAGES], true) },
@@ -265,6 +291,19 @@ export const NODE_DEFINITIONS = {
     ],
     configSchema: z.object({
       size: z.enum(IMAGE_SIZE_VALUES).default(DEFAULT_IMAGE_SIZE),
+      /**
+       * The look every image in the run is rendered in.
+       *
+       * It lives here rather than on the step that writes the prompts because
+       * this is the only place that can guarantee it. A style given to the
+       * writer produces eight prompts that each interpret it; appended here it
+       * is the same words on every call, so a set cannot come back half pixel
+       * art and half photograph — which as a video is simply broken.
+       *
+       * Generous limit: "pixel art" and four paragraphs pinning down palette,
+       * linework and shading are both legitimate uses of this field.
+       */
+      style: z.string().max(2_000, 'The image style can be up to 2,000 characters.').default(''),
       /** Stops a runaway prompt list from spending the whole month's quota. */
       maxImages: z.number().int().min(1).max(20).default(8),
       /**
@@ -422,7 +461,7 @@ export const NODE_DEFINITIONS = {
   TEXT_OVERLAY: {
     type: 'TEXT_OVERLAY',
     label: 'Text overlay',
-    description: 'Burns a label onto each cut — a number, a title, or both.',
+    description: 'Burns a label onto each cut — a number, a title, opening text, or a combination.',
     category: 'assemble',
     icon: 'type',
     inputs: [
@@ -435,20 +474,29 @@ export const NODE_DEFINITIONS = {
       },
       {
         id: 'template',
-        label: 'Text on each cut',
+        label: 'Overlay text',
         type: text(),
-        description: 'Overrides the per-cut text set below. Tokens still apply.',
+        description: 'Overrides the repeating overlay chosen under Overlay structure.',
       },
     ],
     outputs: [{ id: 'video', label: 'Video', type: media([...VIDEOS]) }],
     configSchema: z.object({
+      structure: z.enum([
+        'numbered',
+        'opening-only',
+        'opening-always',
+        'titles',
+        'opening-numbered',
+        'numbered-title',
+        'opening-numbered-title',
+      ]).default('numbered'),
       /**
-       * {index} is the cut number from 1, counting only the cuts that carry a
-       * number — an opening card is not one of them. {choice} is a retired
-       * spelling of the same thing, kept because saved configs still hold it.
+       * Kept so saved steps and a connected Overlay text input still round-trip.
+       * Overlay structure is what the panel edits; this is filled in at run time
+       * unless something is wired to the Overlay text port.
        */
       template: z.string().max(200).default('{index}'),
-      /** Optional text used only on the first cut, before template takes over. */
+      /** Opening line. Used by structures that show opening text. */
       firstTemplate: z.string().max(200).nullable().default(null),
       font: z.enum(['Archivo-Bold', 'Archivo-SemiBold', 'BebasNeue-Regular']).default('Archivo-Bold'),
       position: z.enum(['top', 'centre', 'bottom']).default('top'),
@@ -591,10 +639,15 @@ export function findPort(
  * resolved to.
  */
 export function migrateLegacyConfig(type: string, raw: unknown): unknown {
-  if (type !== 'IMAGE_GENERATOR' || typeof raw !== 'object' || raw === null) return raw;
+  if (typeof raw !== 'object' || raw === null) return raw;
   const config = raw as Record<string, unknown>;
-  if (config.provider !== 'default') return raw;
-  return { ...config, provider: config.useMockGeneration === true ? 'mock' : 'image-use' };
+  if (type === 'IMAGE_GENERATOR' && config.provider === 'default') {
+    return { ...config, provider: config.useMockGeneration === true ? 'mock' : 'image-use' };
+  }
+  if (type === 'TEXT_OVERLAY' && config.structure === undefined) {
+    return { ...config, structure: inferOverlayStructure(config) };
+  }
+  return raw;
 }
 
 /** Config parsed through the node's schema, with defaults filled in. */

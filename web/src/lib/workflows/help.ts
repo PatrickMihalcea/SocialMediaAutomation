@@ -9,11 +9,49 @@ export interface WorkflowFieldHelp {
   multiline?: boolean;
 }
 
-export const TEXT_OVERLAY_PRESETS = [
-  { label: 'Number', value: '{index}', example: '1' },
-  { label: 'Title', value: '{title}', example: 'Coastal minimal' },
-  { label: 'Number and title', value: '{index}. {title}', example: '1. Coastal minimal' },
-  { label: 'No changing text', value: '', example: 'No overlay text' },
+export const TEXT_OVERLAY_STRUCTURES = [
+  {
+    id: 'numbered',
+    label: 'Numbered',
+    description: 'Every cut is just its number.',
+    example: '1, 2, 3',
+  },
+  {
+    id: 'opening-only',
+    label: 'Opening text only',
+    description: 'Opening text on the first cut, then nothing.',
+    example: 'Which would you choose?',
+  },
+  {
+    id: 'opening-always',
+    label: 'Opening text always',
+    description: 'The same opening text on every cut.',
+    example: 'Which would you choose? on each cut',
+  },
+  {
+    id: 'titles',
+    label: 'Titles',
+    description: 'Each cut shows its image title, without a file extension.',
+    example: 'Canopy house',
+  },
+  {
+    id: 'opening-numbered',
+    label: 'Opening text, numbered',
+    description: 'Opening text on the first cut, then a number on each one after.',
+    example: 'Which would you choose? then 1, 2, 3',
+  },
+  {
+    id: 'numbered-title',
+    label: 'Numbered: Title',
+    description: 'Every cut is the number, a colon, and the title.',
+    example: '1: Canopy house',
+  },
+  {
+    id: 'opening-numbered-title',
+    label: 'Opening text, numbered: Title',
+    description: 'Opening text on the first cut, then “1: Title” on each one after.',
+    example: 'Which would you choose? then 1: Canopy house',
+  },
 ] as const;
 
 export const TEXT_OVERLAY_TOKENS = [
@@ -106,17 +144,22 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
     themePool: {
       label: 'Theme pool',
-      description: 'Themes separated by commas. Each run draws one at random from the whole list, so the same theme can come up twice — the ideas will still differ, because the step is told what it already covered.',
+      description: 'Themes separated by commas. Each run draws one at random from the whole list, so the same theme can come up twice — the ideas will still differ, because the step is told what it already covered. Each theme can also carry a layout sketch: connect the Layout reference output to an Image generator and the run uses the sketch belonging to the theme it drew. Rewording a theme drops its sketch.',
       multiline: true,
     },
     count: {
       label: 'How many ideas',
       description: 'Each idea becomes one prompt and one title, and each prompt costs a generation in the step you feed.',
     },
-    styleSuffix: {
-      label: 'Add to every prompt',
-      description: 'Shared direction appended to all of them — palette, lens, mood, or things to avoid. Leave empty if the theme says enough.',
+    promptGuidance: {
+      label: 'How to write the prompts',
+      description: 'Direction for the prompts this step writes — what to include, how long, what to avoid, a shot type to favour. The rendering style is not set here; that belongs on the Image generator, which applies it to every image. Leave empty to let the model decide from the theme.',
       multiline: true,
+      presets: [
+        { label: 'Name the light and the angle', value: 'Every prompt names where the light comes from and the camera angle or point of view.' },
+        { label: 'Concrete nouns only', value: 'Describe only what is physically in the frame. No symbolism, no mood words, no adjectives that carry no visual information.' },
+        { label: 'Wide establishing shots', value: 'Favour wide establishing shots that show the subject in its surroundings rather than close details.' },
+      ],
     },
     titleGuidance: {
       label: 'How to write the post title',
@@ -152,9 +195,18 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
   },
   IMAGE_GENERATOR: {
+    style: {
+      label: 'Image style',
+      description: 'The look every image is rendered in — pixel art, anime, 1960s film photography, a technical illustration. It is appended to every prompt word for word and overrides anything in the prompt that conflicts with it, so a run cannot come back half in one style and half in another. Worth being specific; it can run to several paragraphs.',
+      multiline: true,
+    },
     size: {
       label: 'Image shape',
       description: 'The OpenAI API offers 2:3, 3:2 and 1:1 only, so a vertical frame has to be cropped out of 2:3. Codex adds a true 9:16 that needs no crop at all — it appears here once this step is set to generate with Codex.',
+    },
+    reference: {
+      label: 'Layout reference',
+      description: 'Connect an image — a rough sketch is enough — and every image in the run borrows its framing, crop and camera angle rather than its content. Codex only: the OpenAI API has no composition reference, so a step set to API generates from the prompt alone and ignores anything wired here.',
     },
     maxImages: {
       label: 'Maximum images',
@@ -292,13 +344,28 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
   },
   TEXT_OVERLAY: {
-    template: {
-      label: 'Text on each cut',
-      description: 'Choose a preset or combine fixed words with Number and Title. Connecting the Text on each cut input overrides this, and tokens still apply.',
+    structure: {
+      label: 'Overlay structure',
+      description: 'What appears on each cut. Opening text is the field below, or a connection into Opening text.',
+      optionLabels: Object.fromEntries(
+        [
+          ['numbered', 'Numbered'],
+          ['opening-only', 'Opening text only'],
+          ['opening-always', 'Opening text always'],
+          ['titles', 'Titles'],
+          ['opening-numbered', 'Opening text, numbered'],
+          ['numbered-title', 'Numbered: Title'],
+          ['opening-numbered-title', 'Opening text, numbered: Title'],
+        ],
+      ),
     },
     firstTemplate: {
       label: 'Opening text',
-      description: 'Optional text shown only on the first cut. Later cuts use Text on each cut. Connecting the Opening text input overrides this, so an Idea generator can write the opening line per run.',
+      description: 'Used when Overlay structure includes opening text. Connecting the Opening text input overrides this, so an Idea generator can write it per run.',
+    },
+    template: {
+      label: 'Overlay text',
+      description: 'Only used when something is connected to Overlay text. Leave Overlay structure to choose the pattern.',
     },
     font: {
       label: 'Typeface',

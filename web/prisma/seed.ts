@@ -359,6 +359,7 @@ async function seedBedroomWorkflow(workspaceId: string, userId: string) {
     fadeOutSeconds: 1.2,
   });
   const overlay = await node('TEXT_OVERLAY', 'Number each room', 1100, 140, {
+    structure: 'numbered',
     template: '{index}',
     font: 'Archivo-Bold',
     position: 'top',

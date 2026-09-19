@@ -38,26 +38,20 @@ import {
 } from '@/lib/workflows/video-output-presets';
 import { updateNodeAction } from '@/app/actions/workflows';
 import type { CanvasNode } from '@/components/workflow-canvas';
-import { TEXT_OVERLAY_PRESETS, WORKFLOW_FIELD_HELP } from '@/lib/workflows/help';
+import { TEXT_OVERLAY_STRUCTURES, WORKFLOW_FIELD_HELP } from '@/lib/workflows/help';
+import {
+  isOverlayStructure,
+  overlayUsesOpening,
+} from '@/lib/workflows/text-overlay-template';
 import {
   WorkflowCombineOrder,
   type CombineSourceId,
 } from '@/components/workflow-combine-order';
 import { WorkflowTrimmerEditor } from '@/components/workflow-trimmer-editor';
+import { WorkflowThemePool } from '@/components/workflow-theme-pool';
 
 const CUSTOM_VIDEO_SIZE = '__custom__';
 const CUSTOM_VALUE = '__custom__';
-
-/** What the burnt-in label reads as on the first cut. */
-function previewOverlay(template: string): string {
-  // {choice} is retired from the picker but still lives in saved configs, and
-  // it now means the same number as {index}.
-  const filled = template
-    .replaceAll('{index}', '1')
-    .replaceAll('{choice}', '1')
-    .replaceAll('{title}', 'Coastal minimal');
-  return filled.trim() || 'nothing';
-}
 
 /**
  * A choice control plus its optional explanation.
@@ -564,6 +558,16 @@ export function NodeConfigPanel({
       if (field.key === 'includeSubfolders') return typeof config.assetId !== 'string';
     }
     if (node.type === 'PICK' && field.key === 'index') return config.mode === 'index';
+    if (node.type === 'TEXT_OVERLAY') {
+      // Overlay structure replaced the freeform template picker. The template
+      // field remains in the schema so a connected Overlay text port still
+      // saves, but it is not something to type next to the named options.
+      if (field.key === 'template') return false;
+      if (field.key === 'firstTemplate') {
+        const structure = isOverlayStructure(config.structure) ? config.structure : 'numbered';
+        return overlayUsesOpening(structure);
+      }
+    }
     // One theme or a pool, never both on screen: showing the unused one invites
     // someone to fill in a setting this step will not read.
     if (node.type === 'IDEA_GENERATOR') {
@@ -713,25 +717,6 @@ export function NodeConfigPanel({
         </div>
       );
     }
-    if (node.type === 'TEXT_OVERLAY' && field.key === 'template') {
-      return (
-        <PresetField
-          key={field.key}
-          label={field.label}
-          hint={showHelp ? field.description : undefined}
-          presets={TEXT_OVERLAY_PRESETS.map((option) => ({
-            label: option.label,
-            value: option.value,
-          }))}
-          value={String(value ?? '')}
-          kind="text"
-          disabled={!canEdit}
-          // The only setting whose effect is not obvious from its value.
-          preview={(current) => `Shows ${previewOverlay(String(current ?? ''))}`}
-          onChange={(next) => setConfig((current) => ({ ...current, template: next ?? '' }))}
-        />
-      );
-    }
     if (field.kind === 'boolean') {
       return (
         <div key={field.key}>
@@ -757,12 +742,15 @@ export function NodeConfigPanel({
       const fitNote = showHelp && node.type === 'IMAGE_GENERATOR' && field.key === 'size'
         ? imageSizeFitNote(enumValue)
         : null;
+      const structureNote = node.type === 'TEXT_OVERLAY' && field.key === 'structure'
+        ? TEXT_OVERLAY_STRUCTURES.find((option) => option.id === enumValue)?.description
+        : null;
 
       return (
         <ChoiceField
           key={field.key}
           label={field.label}
-          hint={[fitNote, showHelp ? field.description : null].filter(Boolean).join(' ') || undefined}
+          hint={[structureNote, fitNote, showHelp ? field.description : null].filter(Boolean).join(' ') || undefined}
           value={enumValue}
           disabled={!canEdit}
           options={(sizeOptions ?? (field.options ?? []).map((option) => ({
@@ -811,6 +799,23 @@ export function NodeConfigPanel({
           kind={field.kind === 'number' ? 'number' : 'text'}
           disabled={!canEdit}
           onChange={(next) => setConfig((c) => ({ ...c, [field.key]: next }))}
+        />
+      );
+    }
+    // The theme pool carries a sketch per theme, so it gets an editor that can
+    // show them rather than the plain list field.
+    if (node.type === 'IDEA_GENERATOR' && field.key === 'themePool') {
+      return (
+        <WorkflowThemePool
+          key={field.key}
+          slug={slug}
+          label={field.label}
+          hint={showHelp ? field.description : undefined}
+          themes={Array.isArray(value) ? (value as unknown[]).filter((entry): entry is string => typeof entry === 'string') : []}
+          images={(config.themeImages as Record<string, string>) ?? {}}
+          disabled={!canEdit}
+          onChangeThemes={(themes) => setConfig((c) => ({ ...c, themePool: themes }))}
+          onChangeImages={(themeImages) => setConfig((c) => ({ ...c, themeImages }))}
         />
       );
     }

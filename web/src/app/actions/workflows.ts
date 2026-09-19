@@ -710,6 +710,31 @@ export async function getNodeRunOutputAction(
   return { nodeName: nodeRun.nodeName, nodeType: nodeRun.nodeType, output: nodeRun.output };
 }
 
+/**
+ * The workspace's images, with a thumbnail to show.
+ *
+ * On demand rather than on the workflow page: that page already loads up to a
+ * thousand asset rows for the pickers, and signing a URL for every one of them
+ * on every load — to fill a grid almost nobody opens — is work for nothing.
+ */
+export async function listReferenceImagesAction(
+  slug: string,
+): Promise<{ id: string; filename: string; url: string }[]> {
+  const ctx = await requireWorkspace(slug, 'workflow:view');
+  const assets = await db.mediaAsset.findMany({
+    where: { workspaceId: ctx.workspace.id, status: 'READY', type: 'IMAGE' },
+    select: { id: true, filename: true, thumbnailKey: true, storageKey: true },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+  });
+  const store = storage();
+  return Promise.all(assets.map(async (asset) => ({
+    id: asset.id,
+    filename: asset.filename,
+    url: await store.signedUrl(asset.thumbnailKey ?? asset.storageKey),
+  })));
+}
+
 export async function retryNodeAction(slug: string, nodeRunId: string) {
   const ctx = await requireWorkspace(slug, 'workflow:run');
   await retryWorkflowNode(nodeRunId, ctx.workspace.id);

@@ -10,7 +10,7 @@ import {
 import type { PortDefinition, PortType } from '@/lib/workflows/ports';
 import { IMAGE_SIZE_PRESETS, imageSizeFitNote } from '@/lib/ai/image-sizes';
 import {
-  TEXT_OVERLAY_PRESETS,
+  TEXT_OVERLAY_STRUCTURES,
   TEXT_OVERLAY_TOKENS,
   WORKFLOW_FIELD_HELP,
   WORKFLOW_RECIPES,
@@ -110,21 +110,19 @@ export default async function WorkflowGuidePage({
 
       <section id="text-overlays" className="mt-12 scroll-mt-20">
         <p className="b88-eyebrow">Text overlays</p>
-        <h2 className="b88-section-title mt-3">Use presets first. Customize when needed.</h2>
+        <h2 className="b88-section-title mt-3">Choose a structure, then write the opening text if it needs one.</h2>
         <p className="b88-body-sm mt-3 max-w-2xl">
-          The Text overlay step creates different text for every cut. Curly-brace values are
-          placeholders: Bridge88 replaces them when the workflow runs.
+          Overlay structure decides what appears on each cut. Opening text is its own field,
+          and can also be written by an Idea generator connected into Opening text.
         </p>
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <div className="rounded-lg border border-hairline p-5">
-            <p className="b88-label">Presets</p>
+            <p className="b88-label">Overlay structure</p>
             <dl className="mt-4 space-y-4">
-              {TEXT_OVERLAY_PRESETS.map((preset) => (
-                <div key={preset.label}>
-                  <dt className="font-[540]">{preset.label}</dt>
-                  <dd className="mt-1 text-sm">
-                    <code>{preset.value || 'empty'}</code> → {preset.example}
-                  </dd>
+              {TEXT_OVERLAY_STRUCTURES.map((option) => (
+                <div key={option.id}>
+                  <dt className="font-[540]">{option.label}</dt>
+                  <dd className="mt-1 text-sm">{option.description} Example: {option.example}</dd>
                 </div>
               ))}
             </dl>
@@ -140,8 +138,8 @@ export default async function WorkflowGuidePage({
               ))}
             </dl>
             <p className="mt-4 text-sm">
-              For Title, connect Titles from Idea generator to Image generator, then from
-              Image generator to Beat slideshow. Fixed words are allowed: <code>Room {'{index}'}</code>.
+              For Titles, connect Titles through to Beat slideshow. File extensions such as .png
+              are stripped when the title is burnt on.
             </p>
           </div>
         </div>

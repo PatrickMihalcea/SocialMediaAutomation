@@ -14,6 +14,12 @@ import {
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'next/navigation';
 import {
+  ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
+} from 'lucide-react';
+import {
   Background,
   Controls,
   Handle,
@@ -29,7 +35,7 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Badge, StatusMessage } from '@/bridge88/components';
+import { Badge, Field, IconButton, StatusMessage } from '@/bridge88/components';
 import {
   CATEGORY_LABEL,
   NODE_DEFINITIONS,
@@ -115,6 +121,11 @@ const ConnectingContext = createContext<{
 const MockedProviderContext = createContext(false);
 
 const EDGE_HIT_WIDTH = 24;
+const INSPECTOR_MIN_WIDTH = 320;
+const INSPECTOR_MAX_WIDTH = 640;
+const INSPECTOR_DEFAULT_WIDTH = 380;
+const INSPECTOR_WIDTH_KEY = 'bridge88.workflow.inspector-width';
+const LIBRARY_COLLAPSED_KEY = 'bridge88.workflow.library-collapsed';
 
 const EDGE_A11Y_HINT =
   'Press Enter or Space to select this connection. Then press Backspace or Delete to remove it, or use the connection settings panel.';
@@ -181,7 +192,56 @@ function CanvasInner({
     handleType: PortKind;
   } | null>(null);
   const [pending, startTransition] = useTransition();
+  const [libraryCollapsed, setLibraryCollapsed] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
+  const [inspectorWidth, setInspectorWidth] = useState(INSPECTOR_DEFAULT_WIDTH);
   const configs = useRef(new Map(initialNodes.map((n) => [n.id, n])));
+
+  // Layout preferences belong to the editor rather than a workflow, so one
+  // resize/collapse carries to the next workflow without changing shared data.
+  useEffect(() => {
+    const savedWidth = Number(window.localStorage.getItem(INSPECTOR_WIDTH_KEY));
+    if (Number.isFinite(savedWidth)) {
+      setInspectorWidth(clampInspectorWidth(savedWidth));
+    }
+    setLibraryCollapsed(window.localStorage.getItem(LIBRARY_COLLAPSED_KEY) === 'true');
+  }, []);
+
+  const setLibraryVisibility = useCallback((collapsed: boolean) => {
+    setLibraryCollapsed(collapsed);
+    window.localStorage.setItem(LIBRARY_COLLAPSED_KEY, String(collapsed));
+  }, []);
+
+  const commitInspectorWidth = useCallback((width: number) => {
+    const next = clampInspectorWidth(width);
+    setInspectorWidth(next);
+    window.localStorage.setItem(INSPECTOR_WIDTH_KEY, String(next));
+  }, []);
+
+  const beginInspectorResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = inspectorWidth;
+    const target = event.currentTarget;
+    target.setPointerCapture(event.pointerId);
+
+    const move = (moveEvent: PointerEvent) => {
+      // The handle is on the left of the rail: moving left makes it wider.
+      setInspectorWidth(clampInspectorWidth(startWidth + startX - moveEvent.clientX));
+    };
+    const finish = (upEvent: PointerEvent) => {
+      target.releasePointerCapture(upEvent.pointerId);
+      target.removeEventListener('pointermove', move);
+      target.removeEventListener('pointerup', finish);
+      target.removeEventListener('pointercancel', finish);
+      const finalWidth = clampInspectorWidth(startWidth + startX - upEvent.clientX);
+      commitInspectorWidth(finalWidth);
+    };
+    target.addEventListener('pointermove', move);
+    target.addEventListener('pointerup', finish);
+    target.addEventListener('pointercancel', finish);
+  }, [commitInspectorWidth, inspectorWidth]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<StepData>>(
     initialNodes.map((node) => toFlowNode(node, mediaFolders, mediaCounts, mediaAssets)),
@@ -510,8 +570,15 @@ function CanvasInner({
 
   const palette = useMemo(() => {
     const groups = new Map<NodeCategory, { type: string; label: string; description: string }[]>();
+    const query = paletteQuery.trim().toLocaleLowerCase();
     for (const definition of Object.values(NODE_DEFINITIONS)) {
       if ('legacy' in definition && definition.legacy) continue;
+      if (
+        query &&
+        !`${definition.label} ${definition.description}`.toLocaleLowerCase().includes(query)
+      ) {
+        continue;
+      }
       const list = groups.get(definition.category) ?? [];
       list.push({
         type: definition.type,
@@ -521,7 +588,7 @@ function CanvasInner({
       groups.set(definition.category, list);
     }
     return [...groups.entries()];
-  }, []);
+  }, [paletteQuery]);
 
   const selectedNode = selectedNodeId ? configs.current.get(selectedNodeId) : null;
 
@@ -543,53 +610,99 @@ function CanvasInner({
         };
       });
   }, [edges, selectedNodeId, nodeLookup]);
-  // The settings rail only exists once there is something to configure, so the
-  // canvas keeps that width the rest of the time.
   const inspector = selectedCanvasEdge && selectedConnectionDescription
     ? 'connection'
     : selectedNode
       ? 'step'
       : null;
-  // Written out in full because Tailwind resolves class names statically.
-  const columns = inspector
-    ? canEdit
-      ? 'lg:grid-cols-[190px_minmax(0,1fr)_280px]'
-      : 'lg:grid-cols-[minmax(0,1fr)_280px]'
-    : canEdit
-      ? 'lg:grid-cols-[190px_minmax(0,1fr)]'
-      : 'lg:grid-cols-[minmax(0,1fr)]';
 
   return (
-    <div className={`grid gap-6 ${columns}`}>
+    <div
+      className="b88-workflow-editor"
+      data-can-edit={canEdit || undefined}
+      data-library-collapsed={libraryCollapsed || undefined}
+      data-has-inspector={Boolean(inspector) || undefined}
+      style={{
+        '--workflow-library-width': libraryCollapsed ? '56px' : '220px',
+        '--workflow-inspector-width': `${inspectorWidth}px`,
+      } as CSSProperties}
+    >
       {canEdit && (
-        <aside>
-          <p className="b88-eyebrow">Add a step</p>
-          <div className="mt-4 space-y-4">
-            {palette.map(([category, items]) => (
-              <div key={category}>
-                <p className="b88-caption">{CATEGORY_LABEL[category]}</p>
-                <ul className="mt-1.5 list-none space-y-1 p-0">
-                  {items.map((item) => (
-                    <li key={item.type}>
-                      <button
-                        type="button"
-                        onClick={() => addStep(item.type)}
-                        disabled={pending}
-                        aria-label={`Add ${item.label}: ${item.description}`}
-                        className="w-full rounded-md border border-hairline px-3 py-2 text-left text-sm transition-opacity hover:opacity-80 disabled:opacity-35"
-                      >
-                        {item.label}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+        <aside className="b88-workflow-library min-w-0">
+          {/* Header and search sit outside the scrolling list: collapsing the
+              library is the way out of it, and a control that scrolls away is
+              not there when it is wanted. */}
+          <div className="b88-workflow-library-head">
+            <div className={`flex items-center ${libraryCollapsed ? 'justify-center' : 'justify-between'} gap-2`}>
+              {!libraryCollapsed && <p className="b88-eyebrow">Step library</p>}
+              <IconButton
+                icon={libraryCollapsed ? PanelLeftOpen : PanelLeftClose}
+                label={libraryCollapsed ? 'Open step library' : 'Collapse step library'}
+                aria-expanded={!libraryCollapsed}
+                onClick={() => setLibraryVisibility(!libraryCollapsed)}
+              />
+            </div>
+            {!libraryCollapsed && (
+              <div className="relative mt-4">
+                <Search
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
+                  size={16}
+                  strokeWidth={1.75}
+                />
+                <Field
+                  label="Find a step"
+                  labelHidden
+                  value={paletteQuery}
+                  placeholder="Find a step"
+                  className="pl-9"
+                  onChange={(event) => setPaletteQuery(event.target.value)}
+                />
               </div>
-            ))}
+            )}
           </div>
+          {!libraryCollapsed && (
+            <div className="b88-workflow-library-list">
+              <div className="space-y-2">
+                {palette.map(([category, items]) => (
+                  <details key={category} open className="group border-b border-hairline pb-2">
+                    <summary className="b88-caption flex cursor-pointer list-none items-center justify-between gap-2 py-2">
+                      {CATEGORY_LABEL[category]}
+                      <ChevronRight
+                        size={15}
+                        strokeWidth={1.75}
+                        className="transition-transform group-open:rotate-90"
+                        aria-hidden="true"
+                      />
+                    </summary>
+                    <ul className="list-none space-y-1 p-0">
+                      {items.map((item) => (
+                        <li key={item.type}>
+                          <button
+                            type="button"
+                            onClick={() => addStep(item.type)}
+                            disabled={pending}
+                            title={item.description}
+                            className="w-full rounded-md border border-hairline px-3 py-2 text-left transition-opacity hover:opacity-80 disabled:opacity-35"
+                          >
+                            <span className="block text-sm font-[480]">{item.label}</span>
+                            <span className="mt-0.5 block text-xs leading-snug">{item.description}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ))}
+                {palette.length === 0 && (
+                  <p className="text-sm">No steps match “{paletteQuery}”.</p>
+                )}
+              </div>
+            </div>
+          )}
         </aside>
       )}
 
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4">
         <p className="b88-caption">
           {nodes.length} {nodes.length === 1 ? 'STEP' : 'STEPS'} · {edges.length}{' '}
           {edges.length === 1 ? 'CONNECTION' : 'CONNECTIONS'}
@@ -598,7 +711,7 @@ function CanvasInner({
         {error && <StatusMessage tone="error">{error}</StatusMessage>}
 
         <div
-          className="b88-canvas h-[600px] rounded-lg border border-hairline"
+          className="b88-canvas h-[clamp(560px,72vh,820px)] rounded-lg border border-hairline"
           style={
             {
               '--xy-background-color': 'var(--canvas)',
@@ -711,7 +824,27 @@ function CanvasInner({
       </div>
 
       {inspector && (
-      <aside>
+      <aside className="b88-workflow-inspector relative min-w-0">
+        <div
+          role="separator"
+          aria-label="Resize settings panel"
+          aria-orientation="vertical"
+          aria-valuemin={INSPECTOR_MIN_WIDTH}
+          aria-valuemax={INSPECTOR_MAX_WIDTH}
+          aria-valuenow={inspectorWidth}
+          tabIndex={0}
+          className="b88-workflow-resizer"
+          onPointerDown={beginInspectorResize}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            event.preventDefault();
+            commitInspectorWidth(
+              inspectorWidth + (event.key === 'ArrowLeft' ? 24 : -24),
+            );
+          }}
+        >
+          <span className="sr-only">Use left and right arrows to resize</span>
+        </div>
         {selectedCanvasEdge && selectedConnectionDescription ? (
           <ConnectionConfigPanel
             key={selectedCanvasEdge.id}
@@ -938,10 +1071,10 @@ function StepNode({ id, data, selected }: NodeProps<Node<StepData>>) {
 
   return (
     <div
-      className="min-w-56 rounded-lg bg-canvas p-4"
+      className="w-[280px] rounded-lg bg-canvas p-4"
       style={{ border: selected ? '1px solid var(--ink)' : '1px solid var(--hairline)' }}
     >
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex items-start justify-between gap-3">
         <p className="b88-caption">{CATEGORY_LABEL[definition.category]}</p>
         {mocked && (
           <Badge tone="lilac">
@@ -957,68 +1090,91 @@ function StepNode({ id, data, selected }: NodeProps<Node<StepData>>) {
           </Badge>
         )}
       </div>
-      <p className="mt-1 text-base font-medium">{data.label}</p>
+      <p className="mt-1 break-words text-base font-[540] leading-snug">{data.label}</p>
 
-      {/* Each port dot lives inside its own label row, so it is centred on that
-          row by layout. Positioning them by a guessed pixel offset drifts the
-          moment a title wraps or the type scale changes, which reads as dots
-          belonging to the wrong port. -16px cancels the card's padding, putting
-          the dot on the card edge. */}
-      <div className="mt-3 flex justify-between gap-6">
-        <ul className="list-none space-y-1.5 p-0">
+      {/* The dots on each edge already say which side is which, so the columns
+          carry no headings — two extra words per card, nine cards to a board. */}
+      <div className="mt-4 grid grid-cols-2 gap-5 border-t border-hairline pt-3">
+        <div className="min-w-0">
+          <ul className="list-none space-y-1.5 p-0">
           {nodeInputs.map((port) => {
             // An input with no wire and a value typed into the matching setting
             // is answered from the settings every run. Saying so here is the
             // difference between a step that looks unfinished and one that is
             // deliberately fixed.
-            const typed = !connecting.isInputConnected(id, port.id) && typedInput(data.config, port.id);
+            const connected = connecting.isInputConnected(id, port.id);
+            const typed = !connected && typedInput(data.config, port.id);
             return (
-            <li key={port.id} className="b88-caption relative">
+            <li
+              key={port.id}
+              className="b88-caption relative flex min-h-6 min-w-0 items-center gap-1 leading-tight"
+              title={typed ? `${port.label}: fixed to “${typed}”` : port.label}
+            >
               <Handle
                 id={port.id}
                 type="target"
                 position={Position.Left}
                 style={{ left: -16 }}
                 data-compatible={compatibility(port.id, 'target')}
+                data-connected={connected || undefined}
                 aria-label={
                   `${port.label}${port.required ? ', required' : ''} input` +
                   (typed ? `, set in settings to ${typed}` : '')
                 }
               />
-              {port.label}
-              {port.required ? ' *' : ''}
+              <span className="min-w-0 break-words">
+                {port.label}
+                {port.required ? ' *' : ''}
+              </span>
               {typed && (
-                <span title={`Set in settings: ${typed}`} style={{ opacity: 0.6 }}> · typed</span>
+                <span className="shrink-0 rounded-sm border border-hairline px-1 py-0.5 text-[9px]">
+                  Fixed
+                </span>
               )}
             </li>
             );
           })}
-        </ul>
-        <ul className="list-none space-y-1.5 p-0 text-right">
+          </ul>
+        </div>
+        <div className="min-w-0 text-right">
+          <ul className="list-none space-y-1.5 p-0">
           {outputs.map((port) => {
             const count = data.outputCounts?.[port.id as keyof MediaLibraryOutputCounts];
+            const connected = connecting.isOutputConnected(id, port.id);
             return (
-            <li key={port.id} className="b88-caption relative">
+            <li
+              key={port.id}
+              className="b88-caption relative flex min-h-6 min-w-0 items-center justify-end leading-tight"
+              title={port.label}
+            >
+              <span className="min-w-0 break-words">
+                {port.label}{typeof count === 'number' ? ` · ${count}` : ''}
+              </span>
               <Handle
                 id={port.id}
                 type="source"
                 position={Position.Right}
                 style={{ right: -16 }}
                 data-compatible={compatibility(port.id, 'source')}
+                data-connected={connected || undefined}
                 aria-label={`${port.label} output`}
               />
-              {port.label}{typeof count === 'number' ? ` · ${count}` : ''}
             </li>
             );
           })}
           {outputs.length === 0 && <li className="b88-caption">No ready media</li>}
-        </ul>
+          </ul>
+        </div>
       </div>
     </div>
   );
 }
 
 const NODE_TYPES = { step: StepNode };
+
+function clampInspectorWidth(width: number): number {
+  return Math.min(INSPECTOR_MAX_WIDTH, Math.max(INSPECTOR_MIN_WIDTH, Math.round(width)));
+}
 
 const toFlowNode = (
   node: CanvasNode,

@@ -261,7 +261,7 @@ export function workflowAssistantSkill(): string {
     'BEAT_SLIDESHOW accepts an ordered mixture of images and videos on its saved images port. Source video audio is discarded; short video clips loop to fill their beat slot.',
     'AUDIO_TRIMMER is labelled Trimmer. Use mode=range for audio or video with startSeconds/endSeconds. Use mode=bars only for audio. Keep the saved audio input/output port ids.',
     'For a video from three random existing folder images: MEDIA_LIBRARY.images → PICK.items, PICK.selection → BEAT_SLIDESHOW.images. For music, use MEDIA_LIBRARY.audio → another PICK.items, then PICK.item → BEAT_SLIDESHOW.audio.',
-    'To label each cut with its own filename, add MEDIA_LIBRARY.imageTitles → PICK.labels and PICK.labels → BEAT_SLIDESHOW.titles, then TEXT_OVERLAY template "{index}. {title}".',
+    'To label each cut with its own title, add MEDIA_LIBRARY.imageTitles → PICK.labels and PICK.labels → BEAT_SLIDESHOW.titles, then set TEXT_OVERLAY structure to "titles" or "numbered-title".',
     'Do not add MUSIC_SELECTOR to new workflows; it is retained only so old saved workflows still run.',
     // The one capability a model cannot infer from the port list, and the one
     // most often asked for: "random themes", "varied topics", "do not repeat".
@@ -393,7 +393,7 @@ export function weeklyReelTemplate(theme: string, themePool: string[] = []): {
         name: 'Label each cut',
         positionX: 1100,
         positionY: 140,
-        config: { template: '{index}', font: 'Archivo-Bold', position: 'top', fontSize: 0 },
+        config: { structure: 'numbered', template: '{index}', font: 'Archivo-Bold', position: 'top', fontSize: 0 },
       },
       {
         key: 'draft',
