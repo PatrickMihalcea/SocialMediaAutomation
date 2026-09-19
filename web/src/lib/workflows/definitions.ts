@@ -472,12 +472,6 @@ export const NODE_DEFINITIONS = {
         type: text(),
         description: 'Overrides the opening text set below, so it can be written per run.',
       },
-      {
-        id: 'template',
-        label: 'Overlay text',
-        type: text(),
-        description: 'Overrides the repeating overlay chosen under Overlay structure.',
-      },
     ],
     outputs: [{ id: 'video', label: 'Video', type: media([...VIDEOS]) }],
     configSchema: z.object({
@@ -491,9 +485,13 @@ export const NODE_DEFINITIONS = {
         'opening-numbered-title',
       ]).default('numbered'),
       /**
-       * Kept so saved steps and a connected Overlay text input still round-trip.
-       * Overlay structure is what the panel edits; this is filled in at run time
-       * unless something is wired to the Overlay text port.
+       * The repeating label, derived from Overlay structure at run time.
+       *
+       * Kept in the schema so steps saved before the structure picker still
+       * parse, and so inferOverlayStructure can read what they chose. Nothing
+       * writes it any more: the named structures cover what the freeform
+       * template did, and a port that silently outranked the dropdown was a
+       * second way to set one thing.
        */
       template: z.string().max(200).default('{index}'),
       /** Opening line. Used by structures that show opening text. */

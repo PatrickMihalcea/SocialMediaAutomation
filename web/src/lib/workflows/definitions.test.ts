@@ -127,9 +127,8 @@ describe('node catalogue', () => {
       ['IDEA_GENERATOR', 'hashtags', 'CREATE_DRAFT', 'hashtags'],
       ['IDEA_GENERATOR', 'hashtags', 'PUBLISH', 'hashtags'],
       ['IDEA_GENERATOR', 'postTitle', 'CREATE_DRAFT', 'title'],
-      // The overlay's wording can be generated too, not just typed.
+      // The opening line can be generated too, not just typed.
       ['IDEA_GENERATOR', 'postTitle', 'TEXT_OVERLAY', 'firstTemplate'],
-      ['IDEA_GENERATOR', 'postTitle', 'TEXT_OVERLAY', 'template'],
     ];
 
     for (const [fromType, fromPort, toType, toPort] of path) {
@@ -180,8 +179,11 @@ describe('node catalogue', () => {
       template: '{index}',
       firstTemplate: 'Which treehouse would you choose?',
     })).toMatchObject({ structure: 'opening-numbered' });
-    expect(getDefinition('TEXT_OVERLAY')?.inputs.find((port) => port.id === 'template')?.label)
-      .toBe('Overlay text');
+    // No port for the repeating label: the structure picker decides it, and a
+    // port that silently outranked the dropdown was a second way to set one
+    // thing. The field stays in the schema so older steps still parse.
+    expect(getDefinition('TEXT_OVERLAY')?.inputs.find((port) => port.id === 'template'))
+      .toBeUndefined();
   });
 
   it('does not apply video export presets to image generation size', () => {

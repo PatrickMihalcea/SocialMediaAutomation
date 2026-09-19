@@ -363,10 +363,6 @@ export const WORKFLOW_FIELD_HELP: Partial<
       label: 'Opening text',
       description: 'Used when Overlay structure includes opening text. Connecting the Opening text input overrides this, so an Idea generator can write it per run.',
     },
-    template: {
-      label: 'Overlay text',
-      description: 'Only used when something is connected to Overlay text. Leave Overlay structure to choose the pattern.',
-    },
     font: {
       label: 'Typeface',
       description: 'Typeface used for every label.',

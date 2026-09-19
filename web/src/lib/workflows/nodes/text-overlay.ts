@@ -80,7 +80,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     ? config.structure
     : inferOverlayStructure(config);
   const patterns = overlayPatterns(structure, opening);
-  const rest = connectedText(ctx.inputs.template) || patterns.rest;
+  const rest = patterns.rest;
   const labels = renderTextOverlayLabels(rest, patterns.first, segments);
 
   const fontSizes = overlayFontSizes({
