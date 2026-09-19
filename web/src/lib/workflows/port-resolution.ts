@@ -113,13 +113,38 @@ export function checkEdge(graph: ResolutionGraph, edge: ResolutionEdge): Incompa
   return checkCompatible(source.type, input.type);
 }
 
-/** The first badly-typed edge in the graph, if there is one. */
+/**
+ * The first badly-typed edge in the graph, if there is one.
+ *
+ * An edge whose port no longer exists is skipped rather than reported. A port
+ * can be retired by a release — titles stopped being wired when they started
+ * travelling with the media — and the edges saved against it outlive the
+ * deploy that removed it. They carry nothing, because no step reads a port that
+ * is not declared, so the graph is sound without them. Failing here instead
+ * made every workflow holding one refuse to run, with a message naming a
+ * connection the canvas could no longer even draw.
+ *
+ * Adding an edge is different and still refuses: `checkAddedEdge` reports it,
+ * because a port that does not exist is not somewhere to connect to.
+ */
 export function checkGraphTypes(graph: ResolutionGraph): Incompatibility | null {
   for (const edge of graph.edges) {
+    if (portMissing(graph, edge)) continue;
     const problem = checkEdge(graph, edge);
     if (problem) return { reason: describeEdgeProblem(graph, edge, problem) };
   }
   return null;
+}
+
+/** Either end naming a port the step no longer declares. */
+function portMissing(graph: ResolutionGraph, edge: ResolutionEdge): boolean {
+  const end = (nodeId: string, portId: string, side: 'inputs' | 'outputs') => {
+    const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+    if (!node) return true;
+    return !getNodePorts(node.type, node.config, side).some((port) => port.id === portId);
+  };
+  return end(edge.targetNodeId, edge.targetPort, 'inputs')
+    || end(edge.sourceNodeId, edge.sourcePort, 'outputs');
 }
 
 /**

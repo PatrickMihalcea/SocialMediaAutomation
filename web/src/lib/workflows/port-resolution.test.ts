@@ -138,3 +138,32 @@ describe('generic port resolution', () => {
     expect(resolveOutputType(looped, 'pick', 'item')).toMatchObject({ state: 'awaiting' });
   });
 });
+
+/**
+ * A port can be retired by a release — titles stopped being wired when they
+ * started travelling with the media — and the edges saved against it outlive
+ * the deploy that removed it. Production hit this: every workflow holding one
+ * refused to run, naming a connection the canvas could no longer draw.
+ */
+describe('a graph holding an edge to a retired port', () => {
+  const graph = {
+    nodes: [
+      { id: 'idea', type: 'IDEA_GENERATOR', config: {} },
+      { id: 'images', type: 'IMAGE_GENERATOR', config: {} },
+    ],
+    edges: [
+      { sourceNodeId: 'idea', sourcePort: 'prompts', targetNodeId: 'images', targetPort: 'prompts' },
+      { sourceNodeId: 'idea', sourcePort: 'titles', targetNodeId: 'images', targetPort: 'titles' },
+    ],
+  };
+
+  it('validates, so the workflow still runs', () => {
+    expect(checkGraphTypes(graph)).toBeNull();
+  });
+
+  it('still refuses a new edge onto a port that does not exist', () => {
+    expect(checkAddedEdge(graph, {
+      sourceNodeId: 'idea', sourcePort: 'titles', targetNodeId: 'images', targetPort: 'titles',
+    })).toEqual({ reason: 'That connection point no longer exists.' });
+  });
+});
