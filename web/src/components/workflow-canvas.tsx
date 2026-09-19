@@ -487,10 +487,36 @@ function CanvasInner({
     [canEdit, removeConnection, setEdges, setNodes, slug],
   );
 
+  /**
+   * Draws the connection immediately, then confirms it.
+   *
+   * The edge used to appear only once the save came back, so dropping a
+   * connection did nothing visible for the length of a round trip and people
+   * reasonably concluded it had not worked. It is drawn at once now, green and
+   * travelling, and settles into an ordinary edge when the server answers — or
+   * disappears again, with the reason, if the server refuses it.
+   *
+   * The provisional edge carries a temporary id of its own. Replacing it by id
+   * rather than clearing and re-adding means a second connection drawn while
+   * the first is still saving is untouched by the first one landing.
+   */
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!canEdit) return;
       setError('');
+
+      const candidate: CanvasEdge = {
+        id: `pending:${connection.source}:${connection.sourceHandle}->${connection.target}:${connection.targetHandle}`,
+        sourceNodeId: connection.source!,
+        sourcePort: connection.sourceHandle!,
+        targetNodeId: connection.target!,
+        targetPort: connection.targetHandle!,
+      };
+      setEdges((current) => addEdge(
+        { ...toFlowEdge(candidate, configs.current, canEdit), className: 'b88-edge-pending', deletable: false },
+        current,
+      ));
+
       startTransition(async () => {
         try {
           const edge = await connectNodesAction(slug, workflowId, {
@@ -499,23 +525,12 @@ function CanvasInner({
             targetNodeId: connection.target!,
             targetPort: connection.targetHandle!,
           });
-          setEdges((current) =>
-            addEdge(
-              toFlowEdge(
-                {
-                  id: edge.id,
-                  sourceNodeId: connection.source!,
-                  sourcePort: connection.sourceHandle!,
-                  targetNodeId: connection.target!,
-                  targetPort: connection.targetHandle!,
-                },
-                configs.current,
-                canEdit,
-              ),
-              current,
-            ),
-          );
+          setEdges((current) => [
+            ...current.filter((existing) => existing.id !== candidate.id),
+            toFlowEdge({ ...candidate, id: edge.id }, configs.current, canEdit),
+          ]);
         } catch (cause) {
+          setEdges((current) => current.filter((existing) => existing.id !== candidate.id));
           setError(cause instanceof Error ? cause.message : 'Those steps could not be connected.');
         }
       });

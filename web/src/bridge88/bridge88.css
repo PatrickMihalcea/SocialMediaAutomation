@@ -162,6 +162,13 @@ select.b88-input,.b88-pill-select,.b88-filter-control{appearance:none;background
 .b88-canvas .react-flow__handle[data-connected="true"]{box-shadow:0 0 0 3px var(--surface-soft)}
 .b88-canvas .react-flow__handle.connectingto[data-compatible="true"]{width:22px;height:22px;animation:none;box-shadow:0 0 0 6px color-mix(in srgb,var(--success) 30%,transparent)}
 .b88-canvas .react-flow__connection-path{stroke:var(--accent-magenta);stroke-width:2.5}
+/* An edge drawn the moment it is dropped, before the save has come back. Green
+   and travelling, matching the green a compatible port already pulses, so the
+   connection is visibly provisional rather than indistinguishable from a saved
+   one. It settles to the ordinary edge when the server confirms it. */
+.b88-canvas .react-flow__edge.b88-edge-pending .react-flow__edge-path{stroke:var(--success);stroke-width:2.5;stroke-dasharray:6 5;animation:b88-edge-travel .5s linear infinite}
+@keyframes b88-edge-travel{to{stroke-dashoffset:-22}}
+@media (prefers-reduced-motion:reduce){.b88-canvas .react-flow__edge.b88-edge-pending .react-flow__edge-path{animation:none}}
 @keyframes b88-port-pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--success) 55%,transparent)}60%{box-shadow:0 0 0 9px transparent}}
 @keyframes b88-spin{to{transform:rotate(360deg)}}
 

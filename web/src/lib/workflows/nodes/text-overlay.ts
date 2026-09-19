@@ -167,6 +167,12 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
           template: rest,
           firstTemplate: patterns.first,
           labels,
+          // Carried forward, because this step burns labels onto the video it
+          // was given and does not re-cut it: the timeline coming out is the
+          // one that went in. Without them a second overlay chained onto this
+          // one found a video with no cut points and refused to label it, so
+          // an opening card and per-cut titles could not both be applied.
+          cutPoints: segments,
         }),
       },
       select: { id: true },
