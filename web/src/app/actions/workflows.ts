@@ -719,18 +719,22 @@ export async function getNodeRunOutputAction(
  */
 export async function listReferenceImagesAction(
   slug: string,
-): Promise<{ id: string; filename: string; url: string }[]> {
+): Promise<{ id: string; filename: string; url: string; folderId: string | null }[]> {
   const ctx = await requireWorkspace(slug, 'workflow:view');
   const assets = await db.mediaAsset.findMany({
     where: { workspaceId: ctx.workspace.id, status: 'READY', type: 'IMAGE' },
-    select: { id: true, filename: true, thumbnailKey: true, storageKey: true },
+    select: { id: true, filename: true, folderId: true, thumbnailKey: true, storageKey: true },
     orderBy: { createdAt: 'desc' },
-    take: 200,
+    // The whole library, because the picker browses by folder: a cap small
+    // enough to bite would empty a folder rather than shorten it, which reads
+    // as the folder being empty.
+    take: 1000,
   });
   const store = storage();
   return Promise.all(assets.map(async (asset) => ({
     id: asset.id,
     filename: asset.filename,
+    folderId: asset.folderId,
     url: await store.signedUrl(asset.thumbnailKey ?? asset.storageKey),
   })));
 }
