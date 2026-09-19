@@ -12,8 +12,9 @@ interface Config {
   themeMode: 'fixed' | 'random';
   theme: string;
   themePool: string[];
+  themeImages: Record<string, string>;
   count: number;
-  styleSuffix: string;
+  promptGuidance: string;
   titleGuidance: string;
   captionGuidance: string;
   hashtagsGuidance: string;
@@ -64,7 +65,7 @@ export function buildIdeaInstruction(config: Config, recentTitles: string[] = []
       ? [`Also create these named text fields, each consistent with the same overall concept: ${config.additionalOutputs.map((field) => `${field.id} (${field.label})`).join(', ')}.`]
       : []),
     'title is two or three words, suitable for burning onto a video as a label.',
-    'prompt is the full description.',
+    directed('prompt is the full description.', config.promptGuidance),
   ].join(' ');
 }
 
@@ -117,10 +118,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     ],
   });
 
-  const suffix = config.styleSuffix.trim();
-  const prompts = object.prompts
-    .slice(0, config.count)
-    .map((p) => (suffix ? `${p.prompt.trim()} ${suffix}` : p.prompt.trim()));
+  const prompts = object.prompts.slice(0, config.count).map((p) => p.prompt.trim());
 
   const additionalOutputs = Object.fromEntries(config.additionalOutputs.map((field) => [
     field.id,
@@ -131,6 +129,10 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     // could not be shown on the video, written into the caption, or read back
     // by the next run deciding what not to repeat.
     theme,
+    // The sketch paired with whichever theme was drawn. Null rather than
+    // omitted, so a downstream step sees "this theme has none" rather than a
+    // port that sometimes does not exist.
+    reference: config.themeImages[theme] ?? null,
     postTitle: object.postTitle.trim(),
     caption: (object.caption ?? '').trim(),
     // One space-separated string rather than a list, because that is what the
@@ -223,8 +225,8 @@ function coveredTitles(history: Array<{ theme: string; titles: string[] }>, them
 const INSTRUCTION: Record<Config['mode'], string> = {
   image: [
     'Create a visually compelling scene with a strong sense of depth and atmosphere. Describe the subject of the theme as the main focus, then naturally establish the foreground, surrounding environment, background, and distant views. Include details such as terrain, sky, weather, vegetation, nearby structures, surfaces, reflections, furnishings, and other environmental elements when appropriate to the concept.',
-    'Use the theme to determine the mood, time of day, lighting, colors, materials, and environment. Keep everything realistic and physically believable while allowing creative interpretation. Build a clear visual hierarchy with an interesting foreground, a strong focal point, and a visually rich background. Avoid overly specific constraints that limit creativity.',
-    'The final image should feel like a premium photograph, with natural lighting, realistic textures, believable scale, and subtle imperfections. Vertical 9:16 composition, designed for Instagram Reels. No people, text, logos, or watermarks.',
+    'Use the theme to determine the mood, time of day, lighting, colors, materials, and environment. Build a clear visual hierarchy with an interesting foreground, a strong focal point, and a visually rich background. Avoid overly specific constraints that limit creativity.',
+    'Describe the scene, not the medium. The rendering style — photographic, illustrated, pixel art, or anything else — is set on the Image generator and applied to every prompt, so do not name a medium, a finish, or a frame shape here. No text, logos, or watermarks in the image.',
   ].join('\n\n'),
   video: [
     'You are writing prompts for a video generator.',

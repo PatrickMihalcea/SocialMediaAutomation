@@ -39,6 +39,21 @@ describe('buildIdeaInstruction', () => {
 
   // Blank guidance must leave the default wording clean rather than trailing an
   // empty instruction the model has to interpret.
+  /**
+   * The prompts are what this step exists to write, and they were the one
+   * output with no way to steer them — the other three guidance fields only
+   * ever touched the post copy.
+   */
+  it('steers the prompts themselves, not only the post copy', () => {
+    const instruction = buildIdeaInstruction(config({
+      promptGuidance: 'Every prompt names where the light comes from.',
+    }));
+
+    expect(instruction).toContain(
+      'prompt is the full description. Follow this direction: Every prompt names where the light comes from.',
+    );
+  });
+
   it('says nothing about direction when none was given', () => {
     const instruction = buildIdeaInstruction(config({ captionGuidance: '   ' }));
 
