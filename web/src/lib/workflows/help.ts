@@ -204,10 +204,6 @@ export const WORKFLOW_FIELD_HELP: Partial<
       label: 'Image shape',
       description: 'The OpenAI API offers 2:3, 3:2 and 1:1 only, so a vertical frame has to be cropped out of 2:3. Codex adds a true 9:16 that needs no crop at all — it appears here once this step is set to generate with Codex.',
     },
-    reference: {
-      label: 'Layout reference',
-      description: 'Connect an image — a rough sketch is enough — and every image in the run borrows its framing, crop and camera angle rather than its content. Codex only: the OpenAI API has no composition reference, so a step set to API generates from the prompt alone and ignores anything wired here.',
-    },
     maxImages: {
       label: 'Maximum images',
       description: 'A cost guard. Extra incoming prompts are ignored after this number.',

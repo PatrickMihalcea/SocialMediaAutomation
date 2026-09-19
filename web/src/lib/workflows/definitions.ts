@@ -277,12 +277,11 @@ export const NODE_DEFINITIONS = {
     icon: 'image',
     inputs: [
       { id: 'prompts', label: 'Prompts', type: text(true), required: true },
-      { id: 'titles', label: 'Titles', type: text(true) },
       {
-        id: 'reference',
-        label: 'Layout reference',
-        type: media([...IMAGES]),
-        description: 'A rough sketch or frame whose framing and placement every image should follow. Used by Codex only; the API generates from the prompt alone.',
+        id: 'titles',
+        label: 'Titles',
+        type: text(true),
+        description: 'Arrives with the prompts when they come from an Idea generator; connect one only to name the images from somewhere else.',
       },
     ],
     outputs: [

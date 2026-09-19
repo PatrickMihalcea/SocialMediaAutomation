@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import { db } from '@/lib/db';
 import { enqueue } from '@/lib/queue';
+import { applyRideAlongs } from '@/lib/workflows/ride-alongs';
 import { PermanentJobError } from '@/lib/queue/runner';
 import { backoffMs } from '@/lib/queue/types';
 import { conflict, invalid, notFound } from '@/lib/errors';
@@ -305,8 +306,12 @@ async function resolveInputs(
     const output = (source.output ?? {}) as Record<string, unknown>;
     inputs[edge.targetPort] = output[edge.sourcePort];
   }
+
+  applyRideAlongs(edges, byNode, inputs);
   return inputs;
 }
+
+
 
 async function buildContext(
   nodeRun: WorkflowNodeRun & {
