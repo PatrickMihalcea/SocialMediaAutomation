@@ -16,4 +16,12 @@ export interface StorageDriver {
    * public internet in production.
    */
   signedUrl(key: string, expiresInSeconds?: number): Promise<string>;
+  /**
+   * A URL the browser can PUT bytes to, skipping this application entirely.
+   *
+   * Null when the driver has no such thing. That is the local disk driver,
+   * which needs none: the ceiling this exists to clear is a hosting platform's
+   * request body limit, and there is no platform in front of a local disk.
+   */
+  signedUploadUrl?(key: string, contentType: string, expiresInSeconds?: number): Promise<string | null>;
 }

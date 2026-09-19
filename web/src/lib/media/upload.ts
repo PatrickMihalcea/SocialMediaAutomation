@@ -118,24 +118,120 @@ export async function storeMediaFiles(
     // boundary. UPLOADING retries safely overwrite the same object key.
     if (asset.status !== 'UPLOADING') continue;
     await storage().put(asset.storageKey, bytes, file.type);
-    await db.mediaAsset.updateMany({
-      where: { id: asset.id, status: 'UPLOADING' },
-      data: { status: 'PROCESSING' },
-    });
-    await enqueue('process-media', { mediaAssetId: asset.id }, {
-      workspaceId: ctx.workspace.id,
-      dedupeKey: `process-media:${asset.id}`,
-    });
-    await audit({
+    await markUploaded({
       workspaceId: ctx.workspace.id,
       userId: ctx.user.id,
-      action: 'media.uploaded',
-      entityType: 'media_asset',
-      entityId: asset.id,
-      metadata: { filename: file.name, size: file.size },
+      assetId: asset.id,
+      filename: file.name,
+      size: file.size,
     });
   }
   revalidatePath(`/w/${slug}/media`);
   return { count: files.length };
 }
 
+/**
+ * The bookkeeping that follows bytes reaching storage.
+ *
+ * Its own function because two routes need it: the one that receives the bytes
+ * itself, and the one a browser calls after writing them straight to object
+ * storage through a presigned URL.
+ *
+ * Guarded on UPLOADING, so calling it twice — a retried request, a browser that
+ * did not hear the first answer — cannot enqueue the processing job twice.
+ */
+export async function markUploaded(input: {
+  workspaceId: string;
+  userId: string;
+  assetId: string;
+  filename: string;
+  size: number;
+}): Promise<boolean> {
+  const claimed = await db.mediaAsset.updateMany({
+    where: { id: input.assetId, status: 'UPLOADING' },
+    data: { status: 'PROCESSING' },
+  });
+  if (!claimed.count) return false;
+
+  await enqueue('process-media', { mediaAssetId: input.assetId }, {
+    workspaceId: input.workspaceId,
+    dedupeKey: `process-media:${input.assetId}`,
+  });
+  await audit({
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+    action: 'media.uploaded',
+    entityType: 'media_asset',
+    entityId: input.assetId,
+    metadata: { filename: input.filename, size: input.size },
+  });
+  return true;
+}
+
+/**
+ * A row and a place to write, without the bytes.
+ *
+ * The browser sends only what the file claims to be; the object itself goes
+ * straight to storage. Everything that decides whether an upload is allowed —
+ * the type, the size, the workspace's storage allowance — is checked here,
+ * before a URL is handed out, because after that point this application never
+ * sees the request again.
+ *
+ * `size` is therefore the size the browser reported. It governs the quota check
+ * and the stored row; the object store enforces nothing about it. A client that
+ * lied would be caught when the asset is processed, not here.
+ */
+export async function reserveMediaUpload(
+  slug: string,
+  file: { name: string; type: string; size: number },
+  options: { folderId?: string | null; uploadRequestId?: string | null } = {},
+): Promise<{ assetId: string; storageKey: string; uploadUrl: string | null }> {
+  const ctx = await requireWorkspace(slug, 'media:upload');
+  const [type] = validateMediaUploads([file]);
+
+  const folderId = options.folderId ?? null;
+  if (folderId) await requireFolder(ctx.workspace.id, folderId);
+
+  // The byte-hash fallback the other path uses is not available here — these
+  // bytes never arrive — so an absent identifier falls back to what the file
+  // declares about itself. Weaker, and enough: a retry of the same pick still
+  // converges on the same row.
+  const supplied = options.uploadRequestId?.trim();
+  if (supplied && supplied.length > 200) throw invalid('The upload request identifier is invalid.');
+  const uploadRequestId = supplied
+    || `declared:${file.name}:${file.size}:${file.type}:${folderId ?? 'root'}`;
+
+  const id = uploadAssetId(ctx.workspace.id, uploadRequestId, 0, file);
+  const plan = await workspacePlan(ctx.workspace.id);
+
+  const asset = await db.$transaction(async (tx) => {
+    const [usage, existing] = await Promise.all([
+      tx.mediaAsset.aggregate({ where: { workspaceId: ctx.workspace.id }, _sum: { size: true } }),
+      tx.mediaAsset.findFirst({ where: { id, workspaceId: ctx.workspace.id }, select: { id: true } }),
+    ]);
+    assertStorageUploadWithinPlan(plan, usage._sum.size ?? 0, existing ? 0 : file.size);
+    return tx.mediaAsset.upsert({
+      where: { id },
+      update: {},
+      create: {
+        id,
+        workspaceId: ctx.workspace.id,
+        folderId,
+        uploadedById: ctx.user.id,
+        filename: file.name,
+        mimeType: file.type,
+        type,
+        size: file.size,
+        storageKey: mediaKey(ctx.workspace.id, file.name),
+        status: 'UPLOADING',
+      },
+    });
+  }, { isolationLevel: 'Serializable' });
+
+  const driver = storage();
+  const uploadUrl = driver.signedUploadUrl
+    ? await driver.signedUploadUrl(asset.storageKey, file.type)
+    : null;
+
+  return { assetId: asset.id, storageKey: asset.storageKey, uploadUrl };
+}

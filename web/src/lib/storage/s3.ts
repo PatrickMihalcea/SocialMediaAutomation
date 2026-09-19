@@ -58,6 +58,26 @@ export class S3Storage implements StorageDriver {
     }
   }
 
+  /**
+   * Presigned PUT, so a large file never passes through the application.
+   *
+   * Vercel refuses a request body past a few megabytes before any route runs,
+   * which turned an ordinary 4.6 MB mp3 into "upload failed". Signing the
+   * destination and letting the browser write to it directly removes that
+   * ceiling for every media type at once.
+   *
+   * The content type is signed in: S3 rejects a PUT whose header disagrees with
+   * the signature, which is what stops a signed URL being reused for anything
+   * other than the file it was issued for.
+   */
+  async signedUploadUrl(key: string, contentType: string, expiresInSeconds = 900): Promise<string> {
+    return getSignedUrl(
+      this.client,
+      new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType }),
+      { expiresIn: expiresInSeconds },
+    );
+  }
+
   async signedUrl(key: string, expiresInSeconds = 3600): Promise<string> {
     // A configured CDN base serves objects directly and skips the signature.
     if (env.S3_PUBLIC_BASE_URL) return `${env.S3_PUBLIC_BASE_URL.replace(/\/$/, '')}/${key}`;
