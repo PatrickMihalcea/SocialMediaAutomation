@@ -5,6 +5,9 @@ import { db } from '@/lib/db';
 import { describePlatforms, PLATFORM_LABELS } from '@/lib/social/registry';
 import { relativeLabel } from '@/lib/scheduling/time';
 import { disconnectChannelAction, reconnectDemoChannelAction } from '@/app/actions/channels';
+import { YoutubePrivacyField } from '@/components/youtube-privacy-field';
+import { isYoutubePrivacy } from '@/lib/social/adapters/youtube';
+import { env } from '@/lib/env';
 import { ConfirmationButton } from '@/components/action-ui';
 import { PlatformGlyph } from '@/components/visuals';
 import { DemoChannelConnectForm } from './channel-connect-form';
@@ -114,7 +117,9 @@ export default async function ChannelsPage({
 
       <div className="mt-8 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         {accounts.map((account) => {
-          const metadata = account.metadata as { mock?: boolean; accountType?: string; pageType?: string };
+          const metadata = account.metadata as {
+            mock?: boolean; accountType?: string; pageType?: string; privacyStatus?: unknown;
+          };
           const demo = metadata?.mock;
           const accountType = accountTypeLabel(metadata.accountType ?? metadata.pageType);
           const scheduledTargets = account._count.postPlatforms;
@@ -172,6 +177,21 @@ export default async function ChannelsPage({
                   <dd className="mt-1 text-sm">{account.lastSyncedAt ? relativeLabel(account.lastSyncedAt, ctx.workspace.timezone) : 'Awaiting first sync'}</dd>
                 </div>
               </dl>
+              {/* YouTube alone publishes at a visibility of its own, and it is
+                  a property of the channel rather than of a post — a test
+                  channel must never go public whatever is scheduled onto it. */}
+              {account.platform === 'YOUTUBE' && !demo && (
+                <div className="mt-5">
+                  <YoutubePrivacyField
+                    slug={slug}
+                    accountId={account.id}
+                    value={isYoutubePrivacy(metadata.privacyStatus)
+                      ? metadata.privacyStatus
+                      : env.YOUTUBE_PRIVACY_STATUS}
+                    disabled={!ctx.can('channel:connect')}
+                  />
+                </div>
+              )}
               <div className="mt-auto flex flex-wrap gap-2 pt-5">
                 {ctx.can('channel:connect') && account.status !== 'ACTIVE' && (demo ? (
                   <form action={reconnectDemoChannelAction.bind(null, slug, account.id)} className="shrink-0">

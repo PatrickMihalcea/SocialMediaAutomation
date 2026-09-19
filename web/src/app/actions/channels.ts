@@ -15,6 +15,7 @@ import { rateLimit, LIMITS } from '@/lib/rate-limit';
 import { reconcilePostStatus } from '@/lib/publishing/engine';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
 import { AppError, invalid, toAppError } from '@/lib/errors';
+import { isYoutubePrivacy } from '@/lib/social/adapters/youtube';
 
 export type ChannelActionState = ActionState & { billingHref?: string };
 
@@ -65,6 +66,36 @@ export async function connectDemoChannelAction(
   } catch (error) {
     return channelActionError(error, slug);
   }
+}
+
+/**
+ * Visibility for one YouTube channel's uploads.
+ *
+ * Merged into metadata rather than replacing it: the channel id YouTube needs
+ * on every upload lives in the same object, and writing the whole field would
+ * drop it.
+ */
+export async function setYoutubePrivacyAction(slug: string, accountId: string, formData: FormData) {
+  const ctx = await requireWorkspace(slug, 'channel:connect');
+  const chosen = formData.get('privacyStatus');
+  if (!isYoutubePrivacy(chosen)) throw new AppError('VALIDATION', 'Choose a visibility YouTube offers.');
+
+  const account = await db.socialAccount.findFirst({
+    where: { id: accountId, workspaceId: ctx.workspace.id, platform: 'YOUTUBE' },
+    select: { id: true, metadata: true },
+  });
+  if (!account) throw new AppError('NOT_FOUND', 'That channel is no longer connected.');
+
+  await db.socialAccount.update({
+    where: { id: account.id },
+    data: {
+      metadata: {
+        ...(account.metadata as Record<string, unknown>),
+        privacyStatus: chosen,
+      },
+    },
+  });
+  revalidatePath(`/w/${slug}/channels`);
 }
 
 export async function disconnectChannelAction(slug: string, accountId: string) {

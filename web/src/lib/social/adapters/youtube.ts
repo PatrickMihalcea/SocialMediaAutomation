@@ -194,7 +194,7 @@ export class YouTubeAdapter extends BaseAdapter {
         description: composeText(ctx.post).slice(0, this.capabilities.maxTextLength),
         tags: ctx.post.hashtags.map((h) => h.replace(/^#/, '')).slice(0, 30),
       },
-      status: { privacyStatus: env.YOUTUBE_PRIVACY_STATUS, selfDeclaredMadeForKids: false },
+      status: { privacyStatus: privacyFor(ctx.account), selfDeclaredMadeForKids: false },
     };
 
     // Read before opening the session, not after: the session is opened with a
@@ -319,4 +319,27 @@ export class YouTubeAdapter extends BaseAdapter {
     const profile = await this.getAccount(account);
     return { followers: profile.followers ?? null };
   }
+}
+
+/**
+ * Visibility for this channel's uploads.
+ *
+ * Per channel, not per deployment: a workspace can hold a main channel that
+ * publishes publicly and a test channel that must not, and one environment
+ * variable cannot describe both. YOUTUBE_PRIVACY_STATUS remains the fallback,
+ * so a channel connected before this setting existed keeps what it had.
+ *
+ * Not read from the post: visibility belongs to the channel, and a per-post
+ * control is a switch somebody forgets to set back.
+ */
+export function privacyFor(account: { metadata: Record<string, unknown> }): YoutubePrivacy {
+  const chosen = account.metadata?.privacyStatus;
+  return isYoutubePrivacy(chosen) ? chosen : env.YOUTUBE_PRIVACY_STATUS;
+}
+
+export const YOUTUBE_PRIVACY_OPTIONS = ['public', 'unlisted', 'private'] as const;
+export type YoutubePrivacy = (typeof YOUTUBE_PRIVACY_OPTIONS)[number];
+
+export function isYoutubePrivacy(value: unknown): value is YoutubePrivacy {
+  return typeof value === 'string' && (YOUTUBE_PRIVACY_OPTIONS as readonly string[]).includes(value);
 }
