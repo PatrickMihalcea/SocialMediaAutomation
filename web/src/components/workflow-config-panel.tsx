@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useEffect, useMemo, useState, useTransition } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { CircleHelp, X } from 'lucide-react';
 import { z } from 'zod';
@@ -446,6 +446,31 @@ export function NodeConfigPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSnapshot, canEdit, pending, savedSnapshot, openedSnapshot, failedSnapshot]);
 
+  /**
+   * The edit that was still inside the debounce when the panel closed.
+   *
+   * The timeout above is cleared by its own cleanup, and unmounting runs that
+   * cleanup too — so selecting another step, or closing the panel, within
+   * 700ms of the last keystroke threw the edit away. Pasting a theme pool and
+   * clicking straight off is exactly that, and the panel reopened on the old
+   * value with nothing said. This is the flush: on the way out, if what is on
+   * screen was never saved, save it.
+   *
+   * Deliberately fire-and-forget. There is no component left to tell about the
+   * result, and the alternative — blocking the close until a request returns —
+   * is a settings panel that hangs when the network is slow.
+   */
+  const flushRef = useRef<() => void>(() => {});
+  flushRef.current = () => {
+    if (!canEdit) return;
+    const unsaved = savedSnapshot === null
+      ? currentSnapshot !== openedSnapshot
+      : currentSnapshot !== savedSnapshot;
+    if (!unsaved || currentSnapshot === failedSnapshot) return;
+    void persist(snapshotOf(name, config), normalizeNodeConfig(node.type, config));
+  };
+  useEffect(() => () => flushRef.current(), []);
+
   if (!definition) {
     return (
       <div className="rounded-lg border border-hairline p-6">
@@ -522,23 +547,28 @@ export function NodeConfigPanel({
 
     startTransition(async () => {
       try {
-        // The connection wins at run time, so a typed value only takes effect
-        // once its edge is gone. Dropped first: a save that left both in place
-        // would show the typed text in the panel and keep running the wire.
-        for (const connection of overriddenConnections) {
-          if (!(await onDisconnect(connection.edgeId))) {
-            setError(`The connection from ${connection.sourceLabel} could not be removed.`);
-            return;
-          }
-        }
-        const updated = await updateNodeAction(slug, node.id, { name, config: payload });
-        onSaved(updated as unknown as CanvasNode);
+        await persist(snapshot, payload);
         setSavedSnapshot(snapshot);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'Those settings could not be saved.');
         setFailedSnapshot(snapshot);
       }
     });
+  }
+
+  /** The write itself, with no component state in it, so the flush can use it too. */
+  async function persist(snapshot: string, payload: Record<string, unknown>) {
+    // The connection wins at run time, so a typed value only takes effect once
+    // its edge is gone. Dropped first: a save that left both in place would
+    // show the typed text in the panel and keep running the wire.
+    for (const connection of overriddenConnections) {
+      if (!(await onDisconnect(connection.edgeId))) {
+        throw new Error(`The connection from ${connection.sourceLabel} could not be removed.`);
+      }
+    }
+    const updated = await updateNodeAction(slug, node.id, { name, config: payload });
+    onSaved(updated as unknown as CanvasNode);
+    return snapshot;
   }
 
   /**
@@ -813,6 +843,7 @@ export function NodeConfigPanel({
           hint={showHelp ? field.description : undefined}
           themes={Array.isArray(value) ? (value as unknown[]).filter((entry): entry is string => typeof entry === 'string') : []}
           images={(config.themeImages as Record<string, string>) ?? {}}
+          folders={mediaFolders}
           disabled={!canEdit}
           onChangeThemes={(themes) => setConfig((c) => ({ ...c, themePool: themes }))}
           onChangeImages={(themeImages) => setConfig((c) => ({ ...c, themeImages }))}
