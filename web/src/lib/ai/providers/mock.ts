@@ -51,7 +51,12 @@ export class MockAiProvider implements AiProvider {
     };
   }
 
-  async generateImage(input: { prompt: string; size?: string }): Promise<AiImageResult> {
+  /** `reference` is accepted and ignored — the placeholder has no layout to follow. */
+  async generateImage(input: {
+    prompt: string;
+    size?: string;
+    reference?: { data: Buffer; mimeType: string };
+  }): Promise<AiImageResult> {
     const [w, h] = parseSize(input.size);
     return {
       data: await rasterize(placeholderSvg(input.prompt, w, h), w, h),

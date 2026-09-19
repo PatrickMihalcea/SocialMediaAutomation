@@ -162,7 +162,20 @@ export class OpenAiProvider implements AiProvider {
     }
   }
 
-  async generateImage(input: { prompt: string; size?: ImageSize }): Promise<AiImageResult> {
+  /**
+   * `reference` is accepted and ignored.
+   *
+   * images.generate has no composition-reference parameter, and images.edit is
+   * a different operation — it works from the input's pixels rather than
+   * treating them as a layout to follow, which on a rough sketch returns a
+   * tidied-up sketch. Generating from the prompt alone is the honest behaviour;
+   * the step's help says so, so nobody wires one expecting it to bite here.
+   */
+  async generateImage(input: {
+    prompt: string;
+    size?: ImageSize;
+    reference?: { data: Buffer; mimeType: string };
+  }): Promise<AiImageResult> {
     const size = input.size ?? '1024x1024';
     // Refused rather than quietly reshaped. This API has no 9:16, and silently
     // substituting 2:3 would hand the video steps a frame that needs cropping

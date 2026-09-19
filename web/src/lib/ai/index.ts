@@ -113,6 +113,8 @@ export async function generateImage(input: {
   userId: string;
   prompt: string;
   size?: ImageSize;
+  /** Advisory layout for providers that can follow one; see AiProvider. */
+  reference?: { data: Buffer; mimeType: string };
   /** Per-call choice of source; omitted means the deployment's configured one. */
   provider?: ImageProviderName;
 }): Promise<AiImageResult & { generationId: string }> {
@@ -120,7 +122,11 @@ export async function generateImage(input: {
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);
   const provider = imageProvider(input.provider);
   try {
-    const result = await provider.generateImage({ prompt: input.prompt, size: input.size });
+    const result = await provider.generateImage({
+      prompt: input.prompt,
+      size: input.size,
+      reference: input.reference,
+    });
     const generation = await recordGeneration({
       workspaceId: input.workspaceId,
       userId: input.userId,

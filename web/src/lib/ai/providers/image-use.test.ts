@@ -180,6 +180,35 @@ describe('ImageUseProvider', () => {
     }
   });
 
+  /**
+   * composition-ref, not ref: the sketch supplies framing and placement, and
+   * passing it as a plain reference would have the CLI render the sketch's
+   * subject instead of the prompt's.
+   */
+  it('passes a layout reference as a composition reference', async () => {
+    process.env.FAKE_MODE = 'ok';
+    await new ImageUseProvider().generateImage({
+      prompt: 'a villa on a cliff',
+      reference: { data: Buffer.from('89504e470d0a1a0a', 'hex'), mimeType: 'image/png' },
+    });
+
+    const argv = lastArgv();
+    const flag = argv.indexOf('--composition-ref');
+    expect(flag).toBeGreaterThan(-1);
+    expect(argv).not.toContain('--ref');
+    // A real extension, because the CLI reads the format from it.
+    expect(argv[flag + 1]).toMatch(/\.png$/);
+    // Before the `--`, so it is a flag and not part of the prompt.
+    expect(flag).toBeLessThan(argv.indexOf('--'));
+  });
+
+  it('asks for no reference when none is wired in', async () => {
+    process.env.FAKE_MODE = 'ok';
+    await new ImageUseProvider().generateImage({ prompt: 'a villa on a cliff' });
+
+    expect(lastArgv()).not.toContain('--composition-ref');
+  });
+
   it('marks a rate-limited run retryable and a misconfigured one not', async () => {
     process.env.FAKE_MODE = 'fail';
     process.env.FAKE_STDERR = "chatgpt.com rate-limited this account ('Too many requests')";

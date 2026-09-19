@@ -1,6 +1,6 @@
 import 'server-only';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { env } from '@/lib/env';
@@ -72,7 +72,11 @@ export class ImageUseProvider implements AiProvider {
     throw new AiError('The image-use provider generates images only; set AI_PROVIDER for text.');
   }
 
-  async generateImage(input: { prompt: string; size?: ImageSize }): Promise<AiImageResult> {
+  async generateImage(input: {
+    prompt: string;
+    size?: ImageSize;
+    reference?: { data: Buffer; mimeType: string };
+  }): Promise<AiImageResult> {
     const { command, leading, timeoutMs } = config();
     const format = env.IMAGE_USE_FORMAT;
 
@@ -81,10 +85,24 @@ export class ImageUseProvider implements AiProvider {
     const directory = await mkdtemp(join(tmpdir(), 'image-use-'));
     const requested = join(directory, `image.${format}`);
 
+    // Written into the same directory, so the one cleanup below covers it.
+    let referencePath: string | undefined;
+    if (input.reference) {
+      referencePath = join(directory, `reference.${extensionFor(input.reference.mimeType)}`);
+      await writeFile(referencePath, input.reference.data);
+    }
+
     try {
       const result = await run(
         command,
-        [...leading, ...cliArgs({ out: requested, format, size: input.size, timeoutMs, prompt: input.prompt })],
+        [...leading, ...cliArgs({
+          out: requested,
+          format,
+          size: input.size,
+          timeoutMs,
+          prompt: input.prompt,
+          compositionRef: referencePath,
+        })],
         // The CLI's own --timeout starts only once it holds a concurrency slot,
         // so this outer deadline has to cover the queue wait in front of it as
         // well. It is a backstop against the CLI itself wedging, not the budget.
@@ -152,6 +170,7 @@ function cliArgs(input: {
   size?: ImageSize;
   timeoutMs: number;
   prompt: string;
+  compositionRef?: string;
 }): string[] {
   const args = [
     '--quiet',
@@ -167,6 +186,10 @@ function cliArgs(input: {
   // Unlike a UI, the CLI takes the shape as an argument — so the prompt stays
   // the brief and nothing has to ask for a ratio in words.
   if (input.size) args.push('--size', input.size);
+  // composition-ref, not --ref: the sketch supplies framing, crop and camera
+  // angle, and must not be read as the subject to render. The CLI documents
+  // this as "keep a layout while replacing the subject", which is the job.
+  if (input.compositionRef) args.push('--composition-ref', input.compositionRef);
   for (const style of env.IMAGE_USE_STYLE.split(',').map((name) => name.trim()).filter(Boolean)) {
     args.push('--style', style);
   }
@@ -300,4 +323,11 @@ function reportedUsage(stderr: string): { promptTokens?: number; completionToken
 
 function extensionOf(path: string): string {
   return path.split('.').pop()?.toLowerCase() ?? '';
+}
+
+/** The CLI reads the format from the extension, so a reference needs a real one. */
+function extensionFor(mimeType: string): string {
+  if (mimeType.includes('jpeg') || mimeType.includes('jpg')) return 'jpg';
+  if (mimeType.includes('webp')) return 'webp';
+  return 'png';
 }

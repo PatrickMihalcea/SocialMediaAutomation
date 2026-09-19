@@ -99,7 +99,18 @@ export interface AiProvider {
     temperature?: number;
   }): Promise<AiObjectResult<T>>;
 
-  generateImage(input: { prompt: string; size?: ImageSize }): Promise<AiImageResult>;
+  generateImage(input: {
+    prompt: string;
+    size?: ImageSize;
+    /**
+     * A rough layout to follow — a sketch, a blocking, an existing frame.
+     *
+     * Advisory: only a provider with a composition-reference mechanism can act
+     * on it, and the others generate from the prompt alone rather than failing.
+     * Never the subject of the image; it supplies framing and placement.
+     */
+    reference?: { data: Buffer; mimeType: string };
+  }): Promise<AiImageResult>;
 }
 
 export class AiError extends Error {
