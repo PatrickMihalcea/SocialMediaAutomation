@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { renderTextOverlayLabels } from '@/lib/workflows/text-overlay-template';
+import {
+  inferOverlayStructure,
+  overlayPatterns,
+  renderTextOverlayLabels,
+  type OverlayStructure,
+} from '@/lib/workflows/text-overlay-template';
 
 describe('text overlay templates', () => {
   it('numbers the cuts from one when there is no opening card', () => {
@@ -91,9 +96,81 @@ describe('text overlay templates', () => {
 
   it('drops a title token to nothing when no title is connected', () => {
     expect(renderTextOverlayLabels(
-      '{index}. {title}',
+      '{index}: {title}',
       null,
       [{ index: 0, title: null }],
-    )).toEqual(['1.']);
+    )).toEqual(['1:']);
+  });
+
+  it('strips a file extension from a title burnt onto a cut', () => {
+    expect(renderTextOverlayLabels(
+      '{title}',
+      null,
+      [{ index: 0, title: 'canopy-house.png' }],
+    )).toEqual(['canopy-house']);
+  });
+});
+
+describe('overlay structure', () => {
+  const cuts = [
+    { index: 0, title: 'Canopy house.png' },
+    { index: 1, title: 'Pine house' },
+    { index: 2, title: 'Glass cabin' },
+  ];
+
+  function labels(structure: OverlayStructure, opening = 'Which would you choose?') {
+    const patterns = overlayPatterns(structure, opening);
+    return renderTextOverlayLabels(patterns.rest, patterns.first, cuts);
+  }
+
+  it('numbers every cut', () => {
+    expect(labels('numbered')).toEqual(['1', '2', '3']);
+  });
+
+  it('shows opening text only on the first cut', () => {
+    expect(labels('opening-only')).toEqual(['Which would you choose?', '', '']);
+  });
+
+  it('repeats opening text on every cut', () => {
+    expect(labels('opening-always')).toEqual([
+      'Which would you choose?',
+      'Which would you choose?',
+      'Which would you choose?',
+    ]);
+  });
+
+  it('shows titles without a file extension', () => {
+    expect(labels('titles')).toEqual(['Canopy house', 'Pine house', 'Glass cabin']);
+  });
+
+  it('opens then numbers', () => {
+    expect(labels('opening-numbered')).toEqual(['Which would you choose?', '1', '2']);
+  });
+
+  it('numbers every cut with a colon and title', () => {
+    expect(labels('numbered-title')).toEqual([
+      '1: Canopy house',
+      '2: Pine house',
+      '3: Glass cabin',
+    ]);
+  });
+
+  it('opens then numbers with a colon and title', () => {
+    expect(labels('opening-numbered-title')).toEqual([
+      'Which would you choose?',
+      '1: Pine house',
+      '2: Glass cabin',
+    ]);
+  });
+
+  it('infers opening-numbered from a saved template plus opening line', () => {
+    expect(inferOverlayStructure({
+      template: '{index}',
+      firstTemplate: 'Which treehouse would you choose?',
+    })).toBe('opening-numbered');
+  });
+
+  it('infers numbered-title from the retired number-and-title template', () => {
+    expect(inferOverlayStructure({ template: '{index}. {title}' })).toBe('numbered-title');
   });
 });

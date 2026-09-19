@@ -17,11 +17,18 @@ import { fitFontSize, wrapLabel } from '@/lib/render/fonts';
 import type { BeatSegment } from '@/lib/render/types';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
 import { connectedText } from '@/lib/workflows/connected-text';
-import { renderTextOverlayLabels } from '@/lib/workflows/text-overlay-template';
+import {
+  inferOverlayStructure,
+  isOverlayStructure,
+  overlayPatterns,
+  renderTextOverlayLabels,
+  type OverlayStructure,
+} from '@/lib/workflows/text-overlay-template';
 
 const run_ = promisify(execFile);
 
 interface Config {
+  structure: OverlayStructure;
   template: string;
   firstTemplate: string | null;
   font: string;
@@ -68,13 +75,17 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   // Either template can be written upstream instead of typed here, so an
   // opening line can be generated per run. Tokens are still expanded, because
   // the text is a template wherever it came from.
-  const template = connectedText(ctx.inputs.template) || config.template;
-  const firstTemplate = connectedText(ctx.inputs.firstTemplate) || config.firstTemplate;
-  const labels = renderTextOverlayLabels(template, firstTemplate, segments);
+  const opening = connectedText(ctx.inputs.firstTemplate) || config.firstTemplate || '';
+  const structure = isOverlayStructure(config.structure)
+    ? config.structure
+    : inferOverlayStructure(config);
+  const patterns = overlayPatterns(structure, opening);
+  const rest = connectedText(ctx.inputs.template) || patterns.rest;
+  const labels = renderTextOverlayLabels(rest, patterns.first, segments);
 
   const fontSizes = overlayFontSizes({
     labels,
-    hasOpening: Boolean(firstTemplate),
+    hasOpening: patterns.first !== null,
     configuredSize: config.fontSize,
     font: config.font,
     width,
@@ -152,8 +163,9 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
         // what actually produced these labels.
         derivationPreset: JSON.stringify({
           kind: 'text-overlay',
-          template,
-          firstTemplate,
+          structure,
+          template: rest,
+          firstTemplate: patterns.first,
           labels,
         }),
       },
