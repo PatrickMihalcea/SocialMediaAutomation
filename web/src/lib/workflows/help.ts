@@ -350,6 +350,7 @@ export const WORKFLOW_FIELD_HELP: Partial<
           ['opening-always', 'Opening text always'],
           ['titles', 'Titles'],
           ['opening-numbered', 'Opening text, numbered'],
+          ['opening-titles', 'Opening text, titles'],
           ['numbered-title', 'Numbered: Title'],
           ['opening-numbered-title', 'Opening text, numbered: Title'],
         ],

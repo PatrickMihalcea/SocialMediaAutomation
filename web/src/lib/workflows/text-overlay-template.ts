@@ -4,6 +4,7 @@ export const OVERLAY_STRUCTURES = [
   'opening-always',
   'titles',
   'opening-numbered',
+  'opening-titles',
   'numbered-title',
   'opening-numbered-title',
 ] as const;
@@ -20,6 +21,7 @@ export function overlayUsesOpening(structure: OverlayStructure): boolean {
     structure === 'opening-only'
     || structure === 'opening-always'
     || structure === 'opening-numbered'
+    || structure === 'opening-titles'
     || structure === 'opening-numbered-title'
   );
 }
@@ -47,6 +49,8 @@ export function overlayPatterns(
       return { first: null, rest: '{title}' };
     case 'opening-numbered':
       return { first: opening || null, rest: '{index}' };
+    case 'opening-titles':
+      return { first: opening || null, rest: '{title}' };
     case 'numbered-title':
       return { first: null, rest: '{index}: {title}' };
     case 'opening-numbered-title':
@@ -75,6 +79,7 @@ export function inferOverlayStructure(config: {
 
   if (opening && template === '') return 'opening-only';
   if (opening && isNumberedTitle(template)) return 'opening-numbered-title';
+  if (opening && template === '{title}') return 'opening-titles';
   if (opening) return 'opening-numbered';
   if (template === '{title}') return 'titles';
   if (isNumberedTitle(template)) return 'numbered-title';

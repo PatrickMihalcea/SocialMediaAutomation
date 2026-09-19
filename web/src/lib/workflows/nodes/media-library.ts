@@ -58,6 +58,10 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     // Humanised with the same function the media library renders names through,
     // so a label burnt onto a video reads as the file the user recognises rather
     // than as "oak-loft-bedroom-1789357101163.png".
+    // `titles` is the name every other step emits, which is what lets the
+    // ride-along carry these with the images. `imageTitles` stays beside it so
+    // an edge saved from the old port still resolves.
+    titles: images.map((asset) => humanizeMachineValue(asset.filename)),
     imageTitles: images.map((asset) => humanizeMachineValue(asset.filename)),
   };
 }

@@ -24,7 +24,10 @@ interface Config {
 export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>> {
   const config = ctx.config as Config;
   const items = Array.isArray(ctx.inputs.items) ? ctx.inputs.items : [];
-  const labels = Array.isArray(ctx.inputs.labels) ? ctx.inputs.labels.map(String) : null;
+  // Either name: they ride in as `titles` with the items, and an edge saved
+  // from the old Titles port still delivers them as `labels`.
+  const incoming = ctx.inputs.titles ?? ctx.inputs.labels;
+  const labels = Array.isArray(incoming) ? incoming.map(String) : null;
   if (items.length === 0) throw new PermanentJobError('Nothing reached this step to select from.');
 
   // A mismatched label list is a wiring mistake. Trimming or padding to fit
@@ -48,6 +51,11 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     return {
       item: selection[0],
       selection,
+      // Reordered with the selection so each title stays on its own item.
+      // Emitted under both names: `titles` is what every other step calls them
+      // and what the ride-along looks for, `labels` keeps an edge saved from
+      // the old port resolving.
+      titles: labels ? positions.map((position) => labels[position]) : [],
       labels: labels ? positions.map((position) => labels[position]) : [],
     };
   } catch (error) {

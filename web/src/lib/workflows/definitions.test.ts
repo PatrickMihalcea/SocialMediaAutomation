@@ -109,13 +109,10 @@ describe('node catalogue', () => {
   it('keeps legacy and mixed-media pipeline contracts compatible', () => {
     const path: [string, string, string, string][] = [
       ['IDEA_GENERATOR', 'prompts', 'IMAGE_GENERATOR', 'prompts'],
-      ['IDEA_GENERATOR', 'titles', 'IMAGE_GENERATOR', 'titles'],
       ['IDEA_GENERATOR', 'postTitle', 'PUBLISH', 'title'],
       ['IMAGE_GENERATOR', 'images', 'COMBINE_MEDIA', 'media1'],
-      ['IMAGE_GENERATOR', 'titles', 'COMBINE_MEDIA', 'titles1'],
       ['MEDIA_LIBRARY', 'videos', 'COMBINE_MEDIA', 'media2'],
       ['COMBINE_MEDIA', 'media', 'BEAT_SLIDESHOW', 'images'],
-      ['COMBINE_MEDIA', 'titles', 'BEAT_SLIDESHOW', 'titles'],
       ['MUSIC_SELECTOR', 'audio', 'BEAT_SLIDESHOW', 'audio'],
       ['BEAT_SLIDESHOW', 'video', 'TEXT_OVERLAY', 'video'],
       ['TEXT_OVERLAY', 'video', 'CREATE_DRAFT', 'video'],
@@ -232,49 +229,35 @@ describe('node catalogue', () => {
    * connection, so a port rename that quietly breaks the chain fails here
    * rather than in a run someone has to watch to catch.
    */
-  it('lets an image name travel from the library to a cut label', () => {
-    const port = (type: string, side: 'inputs' | 'outputs', id: string) =>
-      getDefinition(type)![side].find((candidate) => candidate.id === id)!;
-
-    const hops: [string, string][] = [
-      ['MEDIA_LIBRARY.imageTitles', 'PICK.labels'],
-      ['PICK.labels', 'BEAT_SLIDESHOW.titles'],
-      ['MEDIA_LIBRARY.imageTitles', 'BEAT_SLIDESHOW.titles'],
-    ];
-    for (const [from, to] of hops) {
-      const [sourceType, sourcePort] = from.split('.');
-      const [targetType, targetPort] = to.split('.');
-      expect(
-        checkCompatible(
-          port(sourceType, 'outputs', sourcePort).type,
-          port(targetType, 'inputs', targetPort).type,
-        ),
-      ).toBeNull();
+  /**
+   * Titles used to be wired: MEDIA_LIBRARY.imageTitles to PICK.labels to
+   * BEAT_SLIDESHOW.titles, three connections nobody could see were missing
+   * until the cuts came out unlabelled. They ride with the media now, so the
+   * contract is that no step offers a port for them at all.
+   */
+  it('gives titles no port anywhere, because they travel with the media', () => {
+    for (const type of ['IDEA_GENERATOR', 'IMAGE_GENERATOR', 'MEDIA_LIBRARY', 'PICK', 'COMBINE_MEDIA', 'BEAT_SLIDESHOW']) {
+      const definition = getDefinition(type)!;
+      const ports = [...definition.inputs, ...definition.outputs].map((port) => port.id);
+      expect(ports.filter((id) => /^(titles|labels|imageTitles)/.test(id)), `${type}`).toEqual([]);
     }
   });
 
   // The labels port is a plain text list on both sides: it must not follow the
   // items input, or connecting a media list would retype it as media.
-  it('carries labels alongside a selection without adopting the item type', () => {
+  it('selects items without a second list to keep in step with them', () => {
     const pick = getDefinition('PICK')!;
-    const input = pick.inputs.find((port) => port.id === 'labels')!;
-    const output = pick.outputs.find((port) => port.id === 'labels')!;
 
-    expect(input.required).toBeUndefined();
-    expect(input.type).toEqual({ scalar: 'text', list: true });
-    expect(output.type).toEqual({ scalar: 'text', list: true });
-    expect(output.followsInput).toBeUndefined();
+    expect(pick.inputs.map((port) => port.id)).toEqual(['items']);
+    expect(pick.outputs.map((port) => port.id)).toEqual(['item', 'selection']);
   });
 
   it('loads library media and defaults selection compatibly with old Pick nodes', () => {
     const source = getDefinition('MEDIA_LIBRARY')!;
-    expect(source.outputs.map((port) => port.id)).toEqual([
-      'images', 'videos', 'audio', 'imageTitles',
-    ]);
+    expect(source.outputs.map((port) => port.id)).toEqual(['images', 'videos', 'audio']);
     // Every one is a list, so a Select items step is still required before any
-    // single-item input — including for the titles.
+    // single-item input.
     expect(source.outputs.every((port) => port.type.list)).toBe(true);
-    expect(source.outputs.find((port) => port.id === 'imageTitles')!.type.scalar).toBe('text');
     expect(parseConfig('MEDIA_LIBRARY', {})).toEqual({
       folderId: null,
       assetId: null,

@@ -147,6 +147,21 @@ describe('overlay structure', () => {
     expect(labels('opening-numbered')).toEqual(['Which would you choose?', '1', '2']);
   });
 
+  it('opens then shows each image title', () => {
+    expect(labels('opening-titles')).toEqual([
+      'Which would you choose?',
+      'Pine house',
+      'Glass cabin',
+    ]);
+  });
+
+  it('infers opening-titles from a saved title template plus an opening line', () => {
+    expect(inferOverlayStructure({
+      template: '{title}',
+      firstTemplate: 'Which would you choose?',
+    })).toBe('opening-titles');
+  });
+
   it('numbers every cut with a colon and title', () => {
     expect(labels('numbered-title')).toEqual([
       '1: Canopy house',

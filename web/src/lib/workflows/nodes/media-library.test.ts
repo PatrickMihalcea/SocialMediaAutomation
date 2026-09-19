@@ -49,6 +49,7 @@ describe('media library workflow source', () => {
       images: ['image-1'],
       videos: ['video-1'],
       audio: ['audio-1'],
+      titles: ['Oak loft bedroom'],
       imageTitles: ['Oak loft bedroom'],
     });
     expect(dbMock.mediaAsset.findMany).toHaveBeenCalledWith(
@@ -73,6 +74,10 @@ describe('media library workflow source', () => {
     expect(output.images).toEqual(['image-1', 'image-2']);
     // Non-image assets sit between them in the query, and must not shift the
     // titles off their images.
+    // Both names: `titles` is what every other step emits and what the
+    // ride-along carries, `imageTitles` keeps an edge saved from the old port
+    // resolving.
+    expect(output.titles).toEqual(['The attic suite', 'Garden room']);
     expect(output.imageTitles).toEqual(['The attic suite', 'Garden room']);
   });
 
@@ -96,6 +101,7 @@ describe('media library workflow source', () => {
       images: [],
       videos: ['video-1'],
       audio: [],
+      titles: [],
       imageTitles: [],
     });
     expect(dbMock.mediaFolder.findMany).not.toHaveBeenCalled();

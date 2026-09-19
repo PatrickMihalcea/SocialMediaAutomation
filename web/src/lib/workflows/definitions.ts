@@ -173,12 +173,6 @@ export const NODE_DEFINITIONS = {
     outputs: [
       { id: 'prompts', label: 'Prompts', type: text(true) },
       {
-        id: 'titles',
-        label: 'Titles',
-        type: text(true),
-        description: 'Short titles that can be shown by a text overlay.',
-      },
-      {
         id: 'postTitle',
         label: 'Post title',
         type: text(),
@@ -271,16 +265,9 @@ export const NODE_DEFINITIONS = {
     icon: 'image',
     inputs: [
       { id: 'prompts', label: 'Prompts', type: text(true), required: true },
-      {
-        id: 'titles',
-        label: 'Titles',
-        type: text(true),
-        description: 'Arrives with the prompts when they come from an Idea generator; connect one only to name the images from somewhere else.',
-      },
     ],
     outputs: [
       { id: 'images', label: 'Images', type: media([...IMAGES], true) },
-      { id: 'titles', label: 'Titles', type: text(true) },
     ],
     configSchema: z.object({
       size: z.enum(IMAGE_SIZE_VALUES).default(DEFAULT_IMAGE_SIZE),
@@ -341,13 +328,6 @@ export const NODE_DEFINITIONS = {
       { id: 'images', label: 'Images', type: media([...IMAGES], true) },
       { id: 'videos', label: 'Videos', type: media([...VIDEOS], true) },
       { id: 'audio', label: 'Audio', type: media([...AUDIO], true) },
-      {
-        id: 'imageTitles',
-        label: 'Titles',
-        type: text(true),
-        description:
-          'The images\u2019 filenames, tidied up, in the same order. Feed a slideshow\u2019s titles to label each cut.',
-      },
     ],
     configSchema: z.object({
       /** Empty means the whole workspace library. */
@@ -408,12 +388,6 @@ export const NODE_DEFINITIONS = {
     inputs: [
       { id: 'images', label: 'Media', type: media([...IMAGES, ...VIDEOS], true), required: true },
       { id: 'audio', label: 'Audio', type: media([...AUDIO]), required: true },
-      {
-        id: 'titles',
-        label: 'Titles',
-        type: text(true),
-        description: 'Optional labels carried into each cut for a text overlay.',
-      },
     ],
     // The cut points travel with the video rather than on a port of their own:
     // they describe this video, and a step given the video can read them back.
@@ -430,17 +404,12 @@ export const NODE_DEFINITIONS = {
     icon: 'list-plus',
     inputs: [
       { id: 'media1', label: 'Media 1', type: media([...IMAGES, ...VIDEOS], true), required: true },
-      { id: 'titles1', label: 'Titles 1', type: text(true) },
       { id: 'media2', label: 'Media 2', type: media([...IMAGES, ...VIDEOS], true) },
-      { id: 'titles2', label: 'Titles 2', type: text(true) },
       { id: 'media3', label: 'Media 3', type: media([...IMAGES, ...VIDEOS], true) },
-      { id: 'titles3', label: 'Titles 3', type: text(true) },
       { id: 'media4', label: 'Media 4', type: media([...IMAGES, ...VIDEOS], true) },
-      { id: 'titles4', label: 'Titles 4', type: text(true) },
     ],
     outputs: [
       { id: 'media', label: 'Media', type: media([...IMAGES, ...VIDEOS], true) },
-      { id: 'titles', label: 'Titles', type: text(true) },
     ],
     configSchema: z.object({
       sourceOrder: z
@@ -474,6 +443,7 @@ export const NODE_DEFINITIONS = {
         'opening-always',
         'titles',
         'opening-numbered',
+        'opening-titles',
         'numbered-title',
         'opening-numbered-title',
       ]).default('numbered'),
@@ -510,13 +480,6 @@ export const NODE_DEFINITIONS = {
         type: media([...IMAGES, ...VIDEOS, ...AUDIO], true),
         required: true,
       },
-      {
-        id: 'labels',
-        label: 'Titles',
-        type: text(true),
-        description:
-          'Optional titles belonging to the items, one per item. They are reordered with the selection so each title stays on its own item.',
-      },
     ],
     outputs: [
       {
@@ -536,12 +499,6 @@ export const NODE_DEFINITIONS = {
         type: media([...IMAGES, ...VIDEOS, ...AUDIO], true),
         followsInput: 'items',
         description: 'Every selected item, for steps that take a list.',
-      },
-      {
-        id: 'labels',
-        label: 'Titles',
-        type: text(true),
-        description: 'The incoming titles, cut down and reordered to match the selection.',
       },
     ],
     configSchema: z.object({
