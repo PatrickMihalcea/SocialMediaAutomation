@@ -20,7 +20,13 @@ vi.mock('@/lib/db', () => ({
 }));
 vi.mock('@/lib/workflows/engine', () => ({ startWorkflowRun: mocks.startWorkflowRun }));
 
-import { computeNextRun, retimeWorkflows, scanDueWorkflows } from '@/lib/workflows/schedule';
+import {
+  computeNextRun,
+  hourMinuteOf,
+  retimeWorkflows,
+  scanDueWorkflows,
+  scheduleTimesOf,
+} from '@/lib/workflows/schedule';
 
 const MONDAY = new Date('2026-09-14T00:00:00Z');
 
@@ -123,5 +129,66 @@ describe('scanDueWorkflows', () => {
     const [claim] = mocks.workflowUpdateMany.mock.calls[0];
     expect(claim.data.nextRunAt.toISOString()).toBe('2026-09-14T06:00:00.000Z');
     expect(mocks.startWorkflowRun).toHaveBeenCalledOnce();
+  });
+});
+
+describe('several times a day', () => {
+  const base = {
+    scheduleEnabled: true,
+    scheduleWeekdays: [1],
+    scheduleHour: 9,
+    scheduleMinute: 0,
+    timezone: 'Europe/Bucharest',
+  };
+
+  it('takes the soonest slot across every time on every day', () => {
+    // Monday 09:00 and 18:30, asked at midnight UTC — which is 03:00 local.
+    const next = computeNextRun({ ...base, scheduleTimes: [9 * 60, 18 * 60 + 30] }, MONDAY);
+
+    expect(next?.toISOString()).toBe('2026-09-14T06:00:00.000Z');
+  });
+
+  it('moves to the later slot once the first has passed', () => {
+    const afterMorning = new Date('2026-09-14T08:00:00Z'); // 11:00 in Bucharest
+
+    const next = computeNextRun({ ...base, scheduleTimes: [9 * 60, 18 * 60 + 30] }, afterMorning);
+
+    expect(next?.toISOString()).toBe('2026-09-14T15:30:00.000Z');
+  });
+
+  it('wraps to the first slot of the next chosen day after the last one', () => {
+    const afterEvening = new Date('2026-09-14T16:00:00Z'); // 19:00 in Bucharest
+
+    const next = computeNextRun(
+      { ...base, scheduleWeekdays: [1, 3], scheduleTimes: [9 * 60, 18 * 60 + 30] },
+      afterEvening,
+    );
+
+    expect(next?.toISOString()).toBe('2026-09-16T06:00:00.000Z');
+  });
+
+  /**
+   * Every row written before times were a list has an empty column, and rows
+   * are still written that way by anything setting only the pair. Falling back
+   * is what keeps those firing at the time they say rather than at midnight.
+   */
+  it('falls back to the single hour and minute when no times are stored', () => {
+    const next = computeNextRun({ ...base, scheduleTimes: [] }, MONDAY);
+
+    expect(next?.toISOString()).toBe('2026-09-14T06:00:00.000Z');
+  });
+
+  it('ignores a repeated time rather than scheduling it twice', () => {
+    expect(scheduleTimesOf({ scheduleTimes: [540, 540, 60], scheduleHour: 9, scheduleMinute: 0 }))
+      .toEqual([60, 540]);
+  });
+
+  it('drops a time outside the day, which cannot be a wall-clock slot', () => {
+    expect(scheduleTimesOf({ scheduleTimes: [1440, -1, 600], scheduleHour: 9, scheduleMinute: 0 }))
+      .toEqual([600]);
+  });
+
+  it('reads minutes back as the pair a clock is written in', () => {
+    expect(hourMinuteOf(18 * 60 + 30)).toEqual({ hour: 18, minute: 30 });
   });
 });

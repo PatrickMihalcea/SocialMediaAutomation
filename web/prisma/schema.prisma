@@ -1212,6 +1212,13 @@ model Workflow {
   /// rather than introducing a cron expression and a parser to go with it.
   scheduleEnabled  Boolean   @default(false) @map("schedule_enabled")
   scheduleWeekdays Int[]     @default([]) @map("schedule_weekdays")
+  /// Times of day to run on each chosen weekday, as minutes past midnight.
+  /// A list because one workflow often wants a morning and an evening slot,
+  /// and two workflows with the same graph was the only way to say that.
+  scheduleTimes    Int[]     @default([]) @map("schedule_times")
+  /// The earliest of scheduleTimes, kept in step with it. Still written so a
+  /// deploy that lands before this migration — or rolls back after it — reads
+  /// a schedule that means something rather than midnight.
   scheduleHour     Int       @default(9) @map("schedule_hour")
   scheduleMinute   Int       @default(0) @map("schedule_minute")
   timezone         String    @default("UTC")

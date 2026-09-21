@@ -215,3 +215,30 @@ export const COMMON_TIMEZONES = [
 export function timezoneOptions(current: string): string[] {
   return COMMON_TIMEZONES.includes(current) ? COMMON_TIMEZONES : [current, ...COMMON_TIMEZONES];
 }
+
+export const MAX_SCHEDULE_TIMES = 12;
+
+/**
+ * The times of day a workflow runs, as minutes past midnight, sorted.
+ *
+ * Falls back to the single hour and minute, which is what every row held
+ * before times were a list. That keeps a row written by an older deploy — or
+ * by anything still setting only those two — scheduled at the time it says,
+ * rather than silently at midnight.
+ */
+export function scheduleTimesOf(workflow: {
+  scheduleTimes?: number[];
+  scheduleHour: number;
+  scheduleMinute: number;
+}): number[] {
+  const times = workflow.scheduleTimes ?? [];
+  const chosen = times.length > 0 ? times : [workflow.scheduleHour * 60 + workflow.scheduleMinute];
+  return [...new Set(chosen.filter((value) => Number.isInteger(value) && value >= 0 && value < 1440))]
+    .sort((a, b) => a - b);
+}
+
+/** Splits minutes past midnight back into the pair the clock is written in. */
+export const hourMinuteOf = (minutes: number) => ({
+  hour: Math.floor(minutes / 60),
+  minute: minutes % 60,
+});

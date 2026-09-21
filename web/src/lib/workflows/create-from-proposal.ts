@@ -19,7 +19,7 @@ import {
 } from '@/lib/workflows/assistant-graph';
 import { reaches } from '@/lib/workflows/graph';
 import { checkGraphTypes } from '@/lib/workflows/port-resolution';
-import { computeNextRun } from '@/lib/workflows/schedule';
+import { computeNextRun, scheduleTimesOf } from '@/lib/workflows/schedule';
 
 export async function createWorkflowFromProposal(input: {
   workspaceId: string;
@@ -100,16 +100,20 @@ export async function createWorkflowFromProposal(input: {
       });
     }
 
+    // The assistant proposes one time. Stored as a list of one all the same,
+    // so the column is never empty and nothing has to fall back to read it.
+    const scheduleTimes = scheduleTimesOf({ scheduleHour, scheduleMinute });
     const nextRunAt = computeNextRun({
       scheduleEnabled,
       scheduleWeekdays,
+      scheduleTimes,
       scheduleHour,
       scheduleMinute,
       timezone: workspace.timezone,
     });
     await tx.workflow.update({
       where: { id: workflow.id },
-      data: { nextRunAt },
+      data: { scheduleTimes, nextRunAt },
     });
 
     return { id: workflow.id, name: workflow.name };
@@ -163,6 +167,16 @@ export async function updateWorkflowFromProposal(input: {
       scheduleMinute: input.scheduleMinute ?? existing.scheduleMinute,
       timezone: workspace.timezone,
     };
+    // The assistant speaks in one time. It replaces the list only when it
+    // actually proposed one — an edit that left the schedule alone must not
+    // collapse a workflow's several slots down to the earliest.
+    const proposesTime = input.scheduleHour !== undefined || input.scheduleMinute !== undefined;
+    if (proposesTime) {
+      merged.scheduleTimes = scheduleTimesOf({
+        scheduleHour: merged.scheduleHour,
+        scheduleMinute: merged.scheduleMinute,
+      });
+    }
     if (merged.name.length < 2) throw invalid('Give the workflow a name.');
 
     // The older nodeUpdates field remains accepted for stored proposals. New
@@ -305,6 +319,7 @@ export async function updateWorkflowFromProposal(input: {
         description: merged.description,
         scheduleEnabled: merged.scheduleEnabled,
         scheduleWeekdays: merged.scheduleWeekdays,
+        ...(proposesTime ? { scheduleTimes: merged.scheduleTimes } : {}),
         scheduleHour: merged.scheduleHour,
         scheduleMinute: merged.scheduleMinute,
         timezone: workspace.timezone,

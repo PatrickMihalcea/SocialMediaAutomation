@@ -23,7 +23,12 @@ import {
   retryWorkflowNode,
   startWorkflowRun,
 } from '@/lib/workflows/engine';
-import { computeNextRun } from '@/lib/workflows/schedule';
+import {
+  computeNextRun,
+  hourMinuteOf,
+  MAX_SCHEDULE_TIMES,
+  scheduleTimesOf,
+} from '@/lib/workflows/schedule';
 import { selectItems } from '@/lib/workflows/select-items';
 import { storage } from '@/lib/storage';
 
@@ -68,6 +73,16 @@ const scheduleSchema = z.object({
   enabled: z.boolean().optional(),
   scheduleEnabled: z.boolean().optional(),
   scheduleWeekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+  // Minutes past midnight, one per time of day. Capped because a schedule of
+  // fifty slots is a mistake rather than an intention, and every one of them
+  // starts a run.
+  scheduleTimes: z
+    .array(z.number().int().min(0).max(1439))
+    // At least one: a schedule with days and no time is not a schedule, and
+    // falling back to the old single time would quietly ignore the removal.
+    .min(1, 'Choose at least one time of day.')
+    .max(MAX_SCHEDULE_TIMES, `A workflow can run at up to ${MAX_SCHEDULE_TIMES} times a day.`)
+    .optional(),
   scheduleHour: z.number().int().min(0).max(23).optional(),
   scheduleMinute: z.number().int().min(0).max(59).optional(),
   // No timezone: it belongs to the workspace, and a workflow that could pick
@@ -89,10 +104,19 @@ export async function updateWorkflowAction(
   if (!existing) throw notFound('That workflow no longer exists.');
 
   const merged = { ...existing, ...parsed, timezone: ctx.workspace.timezone };
+  // Deduped and sorted once, here, so every reader sees the same list and the
+  // preview on the page cannot disagree with what is stored.
+  const times = parsed.scheduleTimes ? scheduleTimesOf(merged) : null;
+  // The single hour and minute follow the earliest time. They are what an older
+  // deploy reads, and what this row falls back to if the list is ever empty.
+  const earliest = times && times.length > 0 ? hourMinuteOf(times[0]) : null;
+
   const updated = await db.workflow.update({
     where: { id: workflowId },
     data: {
       ...parsed,
+      ...(times ? { scheduleTimes: times } : {}),
+      ...(earliest ? { scheduleHour: earliest.hour, scheduleMinute: earliest.minute } : {}),
       // Re-asserted so a row stored before the workspace moved zones is brought
       // back in line by the next save.
       timezone: ctx.workspace.timezone,
@@ -152,6 +176,7 @@ export async function duplicateWorkflowAction(slug: string, workflowId: string) 
         enabled: false,
         scheduleEnabled: false,
         scheduleWeekdays: source.scheduleWeekdays,
+        scheduleTimes: source.scheduleTimes,
         scheduleHour: source.scheduleHour,
         scheduleMinute: source.scheduleMinute,
         timezone: ctx.workspace.timezone,

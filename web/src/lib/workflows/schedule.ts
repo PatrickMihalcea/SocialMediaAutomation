@@ -1,26 +1,46 @@
 import 'server-only';
 import { WorkflowRunTrigger } from '@prisma/client';
 import { db } from '@/lib/db';
-import { nextOccurrence } from '@/lib/scheduling/time';
+import {
+  hourMinuteOf,
+  nextOccurrence,
+  scheduleTimesOf,
+} from '@/lib/scheduling/time';
 import { startWorkflowRun } from '@/lib/workflows/engine';
+
+export { hourMinuteOf, MAX_SCHEDULE_TIMES, scheduleTimesOf } from '@/lib/scheduling/time';
+
+/** A schedule as it is stored, whichever columns a given row has filled in. */
+export interface StoredSchedule {
+  scheduleEnabled: boolean;
+  scheduleWeekdays: number[];
+  scheduleTimes?: number[];
+  scheduleHour: number;
+  scheduleMinute: number;
+  timezone: string;
+}
 
 /**
  * Weekly scheduling, reusing the shape SchedulingRule already uses: weekday plus
  * wall-clock time in the workspace's zone, resolved to a UTC instant. A cron
  * expression would have meant shipping a parser for a feature nobody asked to
  * express in cron.
+ *
+ * Every chosen time on every chosen day is a candidate, and the soonest wins.
+ * Two slots on one day is the common case — something posted in the morning and
+ * again in the evening — and it used to take two copies of the same workflow.
  */
-export function computeNextRun(workflow: {
-  scheduleEnabled: boolean;
-  scheduleWeekdays: number[];
-  scheduleHour: number;
-  scheduleMinute: number;
-  timezone: string;
-}, from = new Date()): Date | null {
+export function computeNextRun(workflow: StoredSchedule, from = new Date()): Date | null {
   if (!workflow.scheduleEnabled || workflow.scheduleWeekdays.length === 0) return null;
 
-  const candidates = workflow.scheduleWeekdays.map((weekday) =>
-    nextOccurrence(from, workflow.timezone, weekday, workflow.scheduleHour, workflow.scheduleMinute),
+  const times = scheduleTimesOf(workflow);
+  if (times.length === 0) return null;
+
+  const candidates = workflow.scheduleWeekdays.flatMap((weekday) =>
+    times.map((minutes) => {
+      const { hour, minute } = hourMinuteOf(minutes);
+      return nextOccurrence(from, workflow.timezone, weekday, hour, minute);
+    }),
   );
   return candidates.reduce((a, b) => (a.getTime() <= b.getTime() ? a : b));
 }
@@ -38,6 +58,7 @@ export async function retimeWorkflows(workspaceId: string, timezone: string): Pr
       id: true,
       scheduleEnabled: true,
       scheduleWeekdays: true,
+      scheduleTimes: true,
       scheduleHour: true,
       scheduleMinute: true,
     },

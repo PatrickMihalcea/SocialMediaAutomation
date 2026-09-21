@@ -11,6 +11,7 @@ import { toGraph } from '@/lib/workflows/snapshot';
 import { topoOrder } from '@/lib/workflows/graph';
 import { WorkflowCanvasLoader } from '@/components/workflow-canvas-loader';
 import { WorkflowSchedule } from '@/components/workflow-schedule';
+import { scheduleTimesOf } from '@/lib/workflows/schedule';
 import { WorkflowTabs } from '@/components/workflow-tabs';
 import { WorkflowRunsChart } from '@/components/workflow-runs-chart';
 import { WorkflowRunsTable } from '@/components/workflow-runs-table';
@@ -259,8 +260,9 @@ async function WorkflowDetail({
                   id: workflow.id,
                   scheduleEnabled: workflow.scheduleEnabled,
                   scheduleWeekdays: workflow.scheduleWeekdays,
-                  scheduleHour: workflow.scheduleHour,
-                  scheduleMinute: workflow.scheduleMinute,
+                  // Resolved here rather than in the component, so a row saved
+                  // before times were a list opens on the time it actually runs.
+                  scheduleTimes: scheduleTimesOf(workflow),
                 }}
               />
             )}
