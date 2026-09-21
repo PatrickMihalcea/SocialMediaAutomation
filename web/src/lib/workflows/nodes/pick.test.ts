@@ -81,3 +81,26 @@ describe('select items step', () => {
       .rejects.toThrow('needs 9 items, but only 5 arrived');
   });
 });
+
+/**
+ * The run row shows what a step produced, and this step produced a choice —
+ * which was the one thing a run never said about it. Reading uuids back out of
+ * the output panel tells nobody which pictures a random draw landed on.
+ */
+describe('what it chose is shown on the run', () => {
+  it('emits the selected items, in the order it selected them', async () => {
+    const ctx = context({ mode: 'index', count: 3, index: 1 }, { items: ITEMS });
+
+    await run(ctx);
+
+    expect(ctx.emitAssets).toHaveBeenCalledWith('selection', ['b', 'c', 'd']);
+  });
+
+  it('emits nothing when it selected nothing', async () => {
+    const ctx = context({ mode: 'index', count: 1, index: 0 }, { items: [undefined] as unknown as string[] });
+
+    await run(ctx);
+
+    expect(ctx.emitAssets).not.toHaveBeenCalled();
+  });
+});

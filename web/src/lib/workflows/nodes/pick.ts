@@ -54,6 +54,16 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     });
     const selection = positions.map((position) => items[position]);
     const chosenTitles = labels ? positions.map((position) => labels[position]) : [];
+
+    // Shown on the run row, the same as a step that made its media.
+    //
+    // This step's whole job is choosing, and which items it chose was the one
+    // thing the run did not say — a random selection especially, where reading
+    // the ids back tells nobody anything. These are existing assets rather than
+    // new ones, but the link is only ever read to render the row.
+    const media = selection.filter((id): id is string => typeof id === 'string');
+    if (media.length > 0) await ctx.emitAssets('selection', media);
+
     return {
       item: selection[0],
       selection,

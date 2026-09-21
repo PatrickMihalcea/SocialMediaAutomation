@@ -672,6 +672,7 @@ const PLACEHOLDER_TONES: Record<string, string> = {
 
 export function MediaFrame({
   src,
+  fallbackSrc,
   type = 'image',
   ratio = '4:5',
   alt,
@@ -682,8 +683,15 @@ export function MediaFrame({
   showAltWarning = false,
   overlay,
   style,
+  missingLabel = 'File missing',
 }: {
   src?: string | null;
+  /**
+   * Shown if `src` fails to load. For a thumbnail that was never written, or
+   * was cleaned up under an asset that still records one: the full file is a
+   * heavier picture but an accurate one, and a broken image says nothing.
+   */
+  fallbackSrc?: string | null;
   type?: 'image' | 'video';
   ratio?: keyof typeof MEDIA_RATIOS | string;
   alt?: string;
@@ -694,7 +702,15 @@ export function MediaFrame({
   showAltWarning?: boolean;
   overlay?: ReactNode;
   style?: CSSProperties;
+  /** Shown when every source failed to load — not the same as having none. */
+  missingLabel?: string;
 }) {
+  // Sources this frame has already tried and lost: the thumbnail, then the
+  // file, then nothing — at which point the placeholder is shown rather than
+  // the browser's broken-image glyph.
+  const [failed, setFailed] = useState<string[]>([]);
+  const candidates = [src, fallbackSrc].filter((value): value is string => Boolean(value));
+  const shown = candidates.find((value) => !failed.includes(value)) ?? null;
   const chip: CSSProperties = {
     position: 'absolute',
     fontFamily: 'var(--font-mono)',
@@ -720,23 +736,33 @@ export function MediaFrame({
         ...style,
       }}
     >
-      {src ? (
+      {shown ? (
         type === 'video' ? (
           // Absolute inset keeps the video out of grid track sizing, where its
           // intrinsic 150px height would otherwise win over height: 100%.
           <video
-            src={src}
+            src={shown}
             poster={poster}
             playsInline
             muted
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', minHeight: 0, objectFit: 'contain' }}
           />
         ) : (
-          <img src={src} alt={alt || ''} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+          <img
+            key={shown}
+            src={shown}
+            alt={alt || ''}
+            onError={() => setFailed((current) => (current.includes(shown) ? current : [...current, shown]))}
+            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+          />
         )
       ) : (
         <span className="b88-caption" style={{ opacity: 0.7, textAlign: 'center', padding: 'var(--space-sm)' }}>
-          {label || (type === 'video' ? 'Video placeholder' : 'Image placeholder')} · {ratio}
+          {candidates.length > 0
+            // Every source failed. Saying so is the honest thing on screen, and
+            // it reads as a state rather than as a page that is broken.
+            ? missingLabel
+            : `${label || (type === 'video' ? 'Video placeholder' : 'Image placeholder')} · ${ratio}`}
         </span>
       )}
       {duration && <span style={{ ...chip, bottom: 8, right: 8 }}>{duration}</span>}

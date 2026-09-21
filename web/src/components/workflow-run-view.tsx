@@ -456,6 +456,9 @@ export function WorkflowRunView({
                                 tone="mint"
                                 type={asset.type === 'VIDEO' ? 'video' : 'image'}
                                 src={asset.url ?? undefined}
+                                // Some assets record a thumbnail that was never
+                                // written; the file itself still shows.
+                                fallbackSrc={asset.fullUrl ?? undefined}
                                 alt={humanizeMachineValue(asset.filename)}
                                 overlay={asset.type === 'VIDEO'
                                   ? <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
