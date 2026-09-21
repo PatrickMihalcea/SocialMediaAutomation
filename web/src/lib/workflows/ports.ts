@@ -19,6 +19,16 @@ export interface PortType {
   mediaKinds?: MediaType[];
   /** json only — a registry-declared shape id, so `segments` is not a free-for-all. */
   schemaId?: string;
+  /**
+   * List inputs only. Lets a single value connect, treated as a list of one.
+   *
+   * Opt-in rather than general, because the strictness above earns its keep
+   * nearly everywhere: one image dropped onto a slideshow is a one-frame video
+   * and the person finds out three steps later. A Combine media slot is the
+   * case where it says nothing ambiguous — the step exists to append lists, and
+   * appending one item is what "First selected" plainly means.
+   */
+  acceptsSingle?: boolean;
 }
 
 export interface PortDefinition {
@@ -43,10 +53,15 @@ export interface PortDefinition {
 export const text = (list = false): PortType => ({ scalar: 'text', list });
 export const json = (schemaId?: string): PortType => ({ scalar: 'json', list: false, schemaId });
 export const post = (): PortType => ({ scalar: 'post', list: false });
-export const media = (kinds: MediaType[], list = false): PortType => ({
+export const media = (
+  kinds: MediaType[],
+  list = false,
+  options: { acceptsSingle?: boolean } = {},
+): PortType => ({
   scalar: 'media',
   list,
   mediaKinds: kinds,
+  ...(options.acceptsSingle ? { acceptsSingle: true } : {}),
 });
 
 export interface Incompatibility {
@@ -62,9 +77,14 @@ export function checkCompatible(source: PortType, target: PortType): Incompatibi
     return { reason: `A ${describe(source)} output cannot connect to a ${describe(target)} input.` };
   }
   if (source.list !== target.list) {
-    return source.list
-      ? { reason: `That output is a list and this input takes a single ${source.scalar}. Add a Pick one step between them.` }
-      : { reason: `That output is a single ${source.scalar} and this input takes a list of them.` };
+    // A single into a list is allowed only where the input says so; the kinds
+    // are still checked below, so one audio track cannot reach an image slot.
+    const singleIntoAcceptingList = !source.list && target.list && target.acceptsSingle;
+    if (!singleIntoAcceptingList) {
+      return source.list
+        ? { reason: `That output is a list and this input takes a single ${source.scalar}. Add a Pick one step between them.` }
+        : { reason: `That output is a single ${source.scalar} and this input takes a list of them.` };
+    }
   }
   if (source.scalar === 'media') {
     const accepted = target.mediaKinds ?? [];

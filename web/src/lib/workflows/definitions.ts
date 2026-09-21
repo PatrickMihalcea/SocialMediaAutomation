@@ -403,10 +403,10 @@ export const NODE_DEFINITIONS = {
     category: 'utility',
     icon: 'list-plus',
     inputs: [
-      { id: 'media1', label: 'Media 1', type: media([...IMAGES, ...VIDEOS], true), required: true },
-      { id: 'media2', label: 'Media 2', type: media([...IMAGES, ...VIDEOS], true) },
-      { id: 'media3', label: 'Media 3', type: media([...IMAGES, ...VIDEOS], true) },
-      { id: 'media4', label: 'Media 4', type: media([...IMAGES, ...VIDEOS], true) },
+      { id: 'media1', label: 'Media 1', type: media([...IMAGES, ...VIDEOS], true, { acceptsSingle: true }), required: true },
+      { id: 'media2', label: 'Media 2', type: media([...IMAGES, ...VIDEOS], true, { acceptsSingle: true }) },
+      { id: 'media3', label: 'Media 3', type: media([...IMAGES, ...VIDEOS], true, { acceptsSingle: true }) },
+      { id: 'media4', label: 'Media 4', type: media([...IMAGES, ...VIDEOS], true, { acceptsSingle: true }) },
     ],
     outputs: [
       { id: 'media', label: 'Media', type: media([...IMAGES, ...VIDEOS], true) },

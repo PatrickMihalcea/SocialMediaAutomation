@@ -37,7 +37,16 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   return { media, titles: anyTitles ? titles : [] };
 }
 
-const ids = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+/**
+ * The ids in a slot.
+ *
+ * A bare string is one item, not nothing: these slots accept a single media as
+ * well as a list, so "First selected" can be appended without a step in between
+ * whose only job is to make a list of one.
+ */
+const ids = (value: unknown): string[] => {
+  if (typeof value === 'string') return [value];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+};
 
 const strings = (value: unknown): string[] => ids(value);
