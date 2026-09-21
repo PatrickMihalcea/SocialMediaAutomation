@@ -333,30 +333,48 @@ function CanvasInner({
     ? describeConnection(selectedCanvasEdge, nodeLookup)
     : null;
 
-  const connectionAllowed = useCallback(
-    (sourceId: string, sourcePort: string, targetId: string, targetPort: string) => {
-      if (sourceId === targetId) return false;
+  /**
+   * Why a connection is refused, or null when it is allowed.
+   *
+   * A sentence rather than a boolean because some refusals are invisible on the
+   * canvas. Combine media's four slots look identical, so once the step is
+   * combining images the audio slot dims with nothing to say it has a reason —
+   * and "it just won't connect" is the complaint that follows.
+   */
+  const connectionRefusal = useCallback(
+    (sourceId: string, sourcePort: string, targetId: string, targetPort: string): string | null => {
+      if (sourceId === targetId) return 'A step cannot connect to itself.';
       const source = configs.current.get(sourceId);
       const target = configs.current.get(targetId);
-      if (!source || !target) return false;
+      if (!source || !target) return 'One of those steps is no longer on the canvas.';
       const output = getNodePorts(source.type, source.config, 'outputs').find((port) => port.id === sourcePort);
       const input = getNodePorts(target.type, target.config, 'inputs').find((port) => port.id === targetPort);
-      if (!output || !input) return false;
-      if (edges.some((edge) => edge.target === targetId && edge.targetHandle === targetPort)) return false;
+      if (!output || !input) return 'That connection point no longer exists.';
+      if (edges.some((edge) => edge.target === targetId && edge.targetHandle === targetPort)) {
+        return `${input.label} already has a connection. Remove it before making another.`;
+      }
       const graphEdges = edges.map(flowEdgeToCanvas);
-      if (reaches(graphEdges, targetId, sourceId)) return false;
+      if (reaches(graphEdges, targetId, sourceId)) {
+        return 'That would send the run back into a step it has already been through.';
+      }
       const graphNodes = [...configs.current.entries()].map(([id, config]) => ({
         id,
         type: config.type,
         name: config.name,
         config: config.config,
       }));
-      return !checkAddedEdge(
+      return checkAddedEdge(
         { nodes: graphNodes, edges: graphEdges },
         { sourceNodeId: sourceId, sourcePort, targetNodeId: targetId, targetPort },
-      );
+      )?.reason ?? null;
     },
     [edges],
+  );
+
+  const connectionAllowed = useCallback(
+    (sourceId: string, sourcePort: string, targetId: string, targetPort: string) =>
+      connectionRefusal(sourceId, sourcePort, targetId, targetPort) === null,
+    [connectionRefusal],
   );
 
   /** Label and action for whichever element was right-clicked. */
@@ -750,13 +768,26 @@ function CanvasInner({
             onConnectStart={(_event, params) => {
               if (!params.nodeId || !params.handleId || !params.handleType) return;
               setContextMenu(null);
+              setError('');
               setConnectStart({
                 nodeId: params.nodeId,
                 handleId: params.handleId,
                 handleType: params.handleType,
               });
             }}
-            onConnectEnd={() => setConnectStart(null)}
+            onConnectEnd={(_event, state) => {
+              // Fires for refused drops too, which is the only place a reason
+              // can be shown: an invalid drop never reaches onConnect.
+              const origin = connectStart;
+              setConnectStart(null);
+              if (state.isValid !== false || !state.toHandle || !origin) return;
+              const { nodeId, id: handleId } = state.toHandle;
+              if (!nodeId || !handleId) return;
+              const refusal = origin.handleType === 'source'
+                ? connectionRefusal(origin.nodeId, origin.handleId, nodeId, handleId)
+                : connectionRefusal(nodeId, handleId, origin.nodeId, origin.handleId);
+              if (refusal) setError(refusal);
+            }}
             // Wider than the 20px default so a drop near a port still lands.
             connectionRadius={44}
             isValidConnection={isValidConnection}

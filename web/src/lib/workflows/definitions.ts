@@ -399,7 +399,7 @@ export const NODE_DEFINITIONS = {
   COMBINE_MEDIA: {
     type: 'COMBINE_MEDIA',
     label: 'Combine media',
-    description: 'Combines up to four ordered image or video lists into one sequence.',
+    description: 'Joins up to four ordered lists into one. The first connection decides whether the step is combining audio, or images and video.',
     category: 'utility',
     icon: 'list-plus',
     inputs: [
