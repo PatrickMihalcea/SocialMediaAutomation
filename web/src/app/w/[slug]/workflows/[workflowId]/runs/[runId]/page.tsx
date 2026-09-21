@@ -4,7 +4,7 @@ import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { notFound } from '@/lib/errors';
 import { readSnapshot, toGraph } from '@/lib/workflows/snapshot';
-import { indegrees, successorsOf } from '@/lib/workflows/graph';
+import { descendantsOf, indegrees, successorsOf } from '@/lib/workflows/graph';
 import { WorkflowRunView } from '@/components/workflow-run-view';
 import { postsForRun } from '@/lib/workflows/run-posts';
 import { storage } from '@/lib/storage';
@@ -84,6 +84,7 @@ async function RunDetail({
         workflowId={workflowId}
         canRun={ctx.can('workflow:run')}
         levels={levelsOf(graph)}
+        replay={replayPlan(graph)}
         initial={{
           serverNow: Date.now(),
           run: {
@@ -123,6 +124,27 @@ async function RunDetail({
       />
     </>
   );
+}
+
+/**
+ * What playing from each step would actually re-run.
+ *
+ * Computed here because the graph is here: the run view has only a flat list of
+ * steps, and "this also re-runs the four steps after it" is the part someone
+ * needs before clicking, not after. `publishes` is called out separately —
+ * everything else a replay touches can be done again, and a post cannot.
+ */
+function replayPlan(graph: ReturnType<typeof toGraph>): Record<string, { steps: number; publishes: boolean }> {
+  const typeOf = new Map(graph.nodes.map((node) => [node.id, node.type]));
+  const plan: Record<string, { steps: number; publishes: boolean }> = {};
+  for (const node of graph.nodes) {
+    const affected = [node.id, ...descendantsOf(graph, node.id)];
+    plan[node.id] = {
+      steps: affected.length,
+      publishes: affected.some((id) => typeOf.get(id) === 'PUBLISH'),
+    };
+  }
+  return plan;
 }
 
 /**

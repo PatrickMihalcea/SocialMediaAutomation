@@ -56,15 +56,43 @@ export function Button({
 export function IconButton({
   icon: Icon,
   label,
+  href,
+  pressed,
   className,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { icon: LucideIcon; label: string }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  icon: LucideIcon;
+  label: string;
+  /** Renders a link instead of a button, matching Button's own `href`. */
+  href?: string;
+  /**
+   * A toggle that is currently on — inverted, and announced as pressed.
+   *
+   * The fill is an inline style rather than a class a caller could pass,
+   * because Tailwind orders background utilities by config position and not by
+   * the order they appear in the attribute: a `bg-primary` handed in through
+   * `className` loses to the `bg-surface-soft` below it and does nothing at
+   * all, silently. The same trap the Button above documents for heights.
+   */
+  pressed?: boolean;
+}) {
+  const cn = `b88-icon-button inline-flex size-10 shrink-0 items-center justify-center rounded-pill bg-surface-soft transition-opacity hover:opacity-80 active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-40 ${className ?? ''}`;
+  const style = pressed ? { background: 'var(--primary)', color: 'var(--on-primary)' } : undefined;
+  if (href) {
+    return (
+      <Link href={href} aria-label={label} title={label} className={cn} style={style}>
+        <Icon size={18} strokeWidth={1.75} />
+      </Link>
+    );
+  }
   return (
     <button
       type="button"
       aria-label={label}
       title={label}
-      className={`b88-icon-button inline-flex size-10 shrink-0 items-center justify-center rounded-pill bg-surface-soft transition-opacity hover:opacity-80 active:scale-[.97] ${className ?? ''}`}
+      aria-pressed={pressed}
+      className={cn}
+      style={style}
       {...props}
     >
       <Icon size={18} strokeWidth={1.75} />

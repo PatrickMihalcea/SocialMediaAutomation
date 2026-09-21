@@ -603,10 +603,28 @@ export async function cancelWorkflowRun(runId: string, workspaceId: string): Pro
   // Steps already RUNNING stop cooperatively at their next assertNotCancelled.
 }
 
+const TERMINAL_NODE_STATUSES: WorkflowNodeRunStatus[] = [
+  WorkflowNodeRunStatus.SUCCEEDED,
+  WorkflowNodeRunStatus.FAILED,
+  WorkflowNodeRunStatus.SKIPPED,
+  WorkflowNodeRunStatus.CANCELLED,
+];
+
+const TERMINAL_RUN_STATUSES: WorkflowRunStatus[] = [
+  WorkflowRunStatus.SUCCEEDED,
+  WorkflowRunStatus.FAILED,
+  WorkflowRunStatus.CANCELLED,
+];
+
 /**
- * Re-run one failed step and everything below it, without re-running the steps
- * above. Their outputs are still on their SUCCEEDED rows, which is the whole
- * reason inputs are resolved from upstream rows rather than copied onto edges.
+ * Play a finished run again from one step, without re-running the steps above.
+ * Their outputs are still on their SUCCEEDED rows, which is the whole reason
+ * inputs are resolved from upstream rows rather than copied onto edges.
+ *
+ * Any finished step, not only a failed one. Repairing a broken run was the
+ * first need, but the same machinery answers the more common one: the images
+ * are right and the labels are wrong, so change that step's settings and play
+ * from there rather than paying to generate eight pictures again.
  */
 export async function retryWorkflowNode(nodeRunId: string, workspaceId: string): Promise<void> {
   const nodeRun = await db.workflowNodeRun.findFirst({
@@ -614,12 +632,13 @@ export async function retryWorkflowNode(nodeRunId: string, workspaceId: string):
     include: { run: true },
   });
   if (!nodeRun) throw notFound('That step is no longer part of a run.');
-  if (
-    nodeRun.status !== WorkflowNodeRunStatus.FAILED &&
-    nodeRun.status !== WorkflowNodeRunStatus.SKIPPED &&
-    nodeRun.status !== WorkflowNodeRunStatus.CANCELLED
-  ) {
-    throw invalid('Only a step that failed, was skipped or was cancelled can be run again.');
+  if (!TERMINAL_NODE_STATUSES.includes(nodeRun.status)) {
+    throw invalid('This step has not finished yet, so there is nothing to play again.');
+  }
+  // The run itself has to be over. Mid-run the claim below would refuse anyway,
+  // and "that run is already going again" is a poor account of the reason.
+  if (!TERMINAL_RUN_STATUSES.includes(nodeRun.run.status)) {
+    throw invalid('This run is still going. Wait for it to finish, or cancel it first.');
   }
 
   const snapshot = readSnapshot(nodeRun.run.graph);

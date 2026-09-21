@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
-import { ChevronDown, ChevronLeft, ChevronRight, Play } from 'lucide-react';
+import { Braces, ChevronLeft, ChevronRight, Play, SlidersHorizontal } from 'lucide-react';
 import type { WorkflowNodeRunStatus, WorkflowRunStatus } from '@prisma/client';
-import { Badge, Button, Dialog, humanizeMachineValue, MediaFrame, StatusMessage, VideoPlayer } from '@/bridge88/components';
+import { Badge, Button, Dialog, IconButton, humanizeMachineValue, MediaFrame, StatusMessage, VideoPlayer } from '@/bridge88/components';
 import { cancelRunAction, getNodeRunOutputAction, retryNodeAction } from '@/app/actions/workflows';
 import { WorkflowNodeOutput } from '@/components/workflow-node-output';
 import {
@@ -80,6 +80,7 @@ export function WorkflowRunView({
   workflowId,
   initial,
   levels,
+  replay,
   canRun,
 }: {
   slug: string;
@@ -87,6 +88,8 @@ export function WorkflowRunView({
   initial: RunStatus;
   /** Node ids grouped into dependency levels — what runs in parallel with what. */
   levels: string[][];
+  /** Per node id: what playing from it would re-run. Fixed for the run's graph. */
+  replay: Record<string, { steps: number; publishes: boolean }>;
   canRun: boolean;
 }) {
   const [status, setStatus] = useState<RunStatus>(initial);
@@ -111,6 +114,8 @@ export function WorkflowRunView({
    * dialog seven times is not looking through them.
    */
   const [preview, setPreview] = useState<{ assets: ProducedAsset[]; index: number } | null>(null);
+  /** The step a play was asked for, held while the publish warning is up. */
+  const [confirmPlay, setConfirmPlay] = useState<NodeRun | null>(null);
   const previewAsset = preview ? preview.assets[preview.index] ?? null : null;
 
   /**
@@ -273,16 +278,37 @@ export function WorkflowRunView({
     });
   }
 
-  function retry(nodeRunId: string) {
+  function play(nodeRunId: string) {
     setError('');
+    setConfirmPlay(null);
     startTransition(async () => {
       try {
         await retryNodeAction(slug, nodeRunId);
         etag.current = null;
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'That step could not be run again.');
+        setError(cause instanceof Error ? cause.message : 'That step could not be played again.');
       }
     });
+  }
+
+  /** What the button says it will do, which is more than re-run one step. */
+  function playLabel(node: NodeRun): string {
+    const after = (replay[node.nodeId]?.steps ?? 1) - 1;
+    if (after <= 0) return 'Play this step again';
+    return `Play from here — also runs the ${after} step${after === 1 ? '' : 's'} after it`;
+  }
+
+  /**
+   * Straight to it, unless a Publish step is among what would re-run.
+   *
+   * Everything else a replay touches can be done again — a regenerated image
+   * costs a regeneration. A published post cannot be unpublished, and the step
+   * writes a new post each time rather than updating the one it made before, so
+   * the second run is a second post on the channel.
+   */
+  function askToPlay(node: NodeRun) {
+    if (replay[node.nodeId]?.publishes) setConfirmPlay(node);
+    else play(node.id);
   }
 
   return (
@@ -431,36 +457,34 @@ export function WorkflowRunView({
                           view=steps is required, not cosmetic — the canvas only
                           mounts on that tab, so without it the link lands on
                           Runs and the node selection has nothing to select. */}
-                      <Link
+                      <IconButton
+                        icon={SlidersHorizontal}
+                        label={node.status === 'FAILED' ? 'Fix this step' : 'Step settings'}
                         href={`/w/${slug}/workflows/${workflowId}?view=steps&node=${encodeURIComponent(node.nodeId)}`}
-                        className="b88-body-sm underline underline-offset-4"
-                      >
-                        {node.status === 'FAILED' ? 'Fix this step' : 'Step settings'}
-                      </Link>
+                      />
                       {/* Only once a step has finished: before that there is
-                          nothing recorded to show. A disclosure rather than two
-                          sentences — the chevron carries the open/closed state,
-                          so the label can stay one steady word. */}
+                          nothing recorded to show. */}
                       {isNodeTerminal(node.status) && node.hasOutput && (
-                        <Button
-                          type="button"
-                          variant="tertiary"
+                        <IconButton
+                          icon={Braces}
+                          label={outputs[node.id]?.open ? 'Hide the output' : 'Show the output'}
                           onClick={() => toggleOutput(node.id)}
                           aria-expanded={Boolean(outputs[node.id]?.open)}
                           aria-busy={Boolean(outputs[node.id]?.loading)}
-                        >
-                          <ChevronDown
-                            size={15}
-                            className={`transition-transform ${outputs[node.id]?.open ? 'rotate-180' : ''}`}
-                            aria-hidden="true"
-                          />
-                          Output
-                        </Button>
+                          pressed={Boolean(outputs[node.id]?.open)}
+                        />
                       )}
-                      {canRun && isNodeTerminal(node.status) && node.status !== 'SUCCEEDED' && (
-                        <Button variant="secondary" onClick={() => retry(node.id)} disabled={pending}>
-                          Run this step again
-                        </Button>
+                      {/* Every finished step once the run is over, not only the
+                          ones that broke. Changing a label and playing from
+                          there is the ordinary case; regenerating eight
+                          pictures to reach it is not. */}
+                      {canRun && !active && isNodeTerminal(node.status) && (
+                        <IconButton
+                          icon={Play}
+                          label={playLabel(node)}
+                          onClick={() => askToPlay(node)}
+                          disabled={pending}
+                        />
                       )}
                     </div>
                     {outputs[node.id]?.open && (
@@ -564,6 +588,33 @@ export function WorkflowRunView({
         {previewAsset?.width && previewAsset.height ? (
           <p className="b88-caption mt-3 text-center">{previewAsset.width} × {previewAsset.height}</p>
         ) : null}
+      </Dialog>
+
+      {/* Asked only when a Publish step is among what would run again. Every
+          other consequence of a replay can be undone by running it once more;
+          a post on a channel cannot, and the step writes a new one rather than
+          updating the post it made before. */}
+      <Dialog
+        open={Boolean(confirmPlay)}
+        eyebrow="Play from here"
+        title={confirmPlay ? `Run ${confirmPlay.nodeName} and everything after it?` : undefined}
+        onClose={() => setConfirmPlay(null)}
+        actions={confirmPlay ? (
+          <>
+            <Button variant="secondary" onClick={() => setConfirmPlay(null)}>
+              Leave it
+            </Button>
+            <Button onClick={() => play(confirmPlay.id)} disabled={pending}>
+              Play from here
+            </Button>
+          </>
+        ) : undefined}
+      >
+        <p className="b88-body">
+          This also runs a Publish step, which writes a new post rather than
+          replacing the one this run already made. Anything it publishes now is
+          a second post on the channel.
+        </p>
       </Dialog>
     </div>
   );
