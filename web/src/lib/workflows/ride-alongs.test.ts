@@ -150,3 +150,71 @@ describe('titles only ride with the list they describe', () => {
     expect(inputs.titles).toBeUndefined();
   });
 });
+
+/**
+ * The failure this caused in a live run. Pick one names every item it selected,
+ * so sending "First selected" into a Combine media slot alongside the whole
+ * selection handed one picture the names of all eight — and Combine media
+ * refused, because a title list that does not line up puts every label on the
+ * wrong frame.
+ */
+describe('one item carries one title', () => {
+  const picked = new Map([[IDEA, {
+    output: {
+      item: 'asset-1',
+      selection: ['asset-1', 'asset-2', 'asset-3'],
+      itemTitle: ['Cliffside'],
+      titles: ['Cliffside', 'Canopy', 'Desert'],
+    },
+  }]]);
+
+  it('gives a slot fed by First selected only that item’s title', () => {
+    const inputs: Record<string, unknown> = { media2: 'asset-1' };
+
+    applyRideAlongs([edge('media2', 'item')], picked, inputs);
+
+    expect(inputs.titles2).toEqual(['Cliffside']);
+  });
+
+  it('still gives a slot fed by the selection the whole list', () => {
+    const inputs: Record<string, unknown> = { media1: ['asset-1', 'asset-2', 'asset-3'] };
+
+    applyRideAlongs([edge('media1', 'selection')], picked, inputs);
+
+    expect(inputs.titles1).toEqual(['Cliffside', 'Canopy', 'Desert']);
+  });
+
+  /**
+   * A step that already succeeded keeps the output it recorded, so resuming a
+   * run started before `itemTitle` existed has only the list to work from. The
+   * first title is the one belonging to `item`, so the frame is still labelled
+   * correctly rather than left blank.
+   */
+  it('falls back to the first title for an output recorded before the fix', () => {
+    const inputs: Record<string, unknown> = { media2: 'asset-1' };
+
+    applyRideAlongs(
+      [edge('media2', 'item')],
+      upstream({
+        item: 'asset-1',
+        selection: ['asset-1', 'asset-2'],
+        titles: ['Cliffside', 'Canopy'],
+      }),
+      inputs,
+    );
+
+    expect(inputs.titles2).toEqual(['Cliffside']);
+  });
+
+  it('carries nothing when the picked items were never named', () => {
+    const inputs: Record<string, unknown> = { media2: 'track-1' };
+
+    applyRideAlongs(
+      [edge('media2', 'item')],
+      upstream({ item: 'track-1', itemTitle: [], titles: [] }),
+      inputs,
+    );
+
+    expect(inputs.titles2).toBeUndefined();
+  });
+});

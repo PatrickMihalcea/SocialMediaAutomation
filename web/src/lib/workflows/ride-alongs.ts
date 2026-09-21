@@ -27,7 +27,17 @@
  * graphs already built, on nothing more than a shared name.
  */
 /** Outputs that titles describe. Audio and video lists have none of their own. */
-const TITLED_LISTS = ['images', 'media', 'selection', 'item', 'prompts'] as const;
+const TITLED_LISTS = ['images', 'media', 'selection', 'prompts'] as const;
+
+/**
+ * Single-value outputs, which carry one title rather than the whole list.
+ *
+ * Pick one names its selection in `titles`, one per item — so sending "First
+ * selected" into a Combine media slot handed one picture the names of all eight
+ * and the step refused the count. A single item has a single title, and the
+ * step that produced it is the only one that knows which.
+ */
+const TITLED_SINGLES = ['item'] as const;
 
 /**
  * A port filled from the step that fed another port, rather than from a wire.
@@ -43,6 +53,14 @@ const RIDE_ALONGS: ReadonlyArray<{
   whenSourcePortIn: readonly string[];
   fills: string;
   fromKey: string;
+  /**
+   * Where to look when `fromKey` is not there: take the first entry of this
+   * list instead. Only for single-value carriers, and only because a step that
+   * already succeeded keeps the output it recorded — so resuming a run started
+   * before `itemTitle` existed would otherwise leave that frame unlabelled.
+   * `item` is the first of `selection`, so the first title is its own.
+   */
+  orFirstOf?: string;
 }> = [
   // Idea generator to Image generator: the title written for each prompt, and
   // the sketch the drawn theme carries.
@@ -51,13 +69,23 @@ const RIDE_ALONGS: ReadonlyArray<{
   // Any titled list into a step that labels or cuts it.
   { whenTargetPort: 'images', whenSourcePortIn: TITLED_LISTS, fills: 'titles', fromKey: 'titles' },
   { whenTargetPort: 'items', whenSourcePortIn: TITLED_LISTS, fills: 'titles', fromKey: 'titles' },
-  // Combine media's four slots, each from its own list.
-  ...[1, 2, 3, 4].map((slot) => ({
-    whenTargetPort: `media${slot}`,
-    whenSourcePortIn: TITLED_LISTS,
-    fills: `titles${slot}`,
-    fromKey: 'titles',
-  })),
+  // Combine media's four slots, each from its own list — or from one item,
+  // which brings the one title that belongs to it.
+  ...[1, 2, 3, 4].flatMap((slot) => [
+    {
+      whenTargetPort: `media${slot}`,
+      whenSourcePortIn: TITLED_LISTS,
+      fills: `titles${slot}`,
+      fromKey: 'titles',
+    },
+    {
+      whenTargetPort: `media${slot}`,
+      whenSourcePortIn: TITLED_SINGLES,
+      fills: `titles${slot}`,
+      fromKey: 'itemTitle',
+      orFirstOf: 'titles',
+    },
+  ]),
 ];
 
 export function applyRideAlongs(
@@ -77,7 +105,11 @@ export function applyRideAlongs(
     if (!carrier) continue;
 
     const output = (byNode.get(carrier.sourceNodeId)?.output ?? {}) as Record<string, unknown>;
-    const value = output[rider.fromKey];
+    let value = output[rider.fromKey];
+    if (rider.orFirstOf && (value == null || (Array.isArray(value) && value.length === 0))) {
+      const list = output[rider.orFirstOf];
+      value = Array.isArray(list) && list.length > 0 ? [list[0]] : null;
+    }
     // An empty list is nothing to carry, and carrying it is not harmless: a
     // step reading "some titles, zero of them" refuses the count against any
     // items at all.

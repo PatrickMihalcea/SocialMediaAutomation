@@ -53,15 +53,21 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       seed: `${ctx.runId}:${ctx.nodeRunId}`,
     });
     const selection = positions.map((position) => items[position]);
+    const chosenTitles = labels ? positions.map((position) => labels[position]) : [];
     return {
       item: selection[0],
       selection,
+      // The one title belonging to `item`, kept apart from the list above.
+      // Sending "First selected" into a step that labels what it is given used
+      // to hand one picture the names of all eight, and the step refused —
+      // rightly, since a shifted label is worse than a missing one.
+      itemTitle: chosenTitles.length ? [chosenTitles[0]] : [],
       // Reordered with the selection so each title stays on its own item.
       // Emitted under both names: `titles` is what every other step calls them
       // and what the ride-along looks for, `labels` keeps an edge saved from
       // the old port resolving.
-      titles: labels ? positions.map((position) => labels[position]) : [],
-      labels: labels ? positions.map((position) => labels[position]) : [],
+      titles: chosenTitles,
+      labels: chosenTitles,
     };
   } catch (error) {
     throw new PermanentJobError(
