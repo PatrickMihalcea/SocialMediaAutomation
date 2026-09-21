@@ -1,3 +1,4 @@
+import { MediaType } from '@prisma/client';
 import { getDefinition, getNodePorts } from '@/lib/workflows/definitions';
 import {
   checkCompatible,
@@ -110,7 +111,62 @@ export function checkEdge(graph: ResolutionGraph, edge: ResolutionEdge): Incompa
       reason: `Connect the ${source.inputLabel} input of "${source.nodeName}" first — until then it does not know what kind of ${describePortType(input.type)} it passes on.`,
     };
   }
-  return checkCompatible(source.type, input.type);
+  const mismatch = checkCompatible(source.type, input.type);
+  if (mismatch) return mismatch;
+  return checkCombineFamily(graph, edge, target.type, source.type);
+}
+
+/**
+ * Combine media takes audio or visual media, and the first connection decides
+ * which.
+ *
+ * The step appends its slots into one list, so the list has to be of one kind:
+ * a run that concatenated two tracks and three stills would hand the next step
+ * something no step can use. Rather than pick a family in the catalogue and
+ * make a second node for the other, the first thing connected settles it and
+ * the remaining slots are held to it.
+ *
+ * Applied here, where every sibling edge is visible, rather than in
+ * checkCompatible — a port type describes one port and cannot see the ones
+ * beside it.
+ */
+function checkCombineFamily(
+  graph: ResolutionGraph,
+  edge: ResolutionEdge,
+  targetType: string,
+  incoming: PortType,
+): Incompatibility | null {
+  if (targetType !== 'COMBINE_MEDIA' || !/^media[1-4]$/.test(edge.targetPort)) return null;
+
+  const family = familyOf(incoming);
+  if (!family) return null;
+
+  for (const sibling of graph.edges) {
+    if (sibling.targetNodeId !== edge.targetNodeId) continue;
+    if (sibling.targetPort === edge.targetPort) continue;
+    if (!/^media[1-4]$/.test(sibling.targetPort)) continue;
+
+    const other = resolveOutputType(graph, sibling.sourceNodeId, sibling.sourcePort);
+    if (other.state !== 'type') continue;
+    const otherFamily = familyOf(other.type);
+    if (otherFamily && otherFamily !== family) {
+      return {
+        reason: otherFamily === 'audio'
+          ? 'This step is already combining audio, so every input has to be audio.'
+          : 'This step is already combining images or video, so every input has to be an image or a video.',
+      };
+    }
+  }
+  return null;
+}
+
+/** Audio on one side, everything you can put on screen on the other. */
+function familyOf(type: PortType): 'audio' | 'visual' | null {
+  const kinds = type.mediaKinds ?? [];
+  if (kinds.length === 0) return null;
+  const audio = kinds.every((kind) => kind === MediaType.AUDIO);
+  if (audio) return 'audio';
+  return kinds.some((kind) => kind === MediaType.AUDIO) ? null : 'visual';
 }
 
 /**

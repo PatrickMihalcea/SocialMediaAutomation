@@ -40,8 +40,6 @@ const MUST_WORK: Array<[string | null, string, string]> = [
   ['MEDIA_LIBRARY.videos', 'PICK.item', 'CREATE_DRAFT.video'],
   ['MEDIA_LIBRARY.videos', 'PICK.item', 'PUBLISH.video'],
   // Combining and cutting.
-  [null, 'COMBINE_MEDIA.media', 'BEAT_SLIDESHOW.images'],
-  [null, 'COMBINE_MEDIA.media', 'PICK.items'],
   [null, 'BEAT_SLIDESHOW.video', 'TEXT_OVERLAY.video'],
   [null, 'BEAT_SLIDESHOW.video', 'CREATE_DRAFT.video'],
   [null, 'BEAT_SLIDESHOW.video', 'PUBLISH.video'],
@@ -57,6 +55,15 @@ const MUST_WORK: Array<[string | null, string, string]> = [
  */
 describe('chains a real pipeline needs', () => {
   const CHAINS: Array<{ name: string; steps: Array<[string, string]>; hops: Array<[string, string, string, string]> }> = [
+    {
+      name: 'a combine of stills into a slideshow and a picker',
+      steps: [['lib', 'MEDIA_LIBRARY'], ['mix', 'COMBINE_MEDIA'], ['slide', 'BEAT_SLIDESHOW'], ['pick', 'PICK']],
+      hops: [
+        ['lib', 'images', 'mix', 'media1'],
+        ['mix', 'media', 'slide', 'images'],
+        ['mix', 'media', 'pick', 'items'],
+      ],
+    },
     {
       name: 'library to a trimmed track to a slideshow',
       steps: [['lib', 'MEDIA_LIBRARY'], ['pick', 'PICK'], ['trim', 'AUDIO_TRIMMER'], ['slide', 'BEAT_SLIDESHOW']],

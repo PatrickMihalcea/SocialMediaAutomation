@@ -112,7 +112,10 @@ describe('node catalogue', () => {
       ['IDEA_GENERATOR', 'postTitle', 'PUBLISH', 'title'],
       ['IMAGE_GENERATOR', 'images', 'COMBINE_MEDIA', 'media1'],
       ['MEDIA_LIBRARY', 'videos', 'COMBINE_MEDIA', 'media2'],
-      ['COMBINE_MEDIA', 'media', 'BEAT_SLIDESHOW', 'images'],
+      // Not COMBINE_MEDIA.media: its output follows whatever its first slot is
+      // given, so the declared type is the widest set it could ever carry and
+      // says nothing about a particular graph. The resolved hop is covered in
+      // pipeline-connections.test.ts, where the slot is actually connected.
       ['MUSIC_SELECTOR', 'audio', 'BEAT_SLIDESHOW', 'audio'],
       ['BEAT_SLIDESHOW', 'video', 'TEXT_OVERLAY', 'video'],
       ['TEXT_OVERLAY', 'video', 'CREATE_DRAFT', 'video'],

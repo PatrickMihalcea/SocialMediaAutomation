@@ -29,11 +29,24 @@ describe('a single media into a combine slot', () => {
     })).toBeNull();
   });
 
-  /** The kind rule is untouched: a track is still not an image or a video. */
-  it('still refuses a single audio track', () => {
+  /**
+   * A single track is fine on its own — the step combines audio too now. What
+   * refuses it is the family rule, once a slot already holds something visual.
+   */
+  it('accepts a single audio track into an empty step', () => {
     expect(checkAddedEdge({ nodes, edges: withPickFedBy('audio') }, {
       sourceNodeId: 'pick', sourcePort: 'item', targetNodeId: 'mix', targetPort: 'media1',
-    })).toEqual({ reason: 'This input takes image or video, and that output can produce audio.' });
+    })).toBeNull();
+  });
+
+  it('refuses a single track once the step is combining stills', () => {
+    const edges = [
+      ...withPickFedBy('audio'),
+      { sourceNodeId: 'lib', sourcePort: 'images', targetNodeId: 'mix', targetPort: 'media1' },
+    ];
+    expect(checkAddedEdge({ nodes, edges }, {
+      sourceNodeId: 'pick', sourcePort: 'item', targetNodeId: 'mix', targetPort: 'media2',
+    })).toEqual({ reason: 'This step is already combining images or video, so every input has to be an image or a video.' });
   });
 
   /** Everywhere else stays strict — a one-frame slideshow is still refused. */

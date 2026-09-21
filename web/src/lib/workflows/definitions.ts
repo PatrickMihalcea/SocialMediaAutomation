@@ -403,13 +403,21 @@ export const NODE_DEFINITIONS = {
     category: 'utility',
     icon: 'list-plus',
     inputs: [
-      { id: 'media1', label: 'Media 1', type: media([...IMAGES, ...VIDEOS], true, { acceptsSingle: true }), required: true },
-      { id: 'media2', label: 'Media 2', type: media([...IMAGES, ...VIDEOS], true, { acceptsSingle: true }) },
-      { id: 'media3', label: 'Media 3', type: media([...IMAGES, ...VIDEOS], true, { acceptsSingle: true }) },
-      { id: 'media4', label: 'Media 4', type: media([...IMAGES, ...VIDEOS], true, { acceptsSingle: true }) },
+      { id: 'media1', label: 'Media 1', type: media([...IMAGES, ...VIDEOS, ...AUDIO], true, { acceptsSingle: true }), required: true },
+      { id: 'media2', label: 'Media 2', type: media([...IMAGES, ...VIDEOS, ...AUDIO], true, { acceptsSingle: true }) },
+      { id: 'media3', label: 'Media 3', type: media([...IMAGES, ...VIDEOS, ...AUDIO], true, { acceptsSingle: true }) },
+      { id: 'media4', label: 'Media 4', type: media([...IMAGES, ...VIDEOS, ...AUDIO], true, { acceptsSingle: true }) },
     ],
     outputs: [
-      { id: 'media', label: 'Media', type: media([...IMAGES, ...VIDEOS], true) },
+      {
+        id: 'media',
+        label: 'Media',
+        type: media([...IMAGES, ...VIDEOS, ...AUDIO], true),
+        // What comes out is what went in: a step fed audio emits audio, one fed
+        // stills emits stills. Following the first slot is enough because every
+        // other slot is held to its family — see the rule in port-resolution.
+        followsInput: 'media1',
+      },
     ],
     configSchema: z.object({
       sourceOrder: z
