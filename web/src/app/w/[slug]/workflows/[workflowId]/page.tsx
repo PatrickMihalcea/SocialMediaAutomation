@@ -11,7 +11,7 @@ import { toGraph } from '@/lib/workflows/snapshot';
 import { topoOrder } from '@/lib/workflows/graph';
 import { WorkflowCanvasLoader } from '@/components/workflow-canvas-loader';
 import { WorkflowSchedule } from '@/components/workflow-schedule';
-import { scheduleTimesOf } from '@/lib/workflows/schedule';
+import { hourMinuteOf, scheduleTimesOf } from '@/lib/scheduling/time';
 import { WorkflowTabs } from '@/components/workflow-tabs';
 import { WorkflowRunsChart } from '@/components/workflow-runs-chart';
 import { WorkflowRunsTable } from '@/components/workflow-runs-table';
@@ -377,10 +377,19 @@ function WorkflowDetails({
   );
 }
 
+/**
+ * The schedule in one line, listing every time rather than the first.
+ *
+ * It read the single hour, which after times became a list was the earliest of
+ * them — so a workflow set to run at 09:00 and 15:00 reported "09:00" here
+ * while the panel below it showed both, and the obvious conclusion was that
+ * the second time had not saved.
+ */
 function describeSchedule(
   workflow: {
     scheduleEnabled: boolean;
     scheduleWeekdays: number[];
+    scheduleTimes: number[];
     scheduleHour: number;
     scheduleMinute: number;
     nextRunAt: Date | null;
@@ -391,7 +400,12 @@ function describeSchedule(
     return 'Runs manually only.';
   }
   const days = workflow.scheduleWeekdays.map((day) => WEEKDAY_SHORT[day]).join(', ');
-  const at = `${String(workflow.scheduleHour).padStart(2, '0')}:${String(workflow.scheduleMinute).padStart(2, '0')}`;
+  const at = scheduleTimesOf(workflow)
+    .map((minutes) => {
+      const { hour, minute } = hourMinuteOf(minutes);
+      return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    })
+    .join(', ');
   const next = workflow.nextRunAt
     ? ` Next ${formatInZone(workflow.nextRunAt, timezone, 'd LLL HH:mm')}.`
     : '';
