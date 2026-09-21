@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   jobUpdateMany: vi.fn(),
   workflowNodeRunFindFirst: vi.fn(),
   workflowNodeRunAssetDeleteMany: vi.fn(),
+  workflowNodeFindMany: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -54,6 +55,7 @@ vi.mock('@/lib/db', () => ({
           updateMany: mocks.workflowNodeRunUpdateMany,
         },
         workflowNodeRunAsset: { deleteMany: mocks.workflowNodeRunAssetDeleteMany },
+        workflowNode: { findMany: mocks.workflowNodeFindMany },
         workflow: { update: mocks.workflowUpdate },
         job: { updateMany: mocks.jobUpdateMany },
       }),
@@ -271,9 +273,15 @@ describe('retryWorkflowNode', () => {
       nodeId,
       workspaceId: 'workspace-1',
       status: 'SUCCEEDED',
-      run: { id: 'run-1', status: 'SUCCEEDED', graph },
+      run: { id: 'run-1', workflowId: 'workflow-1', status: 'SUCCEEDED', graph },
     });
     mocks.workflowRunUpdateMany.mockResolvedValue({ count: 1 });
+    // The workflow as it stands now — the labelling step has been edited since.
+    mocks.workflowNodeFindMany.mockResolvedValue([
+      { id: 'library', name: 'Media library', config: {} },
+      { id: 'pick', name: 'Choose pictures', config: { mode: 'random', count: 5 } },
+      { id: 'combine', name: 'Combine media', config: {} },
+    ]);
     // Every step succeeded in the run being played again.
     mocks.workflowNodeRunFindMany.mockResolvedValue(
       graph.nodes.map((node) => ({ nodeId: node.id, id: `${node.id}-run`, workspaceId: 'workspace-1' })),
@@ -308,6 +316,34 @@ describe('retryWorkflowNode', () => {
 
     // The library above it keeps its output and is not replayed.
     expect(depsWritten()).toEqual({ pick: 0, combine: 1 });
+  });
+
+  /**
+   * The point of the button. Someone presses it because the settings were
+   * wrong; replaying with the ones frozen at run start would produce exactly
+   * the same output again.
+   */
+  it('replays with the settings as they are now, not as they were', async () => {
+    succeededRun('pick');
+
+    await retryWorkflowNode('pick-run', 'workspace-1');
+
+    const written = mocks.workflowNodeRunUpdateMany.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.nodeId === 'pick');
+    expect(written.data.config).toEqual({ mode: 'random', count: 5 });
+  });
+
+  it('leaves a step deleted since with what it ran', async () => {
+    succeededRun('pick');
+    mocks.workflowNodeFindMany.mockResolvedValue([]);
+
+    await retryWorkflowNode('pick-run', 'workspace-1');
+
+    const written = mocks.workflowNodeRunUpdateMany.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.nodeId === 'pick');
+    expect(written.data.config).toBeUndefined();
   });
 
   it('refuses while the run is still going', async () => {

@@ -114,7 +114,11 @@ async function RunDetail({
               type: link.mediaAsset.type,
               width: link.mediaAsset.width,
               height: link.mediaAsset.height,
-              url: previews.get(link.mediaAsset.id) ?? null,
+              url: previews.get(link.mediaAsset.id)?.url ?? null,
+              // The file itself, not the still: a poster image handed to a
+              // <video> is a video that cannot be played, which is what the
+              // preview dialog was doing with every clip a run produced.
+              fullUrl: previews.get(link.mediaAsset.id)?.fullUrl ?? null,
             })),
             // Read from the posts table, not from this node's frozen output:
             // approving a post has to stop this row saying "Waiting for you".
@@ -190,18 +194,24 @@ function levelsOf(graph: ReturnType<typeof toGraph>): string[][] {
  */
 async function previewUrls(
   nodeRuns: { producedAssets: { mediaAsset: { id: string; thumbnailKey: string | null; storageKey: string; type: string } }[] }[],
-): Promise<Map<string, string>> {
-  const assets = new Map<string, { key: string }>();
+): Promise<Map<string, { url: string | null; fullUrl: string }>> {
+  const assets = new Map<string, { still: string | null; file: string }>();
   for (const node of nodeRuns) {
     for (const link of node.producedAssets) {
       const asset = link.mediaAsset;
-      // Audio has no still worth showing, and a signed URL for one is wasted work.
-      if (asset.type === 'AUDIO') continue;
-      assets.set(asset.id, { key: asset.thumbnailKey ?? asset.storageKey });
+      assets.set(asset.id, {
+        // Audio has no still worth showing, and a signed URL for one is wasted
+        // work — but the file itself is still wanted, so it can be played.
+        still: asset.type === 'AUDIO' ? null : asset.thumbnailKey ?? asset.storageKey,
+        file: asset.storageKey,
+      });
     }
   }
   const signed = await Promise.all(
-    [...assets].map(async ([id, { key }]) => [id, await storage().signedUrl(key)] as const),
+    [...assets].map(async ([id, { still, file }]) => [id, {
+      url: still ? await storage().signedUrl(still) : null,
+      fullUrl: await storage().signedUrl(file),
+    }] as const),
   );
   return new Map(signed);
 }

@@ -23,7 +23,10 @@ interface ProducedAsset {
   type: string;
   width?: number | null;
   height?: number | null;
+  /** The still shown in the grid: a thumbnail where one exists. */
   url?: string | null;
+  /** The asset itself, for the preview — a <video> cannot play a poster. */
+  fullUrl?: string | null;
 }
 
 interface NodeRun {
@@ -562,18 +565,21 @@ export function WorkflowRunView({
           <div className="relative mx-auto w-fit max-w-full">
             {previewAsset.type === 'VIDEO' ? (
               <VideoPlayer
-                src={previewAsset.url ?? undefined}
+                src={previewAsset.fullUrl ?? undefined}
+                poster={previewAsset.url ?? undefined}
                 ratio={ratioOf(previewAsset)}
-                style={mediaFit(viewportHeight, previewHasStrip)}
+                style={mediaFit(viewportHeight, previewHasStrip, ratioOf(previewAsset))}
               />
             ) : previewAsset.type === 'AUDIO' ? (
-              <audio src={previewAsset.url ?? undefined} controls className="w-80 max-w-full" />
+              <audio src={previewAsset.fullUrl ?? undefined} controls className="w-80 max-w-full" />
             ) : (
               <MediaFrame
                 ratio={ratioOf(previewAsset)}
                 tone="mint"
                 type="image"
-                src={previewAsset.url ?? undefined}
+                /* The full picture here, not the thumbnail the grid shows:
+                   this dialog exists to look at it properly. */
+                src={previewAsset.fullUrl ?? previewAsset.url ?? undefined}
                 alt={humanizeMachineValue(previewAsset.filename)}
                 style={mediaFit(viewportHeight, previewHasStrip)}
               />
@@ -671,10 +677,10 @@ function ratioOf(asset: ProducedAsset): string {
  * seen for it is kept and only genuinely new assets take the one just signed.
  */
 function withStablePreviewUrls(previous: RunStatus, next: RunStatus): RunStatus {
-  const known = new Map<string, string>();
+  const known = new Map<string, { url?: string | null; fullUrl?: string | null }>();
   for (const node of previous.nodes) {
     for (const asset of node.produced ?? []) {
-      if (asset.url) known.set(asset.id, asset.url);
+      if (asset.url || asset.fullUrl) known.set(asset.id, { url: asset.url, fullUrl: asset.fullUrl });
     }
   }
   if (known.size === 0) return next;
@@ -685,7 +691,10 @@ function withStablePreviewUrls(previous: RunStatus, next: RunStatus): RunStatus 
       ...node,
       produced: node.produced?.map((asset) => ({
         ...asset,
-        url: known.get(asset.id) ?? asset.url,
+        url: known.get(asset.id)?.url ?? asset.url,
+        // Kept for the same reason as the still, and it matters more: a fresh
+        // signature mid-playback restarts the clip the person is watching.
+        fullUrl: known.get(asset.id)?.fullUrl ?? asset.fullUrl,
       })),
     })),
   };
@@ -711,12 +720,18 @@ function mediaHeight(viewportHeight: number, hasStrip: boolean): number {
   return Math.max(220, Math.min(viewportHeight - chrome, 620));
 }
 
-function mediaFit(viewportHeight: number, hasStrip: boolean) {
+function mediaFit(viewportHeight: number, hasStrip: boolean, ratio?: string) {
   return {
     width: 'auto',
     height: `${mediaHeight(viewportHeight, hasStrip)}px`,
     maxWidth: '100%',
     margin: '0 auto',
+    // The player's own frame is `width: 100%` of this element, and this one
+    // sits in a shrink-to-fit column — so with only a height to go on it
+    // resolved to nothing and the dialog opened on an empty space. The ratio
+    // is what turns the fixed height into a width. Images need none: the
+    // picture inside carries its own.
+    ...(ratio ? { aspectRatio: ratio } : {}),
   } as const;
 }
 

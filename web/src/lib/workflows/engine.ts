@@ -667,6 +667,23 @@ export async function retryWorkflowNode(nodeRunId: string, workspaceId: string):
       select: { nodeId: true },
     });
     const done = new Set(succeeded.map((s) => s.nodeId));
+
+    // The settings as they are now, not as they were when the run started.
+    //
+    // A node run freezes its config so a mid-run edit cannot change what a run
+    // is doing underneath itself. Playing from a step is the other case: the
+    // reason to press it is usually that the settings were wrong, and applying
+    // the old ones again would just produce the same output. Only the steps
+    // being replayed are refreshed; the rows above keep what they ran with.
+    //
+    // Wiring is deliberately not re-read. The run's graph is the shape it
+    // started with, and re-deriving it here would let a rewired workflow
+    // disagree with the node rows this run actually has.
+    const live = await tx.workflowNode.findMany({
+      where: { workflowId: nodeRun.run.workflowId, id: { in: affected } },
+      select: { id: true, name: true, config: true },
+    });
+    const current = new Map(live.map((node) => [node.id, node]));
     // A step being replayed is not a finished dependency, whatever its row says
     // a moment before this resets it. Playing from a step that had succeeded
     // otherwise left its own descendants counting it as done: they were queued
@@ -684,9 +701,15 @@ export async function retryWorkflowNode(nodeRunId: string, workspaceId: string):
           .filter((e) => e.targetNodeId === nodeId && !done.has(e.sourceNodeId))
           .map((e) => e.sourceNodeId),
       ).size;
+      // A step deleted from the workflow since keeps what it ran with: there
+      // are no current settings to take, and the run's own graph still has it.
+      const latest = current.get(nodeId);
       await tx.workflowNodeRun.updateMany({
         where: { runId: nodeRun.runId, nodeId },
         data: {
+          ...(latest
+            ? { config: (latest.config ?? {}) as Prisma.InputJsonValue, nodeName: latest.name }
+            : {}),
           status: WorkflowNodeRunStatus.PENDING,
           pendingDeps: pending,
           output: Prisma.DbNull,
