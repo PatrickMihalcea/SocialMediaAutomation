@@ -667,6 +667,12 @@ export async function retryWorkflowNode(nodeRunId: string, workspaceId: string):
       select: { nodeId: true },
     });
     const done = new Set(succeeded.map((s) => s.nodeId));
+    // A step being replayed is not a finished dependency, whatever its row says
+    // a moment before this resets it. Playing from a step that had succeeded
+    // otherwise left its own descendants counting it as done: they were queued
+    // beside it instead of behind it, read a row that had just been cleared,
+    // and failed with "that step did not finish".
+    for (const nodeId of affected) done.delete(nodeId);
 
     for (const nodeId of affected) {
       // Dependencies still outstanding are upstreams that have not succeeded —

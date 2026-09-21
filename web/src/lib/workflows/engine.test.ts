@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   enqueue: vi.fn(),
   audit: vi.fn(),
   jobUpdateMany: vi.fn(),
+  workflowNodeRunFindFirst: vi.fn(),
+  workflowNodeRunAssetDeleteMany: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -30,8 +32,10 @@ vi.mock('@/lib/db', () => ({
       updateMany: mocks.workflowNodeRunUpdateMany,
       update: mocks.workflowNodeRunUpdate,
       findUnique: mocks.workflowNodeRunFindUnique,
+      findFirst: mocks.workflowNodeRunFindFirst,
       groupBy: mocks.workflowNodeRunGroupBy,
     },
+    workflowNodeRunAsset: { deleteMany: mocks.workflowNodeRunAssetDeleteMany },
     workflowRun: {
       create: mocks.workflowRunCreate,
       findUnique: mocks.workflowRunFindUnique,
@@ -49,6 +53,7 @@ vi.mock('@/lib/db', () => ({
           findMany: mocks.workflowNodeRunFindMany,
           updateMany: mocks.workflowNodeRunUpdateMany,
         },
+        workflowNodeRunAsset: { deleteMany: mocks.workflowNodeRunAssetDeleteMany },
         workflow: { update: mocks.workflowUpdate },
         job: { updateMany: mocks.jobUpdateMany },
       }),
@@ -59,7 +64,7 @@ vi.mock('@/lib/queue', () => ({ enqueue: mocks.enqueue }));
 vi.mock('@/lib/workflows/executors', () => ({ getExecutor: mocks.getExecutor }));
 vi.mock('@/lib/audit', () => ({ audit: mocks.audit }));
 
-import { cancelWorkflowRun, runWorkflowNode, startWorkflowRun } from '@/lib/workflows/engine';
+import { cancelWorkflowRun, retryWorkflowNode, runWorkflowNode, startWorkflowRun } from '@/lib/workflows/engine';
 
 describe('startWorkflowRun', () => {
   it('blocks runs when a publish step has no channels selected', async () => {
@@ -241,5 +246,94 @@ describe('cancelWorkflowRun', () => {
       },
       data: { status: 'CANCELLED', dedupeKey: null, completedAt: expect.any(Date) },
     });
+  });
+});
+
+describe('retryWorkflowNode', () => {
+  /** library -> pick -> combine, all of them finished successfully. */
+  const graph = {
+    nodes: [
+      { id: 'library', type: 'MEDIA_LIBRARY', name: 'Media library', config: {}, version: 1, positionX: 0, positionY: 0 },
+      { id: 'pick', type: 'PICK', name: 'Choose pictures', config: {}, version: 1, positionX: 1, positionY: 0 },
+      { id: 'combine', type: 'COMBINE_MEDIA', name: 'Combine media', config: {}, version: 1, positionX: 2, positionY: 0 },
+    ],
+    edges: [
+      { sourceNodeId: 'library', sourcePort: 'images', targetNodeId: 'pick', targetPort: 'items' },
+      { sourceNodeId: 'pick', sourcePort: 'selection', targetNodeId: 'combine', targetPort: 'media1' },
+    ],
+  };
+
+  function succeededRun(nodeId: string) {
+    vi.clearAllMocks();
+    mocks.workflowNodeRunFindFirst.mockResolvedValue({
+      id: `${nodeId}-run`,
+      runId: 'run-1',
+      nodeId,
+      workspaceId: 'workspace-1',
+      status: 'SUCCEEDED',
+      run: { id: 'run-1', status: 'SUCCEEDED', graph },
+    });
+    mocks.workflowRunUpdateMany.mockResolvedValue({ count: 1 });
+    // Every step succeeded in the run being played again.
+    mocks.workflowNodeRunFindMany.mockResolvedValue(
+      graph.nodes.map((node) => ({ nodeId: node.id, id: `${node.id}-run`, workspaceId: 'workspace-1' })),
+    );
+  }
+
+  /** The dependency counts written for the steps being replayed. */
+  const depsWritten = () => Object.fromEntries(
+    mocks.workflowNodeRunUpdateMany.mock.calls
+      .filter(([args]) => typeof args?.data?.pendingDeps === 'number')
+      .map(([args]) => [args.where.nodeId, args.data.pendingDeps]),
+  );
+
+  /**
+   * The bug this exists for. Playing from a step that had succeeded left its
+   * own descendants counting it as a finished dependency — they were queued
+   * beside it rather than behind it, read the row it had just cleared, and
+   * failed with "that step did not finish".
+   */
+  it('does not count a step being replayed as a finished dependency', async () => {
+    succeededRun('library');
+
+    await retryWorkflowNode('library-run', 'workspace-1');
+
+    expect(depsWritten()).toEqual({ library: 0, pick: 1, combine: 1 });
+  });
+
+  it('still starts steps whose upstreams are genuinely done', async () => {
+    succeededRun('pick');
+
+    await retryWorkflowNode('pick-run', 'workspace-1');
+
+    // The library above it keeps its output and is not replayed.
+    expect(depsWritten()).toEqual({ pick: 0, combine: 1 });
+  });
+
+  it('refuses while the run is still going', async () => {
+    succeededRun('pick');
+    mocks.workflowNodeRunFindFirst.mockResolvedValue({
+      id: 'pick-run',
+      runId: 'run-1',
+      nodeId: 'pick',
+      status: 'SUCCEEDED',
+      run: { id: 'run-1', status: 'RUNNING', graph },
+    });
+
+    await expect(retryWorkflowNode('pick-run', 'workspace-1')).rejects.toThrow(/still going/i);
+    expect(mocks.workflowRunUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('refuses a step that has not finished', async () => {
+    succeededRun('pick');
+    mocks.workflowNodeRunFindFirst.mockResolvedValue({
+      id: 'pick-run',
+      runId: 'run-1',
+      nodeId: 'pick',
+      status: 'RUNNING',
+      run: { id: 'run-1', status: 'SUCCEEDED', graph },
+    });
+
+    await expect(retryWorkflowNode('pick-run', 'workspace-1')).rejects.toThrow(/has not finished/i);
   });
 });

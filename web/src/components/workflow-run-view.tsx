@@ -89,7 +89,7 @@ export function WorkflowRunView({
   /** Node ids grouped into dependency levels — what runs in parallel with what. */
   levels: string[][];
   /** Per node id: what playing from it would re-run. Fixed for the run's graph. */
-  replay: Record<string, { steps: number; publishes: boolean }>;
+  replay: Record<string, { nodes: string[]; publishes: boolean }>;
   canRun: boolean;
 }) {
   const [status, setStatus] = useState<RunStatus>(initial);
@@ -278,22 +278,50 @@ export function WorkflowRunView({
     });
   }
 
-  function play(nodeRunId: string) {
+  function play(node: NodeRun) {
     setError('');
     setConfirmPlay(null);
+    // Shown as waiting straight away, and the run marked as going again.
+    //
+    // Not decoration: polling only runs while the run is unfinished, so a view
+    // left on a finished run has nothing watching it. Without this the steps
+    // sat there saying Done until the page was reloaded by hand — the work had
+    // started, the screen was just the last thing the server said.
+    const affected = new Set(replay[node.nodeId]?.nodes ?? [node.nodeId]);
+    setStatus((current) => ({
+      ...current,
+      run: { ...current.run, status: 'RUNNING', finishedAt: null, durationMs: null, error: null },
+      nodes: current.nodes.map((row) => (affected.has(row.nodeId)
+        ? {
+          ...row,
+          status: 'PENDING' as WorkflowNodeRunStatus,
+          startedAt: null,
+          finishedAt: null,
+          durationMs: null,
+          error: null,
+          attempt: 0,
+          hasOutput: false,
+          produced: [],
+          post: null,
+        }
+        : row)),
+    }));
+    etag.current = null;
+
     startTransition(async () => {
       try {
-        await retryNodeAction(slug, nodeRunId);
-        etag.current = null;
+        await retryNodeAction(slug, node.id);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'That step could not be played again.');
+        // Put back what the server last said, since nothing is running after all.
+        setStatus(initial);
       }
     });
   }
 
   /** What the button says it will do, which is more than re-run one step. */
   function playLabel(node: NodeRun): string {
-    const after = (replay[node.nodeId]?.steps ?? 1) - 1;
+    const after = (replay[node.nodeId]?.nodes.length ?? 1) - 1;
     if (after <= 0) return 'Play this step again';
     return `Play from here — also runs the ${after} step${after === 1 ? '' : 's'} after it`;
   }
@@ -308,7 +336,7 @@ export function WorkflowRunView({
    */
   function askToPlay(node: NodeRun) {
     if (replay[node.nodeId]?.publishes) setConfirmPlay(node);
-    else play(node.id);
+    else play(node);
   }
 
   return (
@@ -604,7 +632,7 @@ export function WorkflowRunView({
             <Button variant="secondary" onClick={() => setConfirmPlay(null)}>
               Leave it
             </Button>
-            <Button onClick={() => play(confirmPlay.id)} disabled={pending}>
+            <Button onClick={() => play(confirmPlay)} disabled={pending}>
               Play from here
             </Button>
           </>

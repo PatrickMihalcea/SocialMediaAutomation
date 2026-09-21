@@ -131,16 +131,18 @@ async function RunDetail({
  *
  * Computed here because the graph is here: the run view has only a flat list of
  * steps, and "this also re-runs the four steps after it" is the part someone
- * needs before clicking, not after. `publishes` is called out separately —
+ * needs before clicking, not after. The ids, not just a count, because the
+ * view marks exactly those steps as waiting the moment the button is pressed.
+ * `publishes` is called out separately —
  * everything else a replay touches can be done again, and a post cannot.
  */
-function replayPlan(graph: ReturnType<typeof toGraph>): Record<string, { steps: number; publishes: boolean }> {
+function replayPlan(graph: ReturnType<typeof toGraph>): Record<string, { nodes: string[]; publishes: boolean }> {
   const typeOf = new Map(graph.nodes.map((node) => [node.id, node.type]));
-  const plan: Record<string, { steps: number; publishes: boolean }> = {};
+  const plan: Record<string, { nodes: string[]; publishes: boolean }> = {};
   for (const node of graph.nodes) {
     const affected = [node.id, ...descendantsOf(graph, node.id)];
     plan[node.id] = {
-      steps: affected.length,
+      nodes: affected,
       publishes: affected.some((id) => typeOf.get(id) === 'PUBLISH'),
     };
   }
