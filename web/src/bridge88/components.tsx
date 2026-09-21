@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, Ref, SelectHTMLAttributes, TextareaHTMLAttributes, VideoHTMLAttributes } from 'react';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, Music } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
@@ -692,7 +692,11 @@ export function MediaFrame({
    * heavier picture but an accurate one, and a broken image says nothing.
    */
   fallbackSrc?: string | null;
-  type?: 'image' | 'video';
+  /**
+   * `audio` has no picture of its own: the frame shows a music glyph and the
+   * name, so a chosen track reads as a track rather than as a missing image.
+   */
+  type?: 'image' | 'video' | 'audio';
   ratio?: keyof typeof MEDIA_RATIOS | string;
   alt?: string;
   poster?: string;
@@ -736,7 +740,22 @@ export function MediaFrame({
         ...style,
       }}
     >
-      {shown ? (
+      {type === 'audio' ? (
+        <span
+          className="b88-caption"
+          style={{
+            display: 'grid',
+            gap: 'var(--space-xs)',
+            justifyItems: 'center',
+            padding: 'var(--space-sm)',
+            textAlign: 'center',
+            overflow: 'hidden',
+          }}
+        >
+          <Music size={20} strokeWidth={1.75} aria-hidden="true" />
+          <span style={{ overflowWrap: 'anywhere' }}>{label || alt}</span>
+        </span>
+      ) : shown ? (
         type === 'video' ? (
           // Absolute inset keeps the video out of grid track sizing, where its
           // intrinsic 150px height would otherwise win over height: 100%.

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
-import { Braces, ChevronLeft, ChevronRight, Play, SlidersHorizontal } from 'lucide-react';
+import { Braces, ChevronLeft, ChevronRight, Music, Play, SlidersHorizontal } from 'lucide-react';
 import type { WorkflowNodeRunStatus, WorkflowRunStatus } from '@prisma/client';
 import { Badge, Button, Dialog, IconButton, humanizeMachineValue, MediaFrame, StatusMessage, VideoPlayer } from '@/bridge88/components';
 import { cancelRunAction, getNodeRunOutputAction, retryNodeAction } from '@/app/actions/workflows';
@@ -438,10 +438,13 @@ export function WorkflowRunView({
                       whether it did what you asked, which is the only question
                       anyone opens a run to answer.
                     */}
-                    {!!(node.produced ?? []).some((asset) => asset.url) && (
+                    {/* Audio counts as showable even with no still: a chosen
+                        track is exactly what a Select items step was asked to
+                        produce, and the tile opens a player. */}
+                    {!!(node.produced ?? []).some((asset) => asset.url || asset.type === 'AUDIO') && (
                       <div className="mt-3 flex flex-wrap gap-3">
                         {(node.produced ?? [])
-                          .filter((asset) => asset.url)
+                          .filter((asset) => asset.url || asset.type === 'AUDIO')
                           .slice(0, 8)
                           .map((asset, assetIndex, shown) => (
                             <button
@@ -454,7 +457,8 @@ export function WorkflowRunView({
                               <MediaFrame
                                 ratio={asset.width && asset.height ? `${asset.width} / ${asset.height}` : '1:1'}
                                 tone="mint"
-                                type={asset.type === 'VIDEO' ? 'video' : 'image'}
+                                type={MEDIA_FRAME_TYPE[asset.type] ?? 'image'}
+                                label={humanizeMachineValue(asset.filename)}
                                 src={asset.url ?? undefined}
                                 // Some assets record a thumbnail that was never
                                 // written; the file itself still shows.
@@ -574,7 +578,7 @@ export function WorkflowRunView({
                 style={mediaFit(viewportHeight, previewHasStrip, ratioOf(previewAsset))}
               />
             ) : previewAsset.type === 'AUDIO' ? (
-              <audio src={previewAsset.fullUrl ?? undefined} controls className="w-80 max-w-full" />
+              <audio src={previewAsset.fullUrl ?? undefined} controls autoFocus className="w-[420px] max-w-full" />
             ) : (
               <MediaFrame
                 ratio={ratioOf(previewAsset)}
@@ -594,7 +598,10 @@ export function WorkflowRunView({
               sitting under it, so looking through a set is one target the
               pointer never leaves.
             */}
-            {preview && preview.assets.length > 1 && (
+            {/* Not over a track: the player's own controls are here, and a
+                chevron on the seek bar is a mis-click waiting to happen. The
+                strip below steps through those. */}
+            {preview && preview.assets.length > 1 && previewAsset.type !== 'AUDIO' && (
               <>
                 <StepThrough side="left" label="Previous" onClick={() => step(-1)} />
                 <StepThrough side="right" label="Next" onClick={() => step(1)} />
@@ -613,11 +620,21 @@ export function WorkflowRunView({
                 aria-label={`Show ${humanizeMachineValue(asset.filename)}`}
                 aria-current={index === preview.index}
                 onClick={() => setPreview((current) => (current ? { ...current, index } : current))}
-                className={`size-12 shrink-0 overflow-hidden rounded-md border transition-opacity hover:opacity-80 ${
-                  index === preview.index ? 'border-ink' : 'border-hairline opacity-60'
-                }`}
+                title={humanizeMachineValue(asset.filename)}
+                className={`shrink-0 overflow-hidden rounded-md border transition-opacity hover:opacity-80 ${
+                  asset.type === 'AUDIO' ? 'h-12 w-28 px-2' : 'size-12'
+                } ${index === preview.index ? 'border-ink' : 'border-hairline opacity-60'}`}
               >
-                {asset.url && <img src={asset.url} alt="" className="size-full object-cover" />}
+                {asset.url ? (
+                  <img src={asset.url} alt="" className="size-full object-cover" />
+                ) : asset.type === 'AUDIO' ? (
+                  // A row of blank squares says nothing about which track is
+                  // which, and a track is the one thing that is only a name.
+                  <span className="b88-caption flex size-full items-center justify-center gap-1 leading-tight">
+                    <Music size={12} strokeWidth={1.75} aria-hidden="true" />
+                    <span className="truncate">{humanizeMachineValue(asset.filename)}</span>
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -656,6 +673,14 @@ export function WorkflowRunView({
     </div>
   );
 }
+
+/** How each stored media kind is drawn in a frame. */
+const MEDIA_FRAME_TYPE: Record<string, 'image' | 'video' | 'audio'> = {
+  VIDEO: 'video',
+  AUDIO: 'audio',
+  IMAGE: 'image',
+  GIF: 'image',
+};
 
 const MEDIA_KIND: Record<string, string> = {
   IMAGE: 'Image',

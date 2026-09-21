@@ -129,7 +129,8 @@ export async function GET(
             type: asset.type,
             width: asset.width,
             height: asset.height,
-            url: previews.get(asset.id) ?? null,
+            url: previews.get(asset.id)?.url ?? null,
+            fullUrl: previews.get(asset.id)?.fullUrl ?? null,
           })),
           post: posts.get(node.id) ?? null,
         })),
@@ -143,21 +144,34 @@ export async function GET(
   }
 }
 
-/** Signed stills for everything a run has produced so far. Audio has none worth showing. */
+/**
+ * Signed URLs for everything a run has produced so far: the still for the row,
+ * and the file itself for the preview. Audio has no still worth showing, and
+ * still needs its file — that is what makes a chosen track playable.
+ *
+ * Both, and on this route as well as the page, because a run being watched
+ * receives its assets through here: signing only the still left every clip
+ * produced mid-run unplayable until the page was reloaded.
+ */
 async function signPreviews(
   nodeRuns: {
     producedAssets: { mediaAsset: { id: string; type: string; thumbnailKey: string | null; storageKey: string } }[];
   }[],
-): Promise<Map<string, string>> {
-  const keys = new Map<string, string>();
+): Promise<Map<string, { url: string | null; fullUrl: string }>> {
+  const keys = new Map<string, { still: string | null; file: string }>();
   for (const node of nodeRuns) {
     for (const { mediaAsset: asset } of node.producedAssets) {
-      if (asset.type === 'AUDIO') continue;
-      keys.set(asset.id, asset.thumbnailKey ?? asset.storageKey);
+      keys.set(asset.id, {
+        still: asset.type === 'AUDIO' ? null : asset.thumbnailKey ?? asset.storageKey,
+        file: asset.storageKey,
+      });
     }
   }
   const signed = await Promise.all(
-    [...keys].map(async ([id, key]) => [id, await storage().signedUrl(key)] as const),
+    [...keys].map(async ([id, { still, file }]) => [id, {
+      url: still ? await storage().signedUrl(still) : null,
+      fullUrl: await storage().signedUrl(file),
+    }] as const),
   );
   return new Map(signed);
 }
