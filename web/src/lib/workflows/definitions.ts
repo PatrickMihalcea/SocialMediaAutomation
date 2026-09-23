@@ -245,6 +245,20 @@ export const NODE_DEFINITIONS = {
        * guidance fields steer the post copy, and the thing the step exists to
        * write was the one output nobody could say anything about.
        */
+      /**
+       * How far this step wanders from the model's most typical answer.
+       *
+       * On the step rather than only on the workspace: a workspace writes
+       * captions it wants steady and ideas it wants varied, and one number for
+       * both settles that argument the wrong way whichever value it takes.
+       * Capped at 1.3 — these replies have to parse into a schema, and past
+       * about 1.15 they start failing and being retried.
+       */
+      temperature: z
+        .number()
+        .min(0, 'Temperature cannot be below 0.')
+        .max(1.3, 'Temperature cannot be above 1.3.')
+        .default(0.7),
       promptGuidance: z.string().max(2_000, 'How to write the prompts must be 2,000 characters or fewer.').default(''),
       titleGuidance: z.string().max(2_000, 'How to write the title must be 2,000 characters or fewer.').default(''),
       captionGuidance: z.string().max(2_000, 'How to write the caption must be 2,000 characters or fewer.').default(''),

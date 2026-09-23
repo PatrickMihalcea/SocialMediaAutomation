@@ -137,6 +137,10 @@ export const WORKFLOW_FIELD_HELP: Partial<
         random: 'Random from a pool',
       },
     },
+    temperature: {
+      label: 'Variety',
+      description: 'How far each run wanders from the model\u2019s most obvious answer. Low keeps a steady house style and repeats itself; high explores, and loses consistency. Past about 1.15 the model sometimes replies in a shape the step cannot read, and the run is retried.',
+    },
     theme: {
       label: 'Theme',
       description: 'The subject every idea varies. Connecting the Theme input overrides whatever is typed here.',

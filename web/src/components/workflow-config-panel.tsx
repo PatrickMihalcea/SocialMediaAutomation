@@ -11,6 +11,7 @@ import {
   Dropdown,
   Field,
   IconButton,
+  Slider,
   StatusMessage,
   TextArea,
   type DropdownOption,
@@ -834,6 +835,25 @@ export function NodeConfigPanel({
     }
     // The theme pool carries a sketch per theme, so it gets an editor that can
     // show them rather than the plain list field.
+    if (node.type === 'IDEA_GENERATOR' && field.key === 'temperature') {
+      return (
+        <Slider
+          key={field.key}
+          label={field.label}
+          hint={showHelp ? field.description : undefined}
+          min={0}
+          max={1.3}
+          step={0.05}
+          defaultValue={typeof value === 'number' ? value : 0.7}
+          minLabel="Consistent"
+          maxLabel="Varied"
+          disabled={!canEdit}
+          onChange={(event) =>
+            setConfig((current) => ({ ...current, temperature: Number(event.target.value) }))
+          }
+        />
+      );
+    }
     if (node.type === 'IDEA_GENERATOR' && field.key === 'themePool') {
       return (
         <WorkflowThemePool

@@ -14,6 +14,7 @@ interface Config {
   themePool: string[];
   themeImages: Record<string, string>;
   count: number;
+  temperature: number;
   promptGuidance: string;
   titleGuidance: string;
   captionGuidance: string;
@@ -108,6 +109,9 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     operation: 'IDEAS',
     schema: imagePromptsSchema,
     schemaName: 'image_prompts',
+    // The step's own setting, not the workspace's: this is the one call in the
+    // app whose whole job is to come back different every time.
+    temperature: config.temperature,
     messages: [
       { role: 'system', content: system },
       {
