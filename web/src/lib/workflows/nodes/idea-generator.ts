@@ -39,26 +39,13 @@ const directed = (base: string, guidance: string) => {
  * the guidance settings, and it is otherwise only observable by mocking the
  * model.
  */
-export function buildIdeaInstruction(
-  config: Config,
-  recentTitles: string[] = [],
-  recentSettings: string[] = [],
-): string {
+export function buildIdeaInstruction(config: Config, recentTitles: string[] = []): string {
   return [
-    'Reply as {"postTitle":string,"caption":string,"hashtags":string[],"additionalOutputs":Record<string,string>,"prompts":[{"title":string,"setting":string,"prompt":string}]}.',
+    'Reply as {"postTitle":string,"caption":string,"hashtags":string[],"additionalOutputs":Record<string,string>,"prompts":[{"title":string,"prompt":string}]}.',
     `Produce exactly ${config.count} entries.`,
-    // The heart of it. Asked for several images on one theme, a model returns
-    // its own most typical answers — for almost any subject that is forest,
-    // desert, coast, snow, rainforest, city, in roughly that order — so every
-    // set came out as the same tour of biomes with different wording.
-    'setting is where this one takes place, in a few words: the location, climate and time of day.',
-    `All ${config.count} settings in this reply must be unrelated to each other. Two entries in different forests, or two in different cities, count as the same setting and are not allowed.`,
     // The model has no memory between runs, so a step left on the same theme
     // writes near enough the same set every week. Naming what it already
     // covered is the cheapest way to keep a feed from repeating itself.
-    ...(recentSettings.length
-      ? [`Previous runs of this step already used these settings. Do not use any of them, and do not use a near variant of one — a different glacier is still a glacier: ${recentSettings.join('; ')}.`]
-      : []),
     ...(recentTitles.length
       ? [`This step has already covered these angles, so take a different one for every entry: ${recentTitles.join('; ')}.`]
       : []),
@@ -78,9 +65,6 @@ export function buildIdeaInstruction(
       ? [`Also create these named text fields, each consistent with the same overall concept: ${config.additionalOutputs.map((field) => `${field.id} (${field.label})`).join(', ')}.`]
       : []),
     'title is two or three words, suitable for burning onto a video as a label.',
-    // Said plainly because the obvious readings of "vary the setting" are all
-    // scenery: a set can be eight different landscapes and still be one idea.
-    'Vary more than the scenery. Scale, viewpoint, weather, season, time of day and what the place is for are all available, and a set that changes only its backdrop has not varied at all.',
     directed('prompt is the full description.', config.promptGuidance),
   ].join(' ');
 }
@@ -111,7 +95,6 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     throw new PermanentJobError('This workflow has no owner to bill AI usage to. Open it and save it again.');
   }
   const recentTitles = coveredTitles(history, theme);
-  const recentSettings = coveredSettings(history, theme);
 
   const system = await buildSystemPrompt({
     workspaceId: ctx.workspaceId,
@@ -131,7 +114,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
         role: 'user',
         content: `Write ${config.count} ${config.mode} prompts about: ${theme}`,
       },
-      { role: 'system', content: buildIdeaInstruction(config, recentTitles, recentSettings) },
+      { role: 'system', content: buildIdeaInstruction(config, recentTitles) },
     ],
   });
 
@@ -166,12 +149,6 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     prompts,
     // Titles ride along so a downstream overlay can label each clip by name.
     titles: object.prompts.slice(0, config.count).map((p) => p.title),
-    // Not a port and nothing downstream reads it: this is written so the next
-    // run of this step can be told what has already been used.
-    settings: object.prompts
-      .slice(0, config.count)
-      .map((p) => (p.setting ?? '').trim())
-      .filter(Boolean),
   };
 }
 
@@ -208,10 +185,8 @@ export function resolveTheme(
   return pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
 }
 
-/** Themes, titles and settings this step produced before, newest first. */
-async function recentRuns(
-  ctx: NodeRunContext,
-): Promise<Array<{ theme: string; titles: string[]; settings: string[] }>> {
+/** Themes and titles this step produced before, newest first. */
+async function recentRuns(ctx: NodeRunContext): Promise<Array<{ theme: string; titles: string[] }>> {
   const runs = await db.workflowNodeRun.findMany({
     where: {
       nodeId: ctx.nodeId,
@@ -224,23 +199,13 @@ async function recentRuns(
     select: { output: true },
   });
   return runs.map((run) => {
-    const output = (run.output ?? {}) as {
-      theme?: unknown;
-      titles?: unknown;
-      settings?: unknown;
-      postTitle?: unknown;
-    };
+    const output = (run.output ?? {}) as { theme?: unknown; titles?: unknown; postTitle?: unknown };
     return {
       theme: typeof output.theme === 'string' ? output.theme.trim() : '',
       titles: [
         ...(Array.isArray(output.titles) ? output.titles : []),
         output.postTitle,
       ].filter((title): title is string => typeof title === 'string' && title.trim() !== ''),
-      // Absent on every run recorded before settings existed, which is simply
-      // a shorter exclusion list until a few runs have gone by.
-      settings: (Array.isArray(output.settings) ? output.settings : []).filter(
-        (setting): setting is string => typeof setting === 'string' && setting.trim() !== '',
-      ),
     };
   });
 }
@@ -249,10 +214,7 @@ async function recentRuns(
  * What to tell the model it has already made — only for the theme in hand,
  * because titles written for a different topic say nothing about this one.
  */
-function coveredTitles(
-  history: Array<{ theme: string; titles: string[] }>,
-  theme: string,
-): string[] {
+function coveredTitles(history: Array<{ theme: string; titles: string[] }>, theme: string): string[] {
   return [
     ...new Set(
       history
@@ -261,28 +223,6 @@ function coveredTitles(
         .map((title) => title.trim()),
     ),
   ].slice(0, 40);
-}
-
-/**
- * The settings already used for this theme, newest first.
- *
- * Longer than the title list and worth its length: this is the list that has
- * to hold a whole season of a weekly step, since it is the one thing standing
- * between a feed and its fourth forest.
- */
-export function coveredSettings(
-  history: Array<{ theme: string; settings: string[] }>,
-  theme: string,
-): string[] {
-  return [
-    ...new Set(
-      history
-        .filter((entry) => !entry.theme || entry.theme === theme)
-        .flatMap((entry) => entry.settings)
-        .map((setting) => setting.trim())
-        .filter(Boolean),
-    ),
-  ].slice(0, 60);
 }
 
 const INSTRUCTION: Record<Config['mode'], string> = {

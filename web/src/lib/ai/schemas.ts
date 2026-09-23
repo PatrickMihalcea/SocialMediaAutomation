@@ -212,17 +212,6 @@ export const imagePromptsSchema = z.object({
     .array(
       z.object({
         title: z.string().max(80),
-        /**
-         * Where this one is set, in a few words — "coastal cliff at dusk",
-         * "dense rainforest canopy".
-         *
-         * Recorded so a later run can be told what has already been used. A
-         * title is two or three words chosen to look good burned onto a video,
-         * and asking a model not to repeat "Glacier canopy" simply produced
-         * "Alpine loft" — the same scene under another name. The setting is
-         * the thing that was actually repeating, so it is the thing to name.
-         */
-        setting: z.string().max(120).default(''),
         prompt: z.string().max(2000),
       }),
     )
