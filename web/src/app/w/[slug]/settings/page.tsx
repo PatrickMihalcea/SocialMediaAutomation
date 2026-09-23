@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { Checkbox, Field, MediaUploader, Select, TextArea } from '@/bridge88/components';
+import { Checkbox, Field, MediaUploader, Select, Slider, TextArea } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { timezoneLabel, timezoneOptions } from '@/lib/scheduling/time';
@@ -13,6 +13,7 @@ import {
 import { ActionForm } from '@/components/action-form';
 import { PendingButton } from '@/components/action-ui';
 import { storage } from '@/lib/storage';
+import { MAX_AI_TEMPERATURE, MIN_AI_TEMPERATURE, resolveTemperature } from '@/lib/ai';
 import { SettingsPagePreview } from '@/components/page-previews';
 import { BrandVoiceForms } from './brand-voice-forms';
 import { SettingsSection } from './settings-section';
@@ -116,9 +117,21 @@ async function SettingsData({ params }: { params: Promise<{ slug: string }> }) {
               </div>
               <Field name="defaultHashtags" label="Default hashtags" defaultValue={(preferences?.defaultHashtags ?? []).map((tag) => `#${tag}`).join(', ')} />
               <Field name="defaultCta" label="Default call to action" defaultValue={preferences?.defaultCta ?? ''} />
-              <Select name="aiCreativity" label="AI creativity" defaultValue={preferences?.aiCreativity ?? 'BALANCED'}>
-                <option value="PRECISE">Precise</option><option value="BALANCED">Balanced</option><option value="CREATIVE">Creative</option>
-              </Select>
+              {/* The number, not three names for three points on it. Low
+                  converges on the model's most typical answer, which is why a
+                  set of ideas kept coming back the same; high wanders, and past
+                  about 1.15 structured replies start failing to parse. */}
+              <Slider
+                name="aiTemperature"
+                label="AI temperature"
+                min={MIN_AI_TEMPERATURE}
+                max={MAX_AI_TEMPERATURE}
+                step={0.05}
+                defaultValue={resolveTemperature(preferences)}
+                minLabel="Predictable"
+                maxLabel="Varied"
+                hint="Higher gives more variety and less consistency. Above about 1.15 the model can return replies the app cannot read, which are retried."
+              />
               <Checkbox name="requireApprovalByDefault" label="Require approval by default" defaultChecked={preferences?.requireApprovalByDefault ?? false} />
               <Checkbox name="aiUseBrandVoice" label="Use brand voice for AI" defaultChecked={preferences?.aiUseBrandVoice ?? true} />
               <Checkbox name="aiAutoAdaptPlatforms" label="Automatically adapt AI copy per platform" defaultChecked={preferences?.aiAutoAdaptPlatforms ?? true} />

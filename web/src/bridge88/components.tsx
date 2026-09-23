@@ -244,6 +244,81 @@ export function Field({
   );
 }
 
+/**
+ * A number chosen along a range, with the current value always on screen.
+ *
+ * A bare range input is the one control that says nothing about where it is —
+ * the thumb's position is the only readout, and "somewhere past the middle" is
+ * not a setting anyone can repeat or report. The value sits beside the label,
+ * and the ends are named so the direction means something.
+ *
+ * Uncontrolled like Field: `defaultValue` seeds it and the form reads the
+ * input, so the value shown is display only and never fights the form.
+ */
+export function Slider({
+  label,
+  hint,
+  error,
+  minLabel,
+  maxLabel,
+  id,
+  className,
+  containerClassName,
+  defaultValue,
+  onChange,
+  ...props
+}: InputHTMLAttributes<HTMLInputElement> & {
+  label: string;
+  hint?: string;
+  error?: string;
+  /** Words for each end, so the scale reads as something other than numbers. */
+  minLabel?: string;
+  maxLabel?: string;
+  containerClassName?: string;
+}) {
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
+  const messageId = `${inputId}-message`;
+  const [shown, setShown] = useState(Number(defaultValue ?? 0));
+  // Read off the step rather than taken as a formatter prop: this is a client
+  // component, and a function handed to it from a server one cannot cross that
+  // boundary — the page fails to render rather than falling back to plain
+  // numbers. A step of 0.05 wants two decimals, one of 1 wants none.
+  const decimals = (String(props.step ?? 1).split('.')[1] ?? '').length;
+
+  return (
+    <div className={containerClassName ? `block ${containerClassName}` : 'block'}>
+      <div className="flex items-baseline justify-between gap-3">
+        <label className="b88-label" htmlFor={inputId}>{label}</label>
+        <output htmlFor={inputId} className="b88-caption">{shown.toFixed(decimals)}</output>
+      </div>
+      <input
+        id={inputId}
+        type="range"
+        defaultValue={defaultValue}
+        className={`mt-1 h-10 w-full cursor-pointer accent-[var(--primary)] ${className ?? ''}`}
+        aria-describedby={error || hint ? messageId : undefined}
+        onChange={(event) => {
+          setShown(Number(event.target.value));
+          onChange?.(event);
+        }}
+        {...props}
+      />
+      {(minLabel || maxLabel) && (
+        <div className="b88-caption flex justify-between">
+          <span>{minLabel}</span>
+          <span>{maxLabel}</span>
+        </div>
+      )}
+      {(error || hint) && (
+        <span id={messageId} className="mt-1.5 block text-sm" role={error ? 'alert' : undefined}>
+          {error ?? hint}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function Select({
   label,
   hint,

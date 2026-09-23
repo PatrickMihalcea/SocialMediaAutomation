@@ -60,38 +60,38 @@ export function imageGenerationRunsInProcess(provider?: ImageProviderName): bool
   return selected !== 'image-use' || new ImageUseProvider().isConfigured();
 }
 
+export const MIN_AI_TEMPERATURE = 0;
+export const MAX_AI_TEMPERATURE = 1.3;
+
 /**
- * Sampling temperature for one call.
+ * The temperature a workspace generates at.
  *
- * The workspace setting says how adventurous the account wants to be; the
- * operation says how much variety the task itself needs, and they are not the
- * same question. Rewriting a caption at 1.0 gets a caption nobody asked for.
- * Asking for eight image ideas at 0.7 gets a model's most typical eight, which
- * for any subject at all is forest, desert, coast, snow, city — the same tour
- * every run, which is exactly what people complained about.
+ * A number the workspace sets, not one of three names standing in for one:
+ * three fixed points were never the right three for everybody, and the whole
+ * effect of the setting is how far up this scale you are.
  *
- * So idea generation runs a band hotter than everything else. Not higher than
- * about 1.15: these calls answer into a schema, and past that the replies start
- * failing to parse and get retried, which costs a second call to say the same
- * thing.
+ * Falls back to the old three-way setting for a row written before the number
+ * existed, so nothing silently changes what it was already doing.
+ *
+ * Clamped rather than trusted. This is read straight out of the database and
+ * handed to the provider, and a number outside the range it accepts fails the
+ * call rather than the validation.
  */
-export function temperatureFor(operation: AiOperation, creativity: Creativity): number {
-  const band = operation === 'IDEAS' ? IDEA_TEMPERATURES : DEFAULT_TEMPERATURES;
-  return band[creativity];
+export function resolveTemperature(preferences: {
+  aiTemperature?: number | null;
+  aiCreativity?: 'PRECISE' | 'BALANCED' | 'CREATIVE' | null;
+} | null): number {
+  const chosen = preferences?.aiTemperature
+    ?? LEGACY_TEMPERATURES[preferences?.aiCreativity ?? 'BALANCED'];
+  if (!Number.isFinite(chosen)) return LEGACY_TEMPERATURES.BALANCED;
+  return Math.min(MAX_AI_TEMPERATURE, Math.max(MIN_AI_TEMPERATURE, chosen));
 }
 
-type Creativity = 'PRECISE' | 'BALANCED' | 'CREATIVE';
-
-const DEFAULT_TEMPERATURES: Record<Creativity, number> = {
+/** What each of the three old names meant, kept only to read those rows. */
+const LEGACY_TEMPERATURES: Record<'PRECISE' | 'BALANCED' | 'CREATIVE', number> = {
   PRECISE: 0.25,
   BALANCED: 0.7,
   CREATIVE: 1,
-};
-
-const IDEA_TEMPERATURES: Record<Creativity, number> = {
-  PRECISE: 0.7,
-  BALANCED: 1,
-  CREATIVE: 1.15,
 };
 
 export async function generateObject<T>(input: {
@@ -109,10 +109,9 @@ export async function generateObject<T>(input: {
   const provider = aiProvider();
   const preferences = await db.workspacePreferences.findUnique({
     where: { workspaceId: input.workspaceId },
-    select: { aiCreativity: true },
+    select: { aiTemperature: true, aiCreativity: true },
   });
-  const temperature = input.temperature
-    ?? temperatureFor(input.operation, preferences?.aiCreativity ?? 'BALANCED');
+  const temperature = input.temperature ?? resolveTemperature(preferences);
   try {
     const result = await provider.completeObject({ ...input, temperature });
     await Promise.all([

@@ -20,6 +20,7 @@ import {
 import { retimeWorkflows } from '@/lib/workflows/schedule';
 import { conflict, invalid } from '@/lib/errors';
 import type { BrandVoiceDraft } from '@/lib/ai/schemas';
+import { MAX_AI_TEMPERATURE, MIN_AI_TEMPERATURE } from '@/lib/ai';
 
 const workspaceSchema = z.object({
   name: z.string().trim().min(2, 'Use at least 2 characters.').max(80),
@@ -42,7 +43,12 @@ const workspacePreferencesSchema = z.object({
   defaultPublishMinute: z.coerce.number().int().min(0).max(59),
   defaultHashtags: z.string().max(1_000),
   defaultCta: z.string().trim().max(500),
-  aiCreativity: z.enum(['PRECISE', 'BALANCED', 'CREATIVE']),
+  // The number itself, not one of three names for one. Capped where structured
+  // replies stop parsing reliably rather than at what the API would accept.
+  aiTemperature: z.coerce
+    .number()
+    .min(MIN_AI_TEMPERATURE, 'AI temperature cannot be below 0.')
+    .max(MAX_AI_TEMPERATURE, `AI temperature cannot be above ${MAX_AI_TEMPERATURE}.`),
 });
 
 export async function updateWorkspacePreferencesAction(

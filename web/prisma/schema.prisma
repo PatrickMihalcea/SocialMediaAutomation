@@ -362,6 +362,10 @@ model WorkspacePreferences {
   requireApprovalByDefault Boolean                @default(false) @map("require_approval_by_default")
   defaultHashtags          String[]               @default([]) @map("default_hashtags")
   defaultCta               String                 @default("") @map("default_cta")
+  /// Sampling temperature, set directly rather than chosen from three names.
+  /// Nullable so a row written before this existed still resolves — through
+  /// aiCreativity below, which is kept for exactly that and no longer offered.
+  aiTemperature            Float?                 @map("ai_temperature")
   aiCreativity             AiCreativity           @default(BALANCED) @map("ai_creativity")
   aiUseBrandVoice          Boolean                @default(true) @map("ai_use_brand_voice")
   aiAutoAdaptPlatforms     Boolean                @default(true) @map("ai_auto_adapt_platforms")

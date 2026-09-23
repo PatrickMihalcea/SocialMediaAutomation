@@ -2,34 +2,52 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-import { temperatureFor } from '@/lib/ai';
+import { MAX_AI_TEMPERATURE, resolveTemperature } from '@/lib/ai';
 
 /**
- * Idea generation runs hotter than everything else, because the two settings
- * answer different questions: how adventurous the account wants to be, and how
- * much variety the task needs. A caption rewritten at 1.0 is a caption nobody
- * asked for; eight image ideas at 0.7 are the model's most typical eight.
+ * The setting used to be three names standing in for three numbers. It is the
+ * number now, because the three fixed points were never the right three for
+ * everybody and the whole effect of the setting is how far up the scale you
+ * are.
  */
-describe('temperatureFor', () => {
-  it('gives idea generation a hotter band than other work', () => {
-    expect(temperatureFor('IDEAS', 'BALANCED')).toBeGreaterThan(temperatureFor('CAPTION', 'BALANCED'));
+describe('resolveTemperature', () => {
+  it('uses the number the workspace set', () => {
+    expect(resolveTemperature({ aiTemperature: 1.05, aiCreativity: 'PRECISE' })).toBe(1.05);
   });
 
-  it('still follows the workspace setting within that band', () => {
-    expect(temperatureFor('IDEAS', 'PRECISE')).toBeLessThan(temperatureFor('IDEAS', 'BALANCED'));
-    expect(temperatureFor('IDEAS', 'BALANCED')).toBeLessThan(temperatureFor('IDEAS', 'CREATIVE'));
+  it('accepts zero rather than reading it as unset', () => {
+    expect(resolveTemperature({ aiTemperature: 0, aiCreativity: 'CREATIVE' })).toBe(0);
   });
 
-  /** Past about 1.15 the replies stop parsing into the schema and get retried. */
-  it('stays inside what a structured reply survives', () => {
-    for (const creativity of ['PRECISE', 'BALANCED', 'CREATIVE'] as const) {
-      expect(temperatureFor('IDEAS', creativity)).toBeLessThanOrEqual(1.15);
-    }
+  /**
+   * A row written before the number existed still resolves to the temperature
+   * it was already running at, rather than silently changing on deploy.
+   */
+  it.each([
+    ['PRECISE', 0.25],
+    ['BALANCED', 0.7],
+    ['CREATIVE', 1],
+  ] as const)('falls back to what %s used to mean', (creativity, expected) => {
+    expect(resolveTemperature({ aiTemperature: null, aiCreativity: creativity })).toBe(expected);
   });
 
-  it('leaves everything else where it was', () => {
-    expect(temperatureFor('CAPTION', 'PRECISE')).toBe(0.25);
-    expect(temperatureFor('CAPTION', 'BALANCED')).toBe(0.7);
-    expect(temperatureFor('CAPTION', 'CREATIVE')).toBe(1);
+  it('falls back again for a workspace with no preferences at all', () => {
+    expect(resolveTemperature(null)).toBe(0.7);
+  });
+
+  /**
+   * Read straight from the database and handed to the provider, so a value
+   * outside the accepted range fails the call rather than the validation.
+   */
+  it('clamps a stored value above the maximum', () => {
+    expect(resolveTemperature({ aiTemperature: 9 })).toBe(MAX_AI_TEMPERATURE);
+  });
+
+  it('clamps a stored value below zero', () => {
+    expect(resolveTemperature({ aiTemperature: -1 })).toBe(0);
+  });
+
+  it('ignores a value that is not a number', () => {
+    expect(resolveTemperature({ aiTemperature: Number.NaN })).toBe(0.7);
   });
 });
