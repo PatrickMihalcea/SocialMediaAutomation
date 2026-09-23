@@ -60,6 +60,40 @@ export function imageGenerationRunsInProcess(provider?: ImageProviderName): bool
   return selected !== 'image-use' || new ImageUseProvider().isConfigured();
 }
 
+/**
+ * Sampling temperature for one call.
+ *
+ * The workspace setting says how adventurous the account wants to be; the
+ * operation says how much variety the task itself needs, and they are not the
+ * same question. Rewriting a caption at 1.0 gets a caption nobody asked for.
+ * Asking for eight image ideas at 0.7 gets a model's most typical eight, which
+ * for any subject at all is forest, desert, coast, snow, city — the same tour
+ * every run, which is exactly what people complained about.
+ *
+ * So idea generation runs a band hotter than everything else. Not higher than
+ * about 1.15: these calls answer into a schema, and past that the replies start
+ * failing to parse and get retried, which costs a second call to say the same
+ * thing.
+ */
+export function temperatureFor(operation: AiOperation, creativity: Creativity): number {
+  const band = operation === 'IDEAS' ? IDEA_TEMPERATURES : DEFAULT_TEMPERATURES;
+  return band[creativity];
+}
+
+type Creativity = 'PRECISE' | 'BALANCED' | 'CREATIVE';
+
+const DEFAULT_TEMPERATURES: Record<Creativity, number> = {
+  PRECISE: 0.25,
+  BALANCED: 0.7,
+  CREATIVE: 1,
+};
+
+const IDEA_TEMPERATURES: Record<Creativity, number> = {
+  PRECISE: 0.7,
+  BALANCED: 1,
+  CREATIVE: 1.15,
+};
+
 export async function generateObject<T>(input: {
   workspaceId: string;
   userId: string;
@@ -77,11 +111,8 @@ export async function generateObject<T>(input: {
     where: { workspaceId: input.workspaceId },
     select: { aiCreativity: true },
   });
-  const temperature = input.temperature ?? {
-    PRECISE: 0.25,
-    BALANCED: 0.7,
-    CREATIVE: 1,
-  }[preferences?.aiCreativity ?? 'BALANCED'];
+  const temperature = input.temperature
+    ?? temperatureFor(input.operation, preferences?.aiCreativity ?? 'BALANCED');
   try {
     const result = await provider.completeObject({ ...input, temperature });
     await Promise.all([

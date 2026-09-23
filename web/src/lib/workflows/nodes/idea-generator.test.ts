@@ -7,7 +7,7 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/ai', () => ({ generateObject: vi.fn() }));
 vi.mock('@/lib/ai/brand-voice', () => ({ buildSystemPrompt: vi.fn() }));
 
-import { buildIdeaInstruction, resolveTheme } from '@/lib/workflows/nodes/idea-generator';
+import { buildIdeaInstruction, coveredSettings, resolveTheme } from '@/lib/workflows/nodes/idea-generator';
 import { parseConfig } from '@/lib/workflows/definitions';
 
 const config = (overrides: Record<string, unknown> = {}) =>
@@ -166,5 +166,70 @@ describe('buildIdeaInstruction recent work', () => {
 
   it('says nothing about earlier runs on the first one', () => {
     expect(buildIdeaInstruction(config())).not.toContain('already covered');
+  });
+});
+
+/**
+ * The complaint this answers. Asked for eight images on any theme at all, a
+ * model returns its own most typical eight — forest, desert, coast, snow,
+ * rainforest, city — so every reel was the same tour of biomes. Naming the
+ * titles it had used did not help: told not to repeat "Glacier canopy" it
+ * wrote "Alpine loft", which is the same place with a different label.
+ */
+describe('keeping the subjects apart', () => {
+  it('asks where each one is set, as its own field', () => {
+    const instruction = buildIdeaInstruction(config());
+
+    expect(instruction).toContain('"setting":string');
+    expect(instruction).toContain('setting is where this one takes place');
+  });
+
+  it('requires the settings within one reply to be unrelated', () => {
+    const instruction = buildIdeaInstruction(config({ count: 8 }));
+
+    expect(instruction).toContain('All 8 settings in this reply must be unrelated to each other.');
+    expect(instruction).toContain('Two entries in different forests');
+  });
+
+  it('names the settings earlier runs used, and rules out near variants', () => {
+    const instruction = buildIdeaInstruction(config(), [], ['alpine glacier at dawn', 'dense rainforest']);
+
+    expect(instruction).toContain('alpine glacier at dawn; dense rainforest');
+    expect(instruction).toContain('a different glacier is still a glacier');
+  });
+
+  it('says nothing about previous settings on a step that has never run', () => {
+    const instruction = buildIdeaInstruction(config());
+
+    expect(instruction).not.toContain('Previous runs of this step');
+  });
+
+  it('asks for more than a change of scenery', () => {
+    expect(buildIdeaInstruction(config())).toContain('Vary more than the scenery.');
+  });
+});
+
+describe('coveredSettings', () => {
+  const history = [
+    { theme: 'treehouses', settings: ['alpine glacier', 'desert canyon'] },
+    { theme: 'treehouses', settings: ['desert canyon', 'coastal cliff'] },
+    { theme: 'kitchens', settings: ['tuscan farmhouse'] },
+  ];
+
+  it('collects what this theme has already used, without repeating itself', () => {
+    expect(coveredSettings(history, 'treehouses')).toEqual([
+      'alpine glacier',
+      'desert canyon',
+      'coastal cliff',
+    ]);
+  });
+
+  it('ignores settings recorded for a different theme', () => {
+    expect(coveredSettings(history, 'treehouses')).not.toContain('tuscan farmhouse');
+  });
+
+  /** Runs recorded before settings existed carry none, which is not an error. */
+  it('copes with a history that has none', () => {
+    expect(coveredSettings([{ theme: 'treehouses', settings: [] }], 'treehouses')).toEqual([]);
   });
 });
