@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   workflowUpdate: vi.fn(),
   workflowUpdateMany: vi.fn(),
   startWorkflowRun: vi.fn(),
+  workflowFindUnique: vi.fn(),
+  workflowRunCreate: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -12,9 +14,11 @@ vi.mock('@/lib/db', () => ({
   db: {
     workflow: {
       findMany: mocks.workflowFindMany,
+      findUnique: mocks.workflowFindUnique,
       update: mocks.workflowUpdate,
       updateMany: mocks.workflowUpdateMany,
     },
+    workflowRun: { create: mocks.workflowRunCreate },
     $transaction: vi.fn(async (operations: unknown[]) => Promise.all(operations)),
   },
 }));
@@ -129,6 +133,95 @@ describe('scanDueWorkflows', () => {
     const [claim] = mocks.workflowUpdateMany.mock.calls[0];
     expect(claim.data.nextRunAt.toISOString()).toBe('2026-09-14T06:00:00.000Z');
     expect(mocks.startWorkflowRun).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * The slot is claimed before the run is attempted, so a workflow that throws
+   * on every start is not retried every tick. The cost is a spent slot, and
+   * until this was recorded the only trace was a line in the scheduler's log —
+   * which does not turn the job red and which nobody reads. From the app the
+   * schedule had simply not fired.
+   */
+  it('records a run that could not start, with the reason', async () => {
+    mocks.workflowFindMany.mockResolvedValue([
+      {
+        id: 'workflow-1',
+        workspaceId: 'workspace-1',
+        scheduleEnabled: true,
+        scheduleWeekdays: [1],
+        scheduleTimes: [9 * 60],
+        scheduleHour: 9,
+        scheduleMinute: 0,
+        nextRunAt: new Date('2026-09-07T09:00:00Z'),
+        timezone: 'UTC',
+        workspace: { timezone: 'UTC' },
+      },
+    ]);
+    mocks.workflowUpdateMany.mockResolvedValue({ count: 1 });
+    mocks.workflowFindUnique.mockResolvedValue({ nodes: [], edges: [] });
+    mocks.startWorkflowRun.mockRejectedValueOnce(
+      new Error('"Cut to the beat" needs something connected to its Media input.'),
+    );
+
+    await expect(scanDueWorkflows()).resolves.toEqual({ started: 0 });
+
+    expect(mocks.workflowRunCreate).toHaveBeenCalledOnce();
+    const [recorded] = mocks.workflowRunCreate.mock.calls[0];
+    expect(recorded.data).toMatchObject({
+      workflowId: 'workflow-1',
+      trigger: 'SCHEDULE',
+      status: 'FAILED',
+      error: '"Cut to the beat" needs something connected to its Media input.',
+    });
+  });
+
+  /** The next slot stays booked: recording the failure is not a retry. */
+  it('still moves on to the next slot after a failed start', async () => {
+    mocks.workflowFindMany.mockResolvedValue([
+      {
+        id: 'workflow-1',
+        workspaceId: 'workspace-1',
+        scheduleEnabled: true,
+        scheduleWeekdays: [1],
+        scheduleTimes: [9 * 60],
+        scheduleHour: 9,
+        scheduleMinute: 0,
+        nextRunAt: new Date('2026-09-07T09:00:00Z'),
+        timezone: 'UTC',
+        workspace: { timezone: 'UTC' },
+      },
+    ]);
+    mocks.workflowUpdateMany.mockResolvedValue({ count: 1 });
+    mocks.workflowFindUnique.mockResolvedValue({ nodes: [], edges: [] });
+    mocks.startWorkflowRun.mockRejectedValueOnce(new Error('nope'));
+
+    await scanDueWorkflows();
+
+    const [claim] = mocks.workflowUpdateMany.mock.calls[0];
+    expect(claim.data.nextRunAt.toISOString()).toBe('2026-09-14T09:00:00.000Z');
+  });
+
+  /** Recording is best effort: it must never skip the rest of the list. */
+  it('carries on when the failure itself cannot be recorded', async () => {
+    mocks.workflowFindMany.mockResolvedValue([
+      {
+        id: 'workflow-1',
+        workspaceId: 'workspace-1',
+        scheduleEnabled: true,
+        scheduleWeekdays: [1],
+        scheduleTimes: [9 * 60],
+        scheduleHour: 9,
+        scheduleMinute: 0,
+        nextRunAt: new Date('2026-09-07T09:00:00Z'),
+        timezone: 'UTC',
+        workspace: { timezone: 'UTC' },
+      },
+    ]);
+    mocks.workflowUpdateMany.mockResolvedValue({ count: 1 });
+    mocks.workflowFindUnique.mockRejectedValue(new Error('database gone'));
+    mocks.startWorkflowRun.mockRejectedValueOnce(new Error('nope'));
+
+    await expect(scanDueWorkflows()).resolves.toEqual({ started: 0 });
   });
 });
 

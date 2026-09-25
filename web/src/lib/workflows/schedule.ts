@@ -1,5 +1,5 @@
 import 'server-only';
-import { WorkflowRunTrigger } from '@prisma/client';
+import { Prisma, WorkflowRunStatus, WorkflowRunTrigger } from '@prisma/client';
 import { db } from '@/lib/db';
 import {
   hourMinuteOf,
@@ -7,6 +7,7 @@ import {
   scheduleTimesOf,
 } from '@/lib/scheduling/time';
 import { startWorkflowRun } from '@/lib/workflows/engine';
+import { buildSnapshot } from '@/lib/workflows/snapshot';
 
 export { hourMinuteOf, MAX_SCHEDULE_TIMES, scheduleTimesOf } from '@/lib/scheduling/time';
 
@@ -117,8 +118,60 @@ export async function scanDueWorkflows(): Promise<{ started: number }> {
     } catch (error) {
       // A workflow that cannot start — an unconnected required input, say —
       // must not stop the others, and must not retry every fifteen seconds.
+      // The slot above is already spent, so without a record of this the run
+      // simply never happened and nothing anywhere said why.
       console.error('[workflow] scheduled run failed to start', workflow.id, error);
+      await recordFailedStart(workflow, error);
     }
   }
   return { started };
+}
+
+/**
+ * Writes down a scheduled run that never got off the ground.
+ *
+ * The slot is claimed before the run is attempted, deliberately: a workflow
+ * that throws on every start must not be retried every fifteen seconds. The
+ * cost of that is a spent slot with nothing to show for it, and until this
+ * existed the only trace was a line in the scheduler's own log — which nobody
+ * reads, and which does not turn the job red. From inside the app the schedule
+ * had simply not fired, with the next run cheerfully booked for next week.
+ *
+ * So the failure is recorded as a run, with the reason on it. One row, and the
+ * answer lands on the page people already open to ask the question.
+ */
+async function recordFailedStart(
+  workflow: { id: string; workspaceId: string },
+  error: unknown,
+): Promise<void> {
+  const message = error instanceof Error
+    ? error.message
+    : 'This scheduled run could not be started.';
+  try {
+    // The graph as it stands, so the recorded run shows the steps that could
+    // not start rather than an empty canvas.
+    const live = await db.workflow.findUnique({
+      where: { id: workflow.id },
+      select: { nodes: true, edges: true },
+    });
+    const at = new Date();
+    await db.workflowRun.create({
+      data: {
+        workspaceId: workflow.workspaceId,
+        workflowId: workflow.id,
+        trigger: WorkflowRunTrigger.SCHEDULE,
+        status: WorkflowRunStatus.FAILED,
+        graph: (live
+          ? buildSnapshot(live.nodes, live.edges)
+          : { nodes: [], edges: [] }) as unknown as Prisma.InputJsonValue,
+        error: message,
+        startedAt: at,
+        finishedAt: at,
+        durationMs: 0,
+      },
+    });
+  } catch (cause) {
+    // Never the reason the next workflow in the list is skipped.
+    console.error('[workflow] could not record the failed start', workflow.id, cause);
+  }
 }
