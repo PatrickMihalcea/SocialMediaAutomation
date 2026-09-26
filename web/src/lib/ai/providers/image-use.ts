@@ -322,10 +322,12 @@ function isRetryable(stderr: string): boolean {
 
 const RETRYABLE_FAILURES = new RegExp([
   // Slow or wedged: the CLI's own budget, the stall detector, a killed process.
+  // Deliberately not a bare 'aborting' — the message this covers is "stream
+  // exceeded total timeout budget; aborting", which 'timeout' already matches,
+  // and the word alone would hand a retry to any failure that used it.
   'timed ?out',
   'timeout',
   'stalled',
-  'aborting',
   // The backend answered without a picture in it.
   'no image returned',
   'invalid base64',

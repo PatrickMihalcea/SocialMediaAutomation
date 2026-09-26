@@ -330,3 +330,27 @@ describe.runIf(process.env.IMAGE_USE_E2E === '1')('against the real CLI', () => 
     expect(result.model).not.toBe('image-use');
   }, 300_000);
 });
+
+/**
+ * The list is an allow-list and has to stay one: a retry spends a real image
+ * from the subscription, so anything not known to be worth repeating must end
+ * the step rather than cost four more pictures to find out.
+ */
+describe('what is not worth asking again', () => {
+  const failing = async (stderr: string) => {
+    process.env.FAKE_MODE = 'fail';
+    process.env.FAKE_STDERR = stderr;
+    const error = await new ImageUseProvider()
+      .generateImage({ prompt: 'a cat' })
+      .catch((cause: AiError) => cause);
+    return (error as AiError).retryable;
+  };
+
+  it.each([
+    ['a prompt the backend refused outright'],
+    ['error: unsupported model requested'],
+    ['aborting: the configuration is invalid'],
+  ])('does not retry %s', async (stderr) => {
+    expect(await failing(stderr)).toBe(false);
+  });
+});
