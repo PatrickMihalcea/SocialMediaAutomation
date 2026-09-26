@@ -346,6 +346,88 @@ describe('retryWorkflowNode', () => {
     expect(written.data.config).toBeUndefined();
   });
 
+  /**
+   * A step that failed half way keeps what it made, so playing it again
+   * finishes the job instead of paying for it twice. Gated on the progress
+   * marker: without one, a leftover output is not something the step knows how
+   * to continue from.
+   */
+  it('keeps a failed step\u2019s partial output so it can carry on', async () => {
+    succeededRun('pick');
+    mocks.workflowNodeRunFindFirst.mockResolvedValue({
+      id: 'pick-run',
+      runId: 'run-1',
+      nodeId: 'pick',
+      status: 'FAILED',
+      output: { images: ['asset-1', 'asset-2'], _progress: { done: 2, total: 8 } },
+      run: { id: 'run-1', workflowId: 'workflow-1', status: 'FAILED', graph },
+    });
+
+    await retryWorkflowNode('pick-run', 'workspace-1');
+
+    const written = mocks.workflowNodeRunUpdateMany.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.nodeId === 'pick');
+    expect(written.data).not.toHaveProperty('output');
+  });
+
+  it('still clears the steps below it', async () => {
+    succeededRun('pick');
+    mocks.workflowNodeRunFindFirst.mockResolvedValue({
+      id: 'pick-run',
+      runId: 'run-1',
+      nodeId: 'pick',
+      status: 'FAILED',
+      output: { images: ['asset-1'], _progress: { done: 1, total: 8 } },
+      run: { id: 'run-1', workflowId: 'workflow-1', status: 'FAILED', graph },
+    });
+
+    await retryWorkflowNode('pick-run', 'workspace-1');
+
+    const downstream = mocks.workflowNodeRunUpdateMany.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.nodeId === 'combine');
+    expect(downstream.data.output).toBeDefined();
+  });
+
+  it('starts clean when the step succeeded, since that replay is deliberate', async () => {
+    succeededRun('pick');
+    mocks.workflowNodeRunFindFirst.mockResolvedValue({
+      id: 'pick-run',
+      runId: 'run-1',
+      nodeId: 'pick',
+      status: 'SUCCEEDED',
+      output: { images: ['asset-1'], _progress: { done: 1, total: 8 } },
+      run: { id: 'run-1', workflowId: 'workflow-1', status: 'SUCCEEDED', graph },
+    });
+
+    await retryWorkflowNode('pick-run', 'workspace-1');
+
+    const written = mocks.workflowNodeRunUpdateMany.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.nodeId === 'pick');
+    expect(written.data.output).toBeDefined();
+  });
+
+  it('starts clean when the failed step left no progress marker', async () => {
+    succeededRun('pick');
+    mocks.workflowNodeRunFindFirst.mockResolvedValue({
+      id: 'pick-run',
+      runId: 'run-1',
+      nodeId: 'pick',
+      status: 'FAILED',
+      output: { selection: ['asset-1'] },
+      run: { id: 'run-1', workflowId: 'workflow-1', status: 'FAILED', graph },
+    });
+
+    await retryWorkflowNode('pick-run', 'workspace-1');
+
+    const written = mocks.workflowNodeRunUpdateMany.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.nodeId === 'pick');
+    expect(written.data.output).toBeDefined();
+  });
+
   it('refuses while the run is still going', async () => {
     succeededRun('pick');
     mocks.workflowNodeRunFindFirst.mockResolvedValue({

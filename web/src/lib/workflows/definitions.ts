@@ -40,6 +40,16 @@ export interface NodeDefinition {
   configSchema: z.ZodTypeAny;
   /** Long-running nodes get a wider retry budget and a heartbeat. */
   longRunning?: boolean;
+  /**
+   * Attempts before the step is given up on, overriding the default.
+   *
+   * Worth raising only where an attempt costs less than the first one did. A
+   * step that resumes — saving each item before asking for the next — spends a
+   * retry on the items still missing, so several are cheap. A render that
+   * starts from the beginning every time is the opposite, and keeps the
+   * smaller budget.
+   */
+  maxAttempts?: number;
   /** Kept executable for saved graphs, but hidden from new-workflow surfaces. */
   legacy?: boolean;
 }
@@ -283,6 +293,10 @@ export const NODE_DEFINITIONS = {
     outputs: [
       { id: 'images', label: 'Images', type: media([...IMAGES], true) },
     ],
+    // Each attempt picks up from the image it stopped at, so a retry costs the
+    // remainder rather than the set. Two was the long-running default and it
+    // meant one flaky picture out of eight ended the step.
+    maxAttempts: 5,
     configSchema: z.object({
       size: z.enum(IMAGE_SIZE_VALUES).default(DEFAULT_IMAGE_SIZE),
       /**

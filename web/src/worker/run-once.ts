@@ -92,10 +92,30 @@ async function main() {
           .catch((error) => console.error('[run-once] job failed outside the runner', job.id, error))
           .finally(() => inFlight.delete(job.id));
       }
-      // Nothing queued and nothing running: the batch is caught up, and
-      // sitting in the poll loop until the budget expires would only waste
-      // Actions minutes for no reason.
-      if (due.length === 0 && inFlight.size === 0) break;
+      // Nothing due and nothing running. Before giving up the VM, look for
+      // work that becomes due while this pass could still run it.
+      //
+      // A failed step is retried on a short backoff — ten seconds, then
+      // twenty, then forty — and exiting here left every one of those waiting
+      // for the next cron tick five minutes later. Four retries of one flaky
+      // image turned into twenty minutes of wall clock, on a machine that was
+      // already up and idle. Polling a few more seconds is far cheaper than
+      // the tick it saves.
+      //
+      // Still exits when there is genuinely nothing pending, which is the
+      // common case and the reason not to sit here burning minutes.
+      if (due.length === 0 && inFlight.size === 0) {
+        const waiting = await db.job.findFirst({
+          where: { status: JobStatus.QUEUED, runAt: { lte: new Date(deadline) } },
+          orderBy: { runAt: 'asc' },
+          select: { runAt: true },
+        });
+        if (!waiting) break;
+        console.log(
+          `[run-once] waiting ${Math.max(0, Math.round((waiting.runAt.getTime() - Date.now()) / 1000))}s`
+          + ' for a retry rather than leaving it for the next tick',
+        );
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }

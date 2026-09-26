@@ -209,19 +209,40 @@ describe('ImageUseProvider', () => {
     expect(lastArgv()).not.toContain('--composition-ref');
   });
 
-  it('marks a rate-limited run retryable and a misconfigured one not', async () => {
+  const retryableFor = async (stderr: string) => {
     process.env.FAKE_MODE = 'fail';
-    process.env.FAKE_STDERR = "chatgpt.com rate-limited this account ('Too many requests')";
-    const limited = await new ImageUseProvider()
+    process.env.FAKE_STDERR = stderr;
+    const error = await new ImageUseProvider()
       .generateImage({ prompt: 'a cat' })
-      .catch((error: AiError) => error);
-    expect((limited as AiError).retryable).toBe(true);
+      .catch((cause: AiError) => cause);
+    return (error as AiError).retryable;
+  };
 
-    process.env.FAKE_STDERR = 'error: no image returned. events seen: reasoning';
-    const broken = await new ImageUseProvider()
-      .generateImage({ prompt: 'a cat' })
-      .catch((error: AiError) => error);
-    expect((broken as AiError).retryable).toBe(false);
+  /**
+   * "no image returned" was read as a misconfigured backend and refused a
+   * retry. Live runs say otherwise: it lands on one picture out of eight while
+   * the rest of the same batch renders, which is a stream that happened to
+   * carry no image rather than a setup that cannot produce one. The same is
+   * true of the CLI's own time budget — and that one was only ever missed
+   * because the pattern read "timed out" while the message says "timeout".
+   */
+  it.each([
+    ["chatgpt.com rate-limited this account ('Too many requests')"],
+    ['error: no image returned. events seen: reasoning'],
+    ['stream exceeded total timeout budget; aborting'],
+    ['the run stalled with no output'],
+  ])('asks again after %s', async (stderr) => {
+    expect(await retryableFor(stderr)).toBe(true);
+  });
+
+  /** Nothing is gained by repeating a request the account cannot make. */
+  it('does not ask again once the subscription quota is gone', async () => {
+    expect(await retryableFor('usage_limit_reached: {"resets_at": 1790000000}')).toBe(false);
+  });
+
+  /** An unrecognised failure stays permanent: the default is not to spend. */
+  it('does not ask again for a failure it cannot place', async () => {
+    expect(await retryableFor('error: something nobody has seen before')).toBe(false);
   });
 
   /**

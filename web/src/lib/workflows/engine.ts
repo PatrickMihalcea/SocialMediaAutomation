@@ -97,7 +97,8 @@ export async function startWorkflowRun(input: {
         nodeName: node.name,
         config: (node.config ?? {}) as Prisma.InputJsonValue,
         pendingDeps: degrees.get(node.id) ?? 0,
-        maxAttempts: getDefinition(node.type)?.longRunning ? 2 : 3,
+        maxAttempts: getDefinition(node.type)?.maxAttempts
+          ?? (getDefinition(node.type)?.longRunning ? 2 : 3),
       })),
     });
 
@@ -691,6 +692,18 @@ export async function retryWorkflowNode(nodeRunId: string, workspaceId: string):
     // and failed with "that step did not finish".
     for (const nodeId of affected) done.delete(nodeId);
 
+    // What a failed step already produced, kept so playing it again finishes
+    // the job rather than starting it over.
+    //
+    // Only the step being replayed, only when it failed, and only when it left
+    // a progress marker — the flag a step sets to say its output is a partial
+    // result it knows how to continue from. A step that succeeded is being
+    // replayed on purpose, usually because its settings changed, and that has
+    // to start clean; a partial output from a step with no notion of resuming
+    // would just be read as a finished one.
+    const resuming = nodeRun.status === WorkflowNodeRunStatus.FAILED
+      && hasProgressMarker(nodeRun.output);
+
     for (const nodeId of affected) {
       // Dependencies still outstanding are upstreams that have not succeeded —
       // which for a resumed branch is usually none, so it starts immediately.
@@ -712,7 +725,7 @@ export async function retryWorkflowNode(nodeRunId: string, workspaceId: string):
             : {}),
           status: WorkflowNodeRunStatus.PENDING,
           pendingDeps: pending,
-          output: Prisma.DbNull,
+          ...(resuming && nodeId === nodeRun.nodeId ? {} : { output: Prisma.DbNull }),
           error: null,
           attempt: 0,
           startedAt: null,
@@ -725,9 +738,16 @@ export async function retryWorkflowNode(nodeRunId: string, workspaceId: string):
     }
 
     // Provenance for the discarded attempt goes; the MediaAssets themselves stay
-    // in the library, since they may already be attached to a post.
+    // in the library, since they may already be attached to a post. A step
+    // being resumed keeps its links, because it keeps the work they point at
+    // and will only emit what it makes from here.
     await tx.workflowNodeRunAsset.deleteMany({
-      where: { nodeRun: { runId: nodeRun.runId, nodeId: { in: affected } } },
+      where: {
+        nodeRun: {
+          runId: nodeRun.runId,
+          nodeId: { in: resuming ? affected.filter((id) => id !== nodeRun.nodeId) : affected },
+        },
+      },
     });
   });
 
@@ -825,4 +845,17 @@ export async function sweepWorkflowRuns(): Promise<{ requeued: number; settled: 
   for (const run of unsettled) await settleRun(run.id);
 
   return { requeued, settled: unsettled.length };
+}
+
+/**
+ * Whether a step's output says it is a partial result it knows how to continue.
+ *
+ * Set by steps that save as they go — the image step writes one after every
+ * picture. Its absence is what keeps this from guessing that any leftover
+ * output is safely resumable.
+ */
+function hasProgressMarker(output: unknown): boolean {
+  return typeof output === 'object'
+    && output !== null
+    && '_progress' in (output as Record<string, unknown>);
 }

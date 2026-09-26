@@ -295,12 +295,50 @@ export function usageLimitFailure(stderr: string): AiError | null {
   );
 }
 
-/** Worth another attempt: a slow render, a wedged backend, a momentary rate limit. */
+/**
+ * Worth another attempt: a slow render, a wedged backend, a momentary rate
+ * limit — anything where the same prompt sent again would plausibly work.
+ *
+ * The default for an AiError is *not* retryable, so anything missing from this
+ * list ends the step outright. Two of the CLI's most common failures were
+ * missing, and both are as transient as failures get:
+ *
+ *   no image returned. events seen: response.completed, …
+ *   stream exceeded total timeout budget; aborting
+ *
+ * The first is the model streaming a reply that carried no picture. The second
+ * is the CLI's own wall-clock cap — and it was missed only because the pattern
+ * read "timed out" while the message says "timeout". Both were treated as
+ * permanent, so a batch of eight images stopped on the first flaky one, and
+ * the step's own resume logic never got a second attempt to run.
+ */
 function isRetryable(stderr: string): boolean {
-  // Checked first: an exhausted quota is a 429 that no retry can help.
+  // Checked first: an exhausted quota is a 429 that no retry can help, and a
+  // credential problem is not fixed by asking again either.
   if (usageLimitFailure(stderr)) return false;
-  return /timed out|stalled|HTTP 429|too many requests|rate-limit|temporarily/i.test(stderr);
+  if (credentialFailure(stderr)) return false;
+  return RETRYABLE_FAILURES.test(stderr);
 }
+
+const RETRYABLE_FAILURES = new RegExp([
+  // Slow or wedged: the CLI's own budget, the stall detector, a killed process.
+  'timed ?out',
+  'timeout',
+  'stalled',
+  'aborting',
+  // The backend answered without a picture in it.
+  'no image returned',
+  'invalid base64',
+  // Asked too quickly, or the service is having a moment.
+  'HTTP 429',
+  'HTTP 5\\d\\d',
+  'too many requests',
+  'rate.?limit',
+  'temporarily',
+  // The browser backend losing its session mid-run.
+  'connection (?:reset|closed|refused)',
+  'ECONNRESET',
+].join('|'), 'i');
 
 function reportedModel(stderr: string): string | null {
   return /\bmodel=(\S+)/.exec(stderr)?.[1] ?? null;
