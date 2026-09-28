@@ -308,10 +308,13 @@ export const NODE_DEFINITIONS = {
        * is the same words on every call, so a set cannot come back half pixel
        * art and half photograph — which as a video is simply broken.
        *
-       * Generous limit: "pixel art" and four paragraphs pinning down palette,
-       * linework and shading are both legitimate uses of this field.
+       * Generous limit: "pixel art" and several pages pinning down palette,
+       * linework, shading, lens and grade are both legitimate uses of this
+       * field. It is prepended to every prompt rather than stored once, so the
+       * ceiling is about how much of each request the style may occupy, not
+       * about the column.
        */
-      style: z.string().max(2_000, 'The image style can be up to 2,000 characters.').default(''),
+      style: z.string().max(5_000, 'The image style can be up to 5,000 characters.').default(''),
       /** Stops a runaway prompt list from spending the whole month's quota. */
       maxImages: z.number().int().min(1).max(20).default(8),
       /**
