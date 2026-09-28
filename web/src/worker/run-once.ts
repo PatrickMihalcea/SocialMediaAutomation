@@ -36,6 +36,14 @@ import { JobStatus } from '@prisma/client';
  */
 const DEFAULT_BUDGET_MS = 4 * 60 * 1000;
 const CONCURRENCY = 4;
+/**
+ * How far ahead a retry may be and still be worth holding the VM for.
+ *
+ * Covers the whole backoff ladder (10s, 20s, 40s, 80s) with room to spare, and
+ * stops well short of the five-minute cron interval — anything further out is
+ * cheaper to leave for the next tick than to keep a runner idling through.
+ */
+const RETRY_WAIT_MS = 2 * 60 * 1000;
 const POLL_INTERVAL_MS = 3000;
 
 async function main() {
@@ -75,6 +83,7 @@ async function main() {
   console.log(`[run-once] scans done — workflows started ${started}, requeued ${requeued}, settled ${settled}`);
 
   let processed = 0;
+  let announcedWait = false;
   while (Date.now() < deadline) {
     const capacity = CONCURRENCY - inFlight.size;
     if (capacity > 0) {
@@ -92,29 +101,36 @@ async function main() {
           .catch((error) => console.error('[run-once] job failed outside the runner', job.id, error))
           .finally(() => inFlight.delete(job.id));
       }
-      // Nothing due and nothing running. Before giving up the VM, look for
-      // work that becomes due while this pass could still run it.
+      // Nothing due and nothing running. Before giving up the VM, look for a
+      // retry about to come round — but only just round the corner.
       //
-      // A failed step is retried on a short backoff — ten seconds, then
-      // twenty, then forty — and exiting here left every one of those waiting
-      // for the next cron tick five minutes later. Four retries of one flaky
-      // image turned into twenty minutes of wall clock, on a machine that was
-      // already up and idle. Polling a few more seconds is far cheaper than
-      // the tick it saves.
+      // A failed step is retried on a short backoff: ten seconds, then twenty,
+      // then forty, then eighty. Exiting the instant nothing is due left every
+      // one of those waiting for the next cron tick five minutes later, so
+      // four retries of one flaky image became twenty minutes of wall clock on
+      // a machine that was already up and idle.
       //
-      // Still exits when there is genuinely nothing pending, which is the
-      // common case and the reason not to sit here burning minutes.
+      // The window is the backoffs and nothing more. Waiting out the whole
+      // budget instead was a mistake worth naming: this job holds a
+      // concurrency group of one, so a pass that sits for ten minutes swallows
+      // the five-minute ticks queued behind it — GitHub keeps a single pending
+      // run per group and drops the rest. Trying to save one tick cost two.
       if (due.length === 0 && inFlight.size === 0) {
+        const horizon = Math.min(Date.now() + RETRY_WAIT_MS, deadline);
         const waiting = await db.job.findFirst({
-          where: { status: JobStatus.QUEUED, runAt: { lte: new Date(deadline) } },
+          where: { status: JobStatus.QUEUED, runAt: { lte: new Date(horizon) } },
           orderBy: { runAt: 'asc' },
           select: { runAt: true },
         });
         if (!waiting) break;
-        console.log(
-          `[run-once] waiting ${Math.max(0, Math.round((waiting.runAt.getTime() - Date.now()) / 1000))}s`
-          + ' for a retry rather than leaving it for the next tick',
-        );
+        // Once, not on every poll: this loop turns over every three seconds.
+        if (!announcedWait) {
+          announcedWait = true;
+          console.log(
+            `[run-once] holding for ${Math.max(0, Math.round((waiting.runAt.getTime() - Date.now()) / 1000))}s`
+            + ' to run a retry in this pass',
+          );
+        }
       }
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
