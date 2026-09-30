@@ -33,12 +33,14 @@ const PNG = Buffer.from('89504e470d0a1a0a', 'hex');
 const workspace = mkdtempSync(join(tmpdir(), 'image-use-test-'));
 const cli = join(workspace, 'image-use');
 const argvLog = join(workspace, 'argv.json');
+const configLog = join(workspace, 'config-homes.log');
 
 writeFileSync(
   cli,
   `#!/usr/bin/env node
 const fs = require('node:fs');
 fs.writeFileSync(process.env.FAKE_ARGV_LOG, JSON.stringify(process.argv.slice(2)));
+if (process.env.FAKE_CONFIG_LOG) fs.appendFileSync(process.env.FAKE_CONFIG_LOG, (process.env.XDG_CONFIG_HOME || '(unset)') + '\\n');
 const mode = process.env.FAKE_MODE || 'ok';
 if (mode === 'hang') { setTimeout(() => {}, 60000); return; }
 if (mode === 'fail') {
@@ -60,9 +62,19 @@ function lastArgv(): string[] {
   return JSON.parse(readFileSync(argvLog, 'utf8'));
 }
 
+function configHomes(): string[] {
+  try {
+    return readFileSync(configLog, 'utf8').split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 describe('ImageUseProvider', () => {
   beforeEach(() => {
     process.env.FAKE_ARGV_LOG = argvLog;
+    process.env.FAKE_CONFIG_LOG = configLog;
+    rmSync(configLog, { force: true });
     process.env.FAKE_MODE = 'ok';
     delete process.env.FAKE_STDERR;
     env.IMAGE_USE_BIN = cli;
@@ -352,5 +364,53 @@ describe('what is not worth asking again', () => {
     ['aborting: the configuration is invalid'],
   ])('does not retry %s', async (stderr) => {
     expect(await failing(stderr)).toBe(false);
+  });
+});
+
+/**
+ * The CLI keeps a style library under XDG_CONFIG_HOME and writes it through a
+ * temp file with a fixed name, creating an empty one the first time it reads a
+ * machine that has none. The worker runs four generations at once on a CI
+ * runner that starts fresh every time, so all four created `styles.json.tmp`,
+ * the first rename took it, and the rest died on a file that had just moved:
+ *
+ *   FileNotFoundError: styles.json.tmp -> styles.json
+ *
+ * Nothing here uses that library, so the fix is to stop sharing the directory
+ * it lives in.
+ */
+describe('config directory isolation', () => {
+  // Its own setup: the suite's other blocks leave FAKE_MODE on 'fail', and
+  // these tests need the CLI to actually run.
+  beforeEach(() => {
+    process.env.FAKE_ARGV_LOG = argvLog;
+    process.env.FAKE_CONFIG_LOG = configLog;
+    process.env.FAKE_MODE = 'ok';
+    delete process.env.FAKE_STDERR;
+    rmSync(configLog, { force: true });
+  });
+
+  it('gives the CLI a config directory of this run\u2019s own', async () => {
+    await new ImageUseProvider().generateImage({ prompt: 'a villa' });
+
+    const [home] = configHomes();
+    expect(home).toBeDefined();
+    expect(home).not.toBe('(unset)');
+    // The per-call temp directory, which is removed once the run finishes.
+    expect(home).toContain('image-use-');
+  });
+
+  it('never hands the same one to two generations at once', async () => {
+    const provider = new ImageUseProvider();
+    await Promise.all([
+      provider.generateImage({ prompt: 'one' }),
+      provider.generateImage({ prompt: 'two' }),
+      provider.generateImage({ prompt: 'three' }),
+      provider.generateImage({ prompt: 'four' }),
+    ]);
+
+    const homes = configHomes();
+    expect(homes).toHaveLength(4);
+    expect(new Set(homes).size).toBe(4);
   });
 });

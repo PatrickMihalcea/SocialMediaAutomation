@@ -107,6 +107,25 @@ export class ImageUseProvider implements AiProvider {
         // so this outer deadline has to cover the queue wait in front of it as
         // well. It is a backstop against the CLI itself wedging, not the budget.
         timeoutMs + env.IMAGE_USE_QUEUE_WAIT_MS,
+        {
+          ...process.env,
+          // A config directory of this run's own.
+          //
+          // The CLI keeps a style library under XDG_CONFIG_HOME and writes it
+          // through a temp file with a fixed name. On a machine that has none
+          // yet it writes an empty one on first read — so several generations
+          // starting together all create `styles.json.tmp`, the first rename
+          // takes it, and the rest die on a file that is no longer there:
+          //
+          //   FileNotFoundError: styles.json.tmp -> styles.json
+          //
+          // The worker runs four jobs at once and a CI runner starts fresh
+          // every time, which is exactly that race. Nothing here uses the
+          // style library or the asset library beside it, so the cheapest fix
+          // is to stop sharing the directory they live in. The path is the
+          // per-call temp directory that is removed below.
+          XDG_CONFIG_HOME: directory,
+        },
       );
 
       if (result.timedOut) {
@@ -205,11 +224,16 @@ interface RunResult {
   timedOut: boolean;
 }
 
-function run(command: string, args: string[], killAfterMs: number): Promise<RunResult> {
+function run(
+  command: string,
+  args: string[],
+  killAfterMs: number,
+  env?: NodeJS.ProcessEnv,
+): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     // No stdin: the CLI never prompts, and an inherited one would let a
     // misconfigured run block a worker forever waiting on a terminal.
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], env });
     let stdout = '';
     let stderr = '';
     let timedOut = false;
