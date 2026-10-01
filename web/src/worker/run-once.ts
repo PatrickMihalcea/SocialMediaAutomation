@@ -194,7 +194,20 @@ async function main() {
   // only while there is something to do and stops the moment there is not, so
   // an idle account spends nothing and a busy one keeps moving instead of
   // waiting ninety minutes for GitHub to feel like it.
-  await signalRemainingWork();
+  await signalRemainingWork(inFlight.size);
+
+  // Stop now rather than waiting for whatever is still running.
+  //
+  // Without this the process lingers until every in-flight promise settles —
+  // a seven-minute upload held a pass whose budget was eight minutes well past
+  // the runner's twelve-minute ceiling, and the job was killed. A killed job
+  // is the worst ending available: its work is abandoned either way, and the
+  // chaining step may not get to run at all, so nothing starts the pass that
+  // would have picked the work back up.
+  //
+  // Leaving on our own terms is safe because abandoned jobs are reclaimed at
+  // the start of the next pass, and the line above has already asked for one.
+  process.exit(0);
 }
 
 /**
@@ -203,23 +216,35 @@ async function main() {
  * A file rather than an exit code: this process exiting non-zero would mark the
  * job failed, and "there is more to do" is not a failure.
  */
-async function signalRemainingWork(): Promise<void> {
+async function signalRemainingWork(inFlight: number): Promise<void> {
   const marker = process.env.RUN_ONCE_CONTINUE_FILE;
   if (!marker) return;
   try {
-    // Anything already due, plus anything about to be — a retry a few seconds
-    // out is exactly the work that should not wait for the next cron tick.
-    const remaining = await db.job.count({
+    // Queued work, and work this pass is about to walk away from.
+    //
+    // Counting only QUEUED was wrong in the one case that matters most: a pass
+    // that runs out of budget mid-job holds that job in RUNNING, so the queue
+    // reads as empty, no successor is asked for, and the work sits abandoned
+    // until something else happens along. The jobs still running here are
+    // exactly the ones the next pass will reclaim — so they are the strongest
+    // reason to start one.
+    const queued = await db.job.count({
       where: {
         status: JobStatus.QUEUED,
+        // Anything already due, plus anything about to be: a retry a few
+        // seconds out should not wait for the next cron tick.
         runAt: { lte: new Date(Date.now() + 2 * 60 * 1000) },
       },
     });
+    const abandoned = await db.job.count({ where: { status: JobStatus.RUNNING } });
+    const remaining = queued + Math.max(inFlight, abandoned);
     if (remaining === 0) {
-      console.log('[run-once] queue is empty; nothing to chain');
+      console.log('[run-once] queue is empty and nothing was left running; nothing to chain');
       return;
     }
-    console.log(`[run-once] ${remaining} job(s) still waiting; asking for another pass`);
+    console.log(
+      `[run-once] ${queued} queued and ${inFlight} left running; asking for another pass`,
+    );
     await writeFile(marker, String(remaining), 'utf8');
   } catch (error) {
     // Never fails the pass: the schedule is still the backstop.

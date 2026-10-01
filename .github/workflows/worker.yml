@@ -204,10 +204,11 @@ jobs:
             exit 0
           fi
           NEXT=$((CHAIN + 1))
-          # Ten passes is about an hour and a half of continuous work, which is
-          # far more than a backlog needs and still a bounded amount of budget.
-          # The schedule picks up anything left after that.
-          if [ "$NEXT" -gt 10 ]; then
+          # The cap exists so a bug cannot loop for ever, not to ration time:
+          # this repository is public, so Actions minutes are unmetered. Forty
+          # passes is several hours of continuous work — far more than any
+          # backlog needs — and the schedule still picks up whatever is left.
+          if [ "$NEXT" -gt 40 ]; then
             echo "chained $CHAIN times already; leaving the rest to the schedule"
             exit 0
           fi
