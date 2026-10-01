@@ -43,7 +43,12 @@ const schema = z.object({
    * are secrets GitHub injects into a run it already started; this is a
    * token the *app* holds so it can ask GitHub to start one, and needs only
    * the narrowest scope that allows: a fine-grained PAT with just the
-   * repository's Workflows: write permission, nothing else.
+   * repository's Actions: read and write permission, nothing else.
+   *
+   * Actions, not Workflows. They are two different permissions and the one
+   * named after the thing being started is the wrong one — granting it gets a
+   * 403 on every dispatch, which is silent here by design, so the symptom is
+   * simply that nothing ever starts before the schedule notices it.
    */
   GITHUB_DISPATCH_TOKEN: z.string().default(''),
   /** "owner/repo" */
