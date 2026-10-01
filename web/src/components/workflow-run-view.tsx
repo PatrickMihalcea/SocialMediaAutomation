@@ -210,6 +210,30 @@ export function WorkflowRunView({
     );
   }
 
+  /**
+   * The step named in the address, scrolled to and outlined on arrival.
+   *
+   * Done here rather than left to the browser's own hash handling: this list
+   * is rendered on the client and the element does not exist when the hash is
+   * first read, so the browser finds nothing and stays at the top. The outline
+   * is what makes a landing legible — scrolling alone leaves no clue which of
+   * nine similar cards was asked for.
+   */
+  const [landedOn, setLandedOn] = useState<string | null>(null);
+
+  useEffect(() => {
+    const nodeId = window.location.hash.startsWith('#step-')
+      ? decodeURIComponent(window.location.hash.slice('#step-'.length))
+      : null;
+    if (!nodeId) return;
+    setLandedOn(nodeId);
+    // After paint, so the row it is looking for has been rendered.
+    const timer = window.setTimeout(() => {
+      document.getElementById(`step-${nodeId}`)?.scrollIntoView({ block: 'center' });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const active = !isRunTerminal(status.run.status);
   // Corrects for a client clock that disagrees with the server's.
   const skew = useRef(0);
@@ -383,7 +407,13 @@ export function WorkflowRunView({
                 return (
                   <li
                     key={nodeId}
-                    className="rounded-md border border-hairline p-4"
+                    // Anchored so the runs chart can link straight to the step
+                    // whose square was clicked. scroll-mt keeps the heading
+                    // clear of the sticky top bar once it lands.
+                    id={`step-${nodeId}`}
+                    className={`scroll-mt-24 rounded-md border p-4 transition-colors ${
+                      nodeId === landedOn ? 'border-ink' : 'border-hairline'
+                    }`}
                     style={
                       node.status === 'RUNNING'
                         ? { borderColor: 'var(--ink)' }

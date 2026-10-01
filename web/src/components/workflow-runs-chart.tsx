@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { WorkflowNodeRunStatus, WorkflowRunStatus } from '@prisma/client';
 import { Badge } from '@/bridge88/components';
@@ -138,6 +138,26 @@ export function WorkflowRunsChart({
   const active = runs.find((run) => run.id === selected) ?? null;
   const lanesHeight = lanes.length * LANE_HEIGHT + Math.max(0, lanes.length - 1) * LANE_GAP;
 
+  /**
+   * Opens showing the newest run, which is the right-hand end.
+   *
+   * Set on the node as it attaches rather than in an effect, so the chart is
+   * never painted at the far left and then jumped — and once only, because
+   * this component re-renders on every hover and resetting the scroll under
+   * someone reading older runs would be worse than starting in the wrong
+   * place.
+   */
+  const scrolledOnce = useRef(false);
+  const scroller = useCallback((node: HTMLDivElement | null) => {
+    if (!node || scrolledOnce.current) return;
+    scrolledOnce.current = true;
+    node.scrollLeft = node.scrollWidth;
+  }, []);
+
+  /** Where a column goes when it is clicked: the run, at the step clicked. */
+  const runHref = (runId: string, nodeId?: string) =>
+    `/w/${slug}/workflows/${workflowId}/runs/${runId}${nodeId ? `#step-${nodeId}` : ''}`;
+
   return (
     <section className="b88-card">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
@@ -191,7 +211,7 @@ export function WorkflowRunsChart({
           </div>
         </div>
 
-        <div className="min-w-0 flex-1 overflow-x-auto pb-1">
+        <div ref={scroller} className="min-w-0 flex-1 overflow-x-auto pb-1">
           <div className="min-w-fit">
             {/* Bars */}
             <div className="relative" style={{ height: CHART_HEIGHT }}>
@@ -215,11 +235,12 @@ export function WorkflowRunsChart({
                     : MIN_BAR;
                   const isSelected = run.id === selected;
                   return (
-                    <button
+                    <Link
                       key={run.id}
-                      type="button"
-                      onClick={() => setSelected(run.id)}
-                      aria-pressed={isSelected}
+                      href={runHref(run.id)}
+                      onMouseEnter={() => setSelected(run.id)}
+                      onFocus={() => setSelected(run.id)}
+                      aria-current={isSelected ? 'true' : undefined}
                       title={runTitle(run, timezone)}
                       className={`${COLUMN} flex h-full items-end justify-center px-[3px] transition-opacity hover:opacity-80`}
                     >
@@ -232,7 +253,7 @@ export function WorkflowRunsChart({
                           border: `1px solid ${isSelected ? 'var(--primary)' : 'var(--hairline)'}`,
                         }}
                       />
-                    </button>
+                    </Link>
                   );
                 })}
               </div>
@@ -276,10 +297,11 @@ export function WorkflowRunsChart({
                     const cell = run.nodes.find((node) => node.nodeId === lane.id);
                     const isSelected = run.id === selected;
                     return (
-                      <button
+                      <Link
                         key={run.id}
-                        type="button"
-                        onClick={() => setSelected(run.id)}
+                        href={runHref(run.id, lane.id)}
+                        onMouseEnter={() => setSelected(run.id)}
+                        onFocus={() => setSelected(run.id)}
                         title={cellTitle(lane.name, cell)}
                         className={`${COLUMN} flex items-center justify-center px-[3px] transition-opacity hover:opacity-80`}
                       >
@@ -294,7 +316,7 @@ export function WorkflowRunsChart({
                               : `1px ${cell ? 'solid' : 'dashed'} var(--hairline)`,
                           }}
                         />
-                      </button>
+                      </Link>
                     );
                   })}
                 </div>
