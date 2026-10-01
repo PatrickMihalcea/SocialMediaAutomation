@@ -28,7 +28,8 @@
     "doctor": "node --env-file=.env scripts/doctor.mjs",
     "doctor:production": "node --env-file=.env scripts/doctor.mjs --production",
     "worker:once": "NODE_OPTIONS=--conditions=react-server node --env-file=.env --import tsx src/worker/run-once.ts",
-    "migrate:storage": "node --env-file=.env scripts/migrate-storage.mjs"
+    "migrate:storage": "node --env-file=.env scripts/migrate-storage.mjs",
+    "worker:container": "NODE_OPTIONS=--conditions=react-server node --import tsx src/worker/index.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

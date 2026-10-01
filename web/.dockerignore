@@ -1,0 +1,18 @@
+# node_modules is installed inside the image for Linux. Copying the host's in
+# would overwrite those with macOS binaries — sharp and prisma are native, so
+# the image builds and then dies at the first render.
+node_modules
+.venv-audio
+.next
+.git
+
+# Secrets belong to the platform, never baked into a layer.
+.env
+.env.*
+!.env.example
+
+# Build and test leftovers that the worker never reads.
+coverage
+playwright-report
+test-results
+*.log

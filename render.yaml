@@ -1,0 +1,72 @@
+# The always-on worker, for Render. Railway reads web/Dockerfile directly and
+# needs no file of its own; the environment below is the same either way.
+#
+# Keep .github/workflows/worker.yml enabled alongside this. The two are safe
+# together — every job and every step is claimed conditionally, so the loser of
+# a race does nothing — and the schedule is the backstop for when this host is
+# restarting or down.
+services:
+  - type: worker
+    name: bridge88-worker
+    runtime: docker
+    dockerfilePath: ./web/Dockerfile
+    dockerContext: ./web
+    plan: starter
+    envVars:
+      # Pooled for the app, unpooled for migrations. Copy both from Vercel.
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: APP_URL
+        sync: false
+      # Storage. The worker writes rendered video straight to the bucket.
+      - key: STORAGE_DRIVER
+        value: s3
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_PUBLIC_BASE_URL
+        sync: false
+      # Text generation on the API; images on the subscription CLI, which is
+      # why CODEX_AUTH_BOOTSTRAP is needed here exactly as the Action needs it.
+      - key: AI_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_TEXT_MODEL
+        sync: false
+      - key: OPENAI_IMAGE_MODEL
+        sync: false
+      - key: AI_IMAGE_PROVIDER
+        value: image-use
+      - key: IMAGE_USE_BACKEND
+        value: codex
+      - key: IMAGE_USE_MODEL
+        value: gpt-5.5
+      - key: CODEX_AUTH_STORE_KEY
+        value: system/codex-auth.enc
+      - key: CODEX_AUTH_BOOTSTRAP
+        sync: false
+      # Never mock on a host that publishes to real channels.
+      - key: MOCK_MODE
+        value: "false"
+      - key: YOUTUBE_CLIENT_ID
+        sync: false
+      - key: YOUTUBE_CLIENT_SECRET
+        sync: false
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
