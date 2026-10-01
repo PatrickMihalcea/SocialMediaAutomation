@@ -38,6 +38,20 @@ import { JobStatus } from '@prisma/client';
 const DEFAULT_BUDGET_MS = 4 * 60 * 1000;
 const CONCURRENCY = 4;
 /**
+ * Budget kept back for work already started, during which no new job is taken.
+ *
+ * Claiming right up to the deadline is how a long step never finishes. A
+ * render takes a couple of minutes and nothing about it resumes: claimed with
+ * one minute left it is abandoned, reclaimed by the next pass, started again
+ * from the beginning, and if that pass is also near its end, abandoned again.
+ * The step stays QUEUED for ever while the work is done over and over.
+ *
+ * So the last stretch of a pass finishes what it holds rather than taking on
+ * more. A job left for the next pass costs one tick; a job restarted from zero
+ * every pass costs everything and never lands.
+ */
+const CLAIM_CUTOFF_MS = 3 * 60 * 1000;
+/**
  * How far ahead a retry may be and still be worth holding the VM for.
  *
  * Covers the whole backoff ladder (10s, 20s, 40s, 80s) with room to spare, and
@@ -99,8 +113,17 @@ async function main() {
 
   let processed = 0;
   let announcedWait = false;
+  let announcedCutoff = false;
   while (Date.now() < deadline) {
-    const capacity = CONCURRENCY - inFlight.size;
+    const takingWork = Date.now() < deadline - CLAIM_CUTOFF_MS;
+    if (!takingWork && inFlight.size === 0) break;
+    if (!takingWork && !announcedCutoff) {
+      announcedCutoff = true;
+      console.log(
+        `[run-once] no longer claiming work; finishing the ${inFlight.size} job(s) already started`,
+      );
+    }
+    const capacity = takingWork ? CONCURRENCY - inFlight.size : 0;
     if (capacity > 0) {
       const due = await db.job.findMany({
         where: { status: JobStatus.QUEUED, runAt: { lte: new Date() } },
