@@ -4,6 +4,7 @@ import { runCoarseUpkeep } from '@/lib/scheduling/coarse';
 import { scanDueWorkflows } from '@/lib/workflows/schedule';
 import { sweepWorkflowRuns } from '@/lib/workflows/engine';
 import { runJob } from '@/lib/queue/runner';
+import { reclaimStaleJobs } from '@/lib/queue/store';
 import { persistCodexAuth, restoreCodexAuth } from '@/lib/ai/codex-auth';
 import { JobStatus } from '@prisma/client';
 
@@ -76,6 +77,20 @@ async function main() {
     const { expanded, analytics } = await runCoarseUpkeep();
     console.log(`[run-once] coarse upkeep — recurrences expanded ${expanded}, analytics queued for ${analytics} workspace(s)`);
   }
+
+  // First, because the two scans below both decide what to do from job rows.
+  //
+  // A pass that is killed — the runner's own timeout, or this process exiting
+  // with work still in flight, which it does by design — leaves jobs RUNNING
+  // with nothing behind them. Nothing moves those again on its own, and a step
+  // whose job is RUNNING looks busy to the sweeper, so it sits QUEUED for good
+  // while the run that owns it never finishes. The long-lived driver has always
+  // reclaimed these on start-up; this worker never starts that driver.
+  const reclaimed = await reclaimStaleJobs().catch((error: unknown) => {
+    console.error('[run-once] could not reclaim stale jobs', error);
+    return 0;
+  });
+  if (reclaimed > 0) console.log(`[run-once] reclaimed ${reclaimed} job(s) abandoned by an earlier pass`);
 
   await scanDuePosts();
   const { started } = await scanDueWorkflows();

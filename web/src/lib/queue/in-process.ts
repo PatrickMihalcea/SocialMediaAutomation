@@ -1,6 +1,7 @@
 import 'server-only';
 import { JobStatus } from '@prisma/client';
 import { db } from '@/lib/db';
+import { reclaimStaleJobs } from '@/lib/queue/store';
 import { type EnqueueOptions, type JobPayloadMap, type JobType, type QueueDriver } from '@/lib/queue/types';
 import { runJob } from '@/lib/queue/runner';
 import { storeJob } from '@/lib/queue/store';
@@ -39,13 +40,10 @@ export class InProcessQueue implements QueueDriver {
     if (this.timer) return;
     console.log('[queue] in-process driver started');
     this.timer = setInterval(() => void this.drain(), POLL_INTERVAL_MS);
-    // Recover jobs left RUNNING by a process that died mid-flight.
-    await db.job
-      .updateMany({
-        where: { status: JobStatus.RUNNING, startedAt: { lt: new Date(Date.now() - 10 * 60 * 1000) } },
-        data: { status: JobStatus.QUEUED },
-      })
-      .catch(() => {});
+    // Recover jobs left RUNNING by a process that died mid-flight. Shared with
+    // the scheduled worker, which runs jobs without this driver and so needs
+    // the same recovery of its own.
+    await reclaimStaleJobs().catch(() => 0);
   }
 
   async stop(): Promise<void> {
