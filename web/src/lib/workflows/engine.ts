@@ -485,6 +485,67 @@ async function handleNodeFailure(
   await settleRun(nodeRun.runId);
 }
 
+/**
+ * Ends a step that cannot be tried again, the same way a failed one ends.
+ *
+ * The sweeper's job is to put work back when a worker dies holding it, and on
+ * its own that is a loop with no floor: a step too slow to finish inside one
+ * pass is abandoned, put back, started from the beginning, and abandoned
+ * again, for ever. Nothing noticed, because being abandoned is not failing —
+ * it never reaches handleNodeFailure, so the attempt budget that bounds every
+ * other kind of retry was never consulted.
+ *
+ * So the budget is consulted here too. A step that has used its attempts stops
+ * being resurrected and is failed with a sentence saying why, which also
+ * releases the run: everything downstream is skipped and the run settles,
+ * rather than sitting in RUNNING for ever waiting on a step nobody will finish.
+ */
+async function giveUpOnNodeRun(
+  nodeRun: {
+    id: string;
+    runId: string;
+    nodeId: string;
+    nodeName: string;
+    startedAt: Date | null;
+  },
+  message: string,
+): Promise<void> {
+  const run = await db.workflowRun.findUnique({
+    where: { id: nodeRun.runId },
+    select: { graph: true },
+  });
+  const doomed = run ? descendantsOf(toGraph(readSnapshot(run.graph)), nodeRun.nodeId) : [];
+  const finishedAt = new Date();
+
+  await db.$transaction(async (tx) => {
+    const failed = await tx.workflowNodeRun.updateMany({
+      where: {
+        id: nodeRun.id,
+        status: { in: [WorkflowNodeRunStatus.RUNNING, WorkflowNodeRunStatus.QUEUED] },
+      },
+      data: {
+        status: WorkflowNodeRunStatus.FAILED,
+        error: message,
+        finishedAt,
+        durationMs: nodeRun.startedAt ? finishedAt.getTime() - nodeRun.startedAt.getTime() : null,
+      },
+    });
+    if (failed.count === 0) return;
+    if (doomed.length) {
+      await tx.workflowNodeRun.updateMany({
+        where: {
+          runId: nodeRun.runId,
+          nodeId: { in: doomed },
+          status: { in: [WorkflowNodeRunStatus.PENDING, WorkflowNodeRunStatus.QUEUED] },
+        },
+        data: { status: WorkflowNodeRunStatus.SKIPPED, finishedAt },
+      });
+    }
+  });
+
+  await settleRun(nodeRun.runId);
+}
+
 // ---------------------------------------------------------------- settling
 
 /**
@@ -781,10 +842,18 @@ export async function sweepWorkflowRuns(): Promise<{ requeued: number; settled: 
         { heartbeatAt: null, startedAt: { lt: new Date(Date.now() - STALE_NODE_MS) } },
       ],
     },
-    select: { id: true, workspaceId: true, attempt: true },
+    select: {
+      id: true, workspaceId: true, attempt: true, maxAttempts: true,
+      runId: true, nodeId: true, nodeName: true, startedAt: true,
+    },
     take: 50,
   });
   for (const row of stale) {
+    // Out of attempts: putting it back would start the same loop again.
+    if (row.attempt >= row.maxAttempts) {
+      await giveUpOnNodeRun(row, exhaustedMessage(row.nodeName, row.attempt));
+      continue;
+    }
     const reclaimed = await db.workflowNodeRun.updateMany({
       where: { id: row.id, status: WorkflowNodeRunStatus.RUNNING },
       data: { status: WorkflowNodeRunStatus.QUEUED },
@@ -800,7 +869,10 @@ export async function sweepWorkflowRuns(): Promise<{ requeued: number; settled: 
       status: WorkflowNodeRunStatus.QUEUED,
       queuedAt: { lt: new Date(Date.now() - 60_000) },
     },
-    select: { id: true, workspaceId: true, jobId: true, attempt: true },
+    select: {
+      id: true, workspaceId: true, jobId: true, attempt: true, maxAttempts: true,
+      runId: true, nodeId: true, nodeName: true, startedAt: true,
+    },
     take: 50,
   });
   for (const row of orphaned) {
@@ -815,6 +887,10 @@ export async function sweepWorkflowRuns(): Promise<{ requeued: number; settled: 
         })
       : null;
     if (live) continue;
+    if (row.attempt >= row.maxAttempts) {
+      await giveUpOnNodeRun(row, exhaustedMessage(row.nodeName, row.attempt));
+      continue;
+    }
     // No live job behind a QUEUED step: the dispatch was lost. This is the path
     // that recovers a retry dropped by any future dedupe mistake, so it must
     // stay reachable — it only runs where the sweeper runs.
@@ -859,3 +935,8 @@ function hasProgressMarker(output: unknown): boolean {
     && output !== null
     && '_progress' in (output as Record<string, unknown>);
 }
+
+/** Said plainly, because this one is almost always "the step is too slow". */
+const exhaustedMessage = (nodeName: string, attempts: number) =>
+  `"${nodeName}" was started ${attempts} times and never finished — each attempt was cut short before it completed. `
+  + 'A step that cannot finish inside one worker pass has to be made smaller or given a longer budget.';
