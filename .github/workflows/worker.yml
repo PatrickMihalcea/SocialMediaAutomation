@@ -27,8 +27,14 @@ on:
     # these ticks only, so the five-minute pass stays cheap.
     - cron: '20 */6 * * *'
   # Lets a run be started by hand from the Actions tab, for testing this
-  # workflow itself without waiting for the next tick.
-  workflow_dispatch: {}
+  # workflow itself without waiting for the next tick — and is what a pass uses
+  # to ask for its own successor while work remains.
+  workflow_dispatch:
+    inputs:
+      chain:
+        description: 'How many passes have already chained (leave at 0 by hand)'
+        required: false
+        default: '0'
 
 # Serialises the schedule against itself — two 5-minute ticks piling up behind
 # a slow render would waste a VM's minutes re-scanning work the first one
@@ -41,6 +47,11 @@ on:
 concurrency:
   group: ${{ github.event_name == 'schedule' && 'scheduled-worker' || github.run_id }}
   cancel-in-progress: false
+
+permissions:
+  # Only what the chaining step needs: start another run of this workflow.
+  actions: write
+  contents: read
 
 jobs:
   run-once:
@@ -106,6 +117,8 @@ jobs:
         run: node --import tsx src/worker/run-once.ts
         env:
           RUN_ONCE_BUDGET_MS: '480000'
+          # Written only when the queue still has work; the step below reads it.
+          RUN_ONCE_CONTINUE_FILE: ${{ runner.temp }}/continue
           RUN_ONCE_COARSE: ${{ github.event.schedule == '20 */6 * * *' && '1' || '0' }}
           NODE_OPTIONS: '--conditions=react-server'
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -165,3 +178,38 @@ jobs:
           YOUTUBE_PRIVACY_STATUS: ${{ secrets.YOUTUBE_PRIVACY_STATUS }}
           META_APP_ID: ${{ secrets.META_APP_ID }}
           META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+
+      # Keeps going while there is something to do.
+      #
+      # The schedule cannot be what keeps this alive: GitHub treats cron as
+      # best effort and delivered thirty passes in four days against a request
+      # for one every five minutes. A run whose work takes ten minutes was
+      # finishing in four hours, almost all of it a finished step waiting for a
+      # worker to exist.
+      #
+      # So a pass that leaves work behind starts the next one itself. It chains
+      # only while the queue is not empty, so an idle account spends nothing —
+      # and the depth is capped because the whole point of staying on the free
+      # tier is not discovering a runaway loop through the usage bill.
+      - name: Chain another pass if work remains
+        if: always()
+        working-directory: web
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CONTINUE_FILE: ${{ runner.temp }}/continue
+          CHAIN: ${{ github.event.inputs.chain || '0' }}
+        run: |
+          if [ ! -f "$CONTINUE_FILE" ]; then
+            echo "queue was empty at the end of this pass; stopping here"
+            exit 0
+          fi
+          NEXT=$((CHAIN + 1))
+          # Ten passes is about an hour and a half of continuous work, which is
+          # far more than a backlog needs and still a bounded amount of budget.
+          # The schedule picks up anything left after that.
+          if [ "$NEXT" -gt 10 ]; then
+            echo "chained $CHAIN times already; leaving the rest to the schedule"
+            exit 0
+          fi
+          echo "$(cat "$CONTINUE_FILE") job(s) still queued — starting pass $NEXT"
+          gh workflow run worker.yml --ref main -f chain="$NEXT"

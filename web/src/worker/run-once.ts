@@ -6,6 +6,7 @@ import { sweepWorkflowRuns } from '@/lib/workflows/engine';
 import { runJob } from '@/lib/queue/runner';
 import { reclaimStaleJobs } from '@/lib/queue/store';
 import { persistCodexAuth, restoreCodexAuth } from '@/lib/ai/codex-auth';
+import { writeFile } from 'node:fs/promises';
 import { JobStatus } from '@prisma/client';
 
 /**
@@ -181,6 +182,49 @@ async function main() {
     console.log(`[run-once] budget exhausted with ${inFlight.size} job(s) still in flight; the next scheduled run will pick up anything left`);
   }
   console.log(`[run-once] done — claimed ${processed} job(s)`);
+
+  // Whether to start another pass straight away.
+  //
+  // The schedule is not what keeps this alive — it cannot be. GitHub treats a
+  // cron as best effort and delivers a fraction of what is asked for: a run
+  // whose work takes ten minutes was finishing in four hours, nearly all of it
+  // a finished step waiting for the next pass to exist.
+  //
+  // So a pass that leaves work behind asks for its successor. The chain runs
+  // only while there is something to do and stops the moment there is not, so
+  // an idle account spends nothing and a busy one keeps moving instead of
+  // waiting ninety minutes for GitHub to feel like it.
+  await signalRemainingWork();
+}
+
+/**
+ * Writes the marker the workflow reads to decide whether to chain another pass.
+ *
+ * A file rather than an exit code: this process exiting non-zero would mark the
+ * job failed, and "there is more to do" is not a failure.
+ */
+async function signalRemainingWork(): Promise<void> {
+  const marker = process.env.RUN_ONCE_CONTINUE_FILE;
+  if (!marker) return;
+  try {
+    // Anything already due, plus anything about to be — a retry a few seconds
+    // out is exactly the work that should not wait for the next cron tick.
+    const remaining = await db.job.count({
+      where: {
+        status: JobStatus.QUEUED,
+        runAt: { lte: new Date(Date.now() + 2 * 60 * 1000) },
+      },
+    });
+    if (remaining === 0) {
+      console.log('[run-once] queue is empty; nothing to chain');
+      return;
+    }
+    console.log(`[run-once] ${remaining} job(s) still waiting; asking for another pass`);
+    await writeFile(marker, String(remaining), 'utf8');
+  } catch (error) {
+    // Never fails the pass: the schedule is still the backstop.
+    console.error('[run-once] could not check for remaining work', error);
+  }
 }
 
 /**
