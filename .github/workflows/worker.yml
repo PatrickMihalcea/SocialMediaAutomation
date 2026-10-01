@@ -97,9 +97,15 @@ jobs:
         # A comfortable margin under timeout-minutes above, so this process
         # exits on its own accord — logging what it left for the next tick —
         # rather than being killed mid-write by the job timeout.
+        #
+        # Ten minutes was not that margin. Setup costs about a minute and a
+        # half before this starts, a pass that uses its whole budget takes the
+        # rest, and roughly a fifth of all passes were killed outright at the
+        # twelve-minute ceiling — which abandons whatever was in flight and
+        # wastes the tick. Eight leaves the margin the comment claims.
         run: node --import tsx src/worker/run-once.ts
         env:
-          RUN_ONCE_BUDGET_MS: '600000'
+          RUN_ONCE_BUDGET_MS: '480000'
           RUN_ONCE_COARSE: ${{ github.event.schedule == '20 */6 * * *' && '1' || '0' }}
           NODE_OPTIONS: '--conditions=react-server'
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
