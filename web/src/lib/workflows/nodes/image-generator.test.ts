@@ -7,6 +7,7 @@ import { composePrompt, resolveStepProvider, type Config } from '@/lib/workflows
 const config = (overrides: Partial<Config>): Config => ({
   size: '1024x1536',
   style: '',
+  referenceUse: 'layout',
   maxImages: 8,
   provider: 'image-use',
   useMockGeneration: false,
@@ -122,5 +123,54 @@ describe('composePrompt with a layout reference', () => {
       composePrompt({ prompt: entry, style: '', hasReference: true }).slice(entry.length));
 
     expect(new Set(notes).size).toBe(1);
+  });
+});
+
+/**
+ * Two references, two opposite instructions.
+ *
+ * A layout sketch is followed for arrangement and ignored for everything else.
+ * A cast of characters is the other way round: how it looks is the whole point,
+ * and copying its composition would make every scene the same picture. One note
+ * cannot serve both, and sending the layout wording with a cast sheet actively
+ * tells the model to throw away the thing it was given.
+ */
+describe('what the reference is for', () => {
+  const withReference = (referenceUse: 'layout' | 'subject') =>
+    composePrompt({ prompt: 'a wizard reads by candlelight', style: '', hasReference: true, referenceUse });
+
+  it('tells the model to follow a layout only for arrangement', () => {
+    const prompt = withReference('layout');
+
+    expect(prompt).toContain('Follow it only for the arrangement of the scene');
+    expect(prompt).toContain('do not imitate how it is drawn');
+  });
+
+  it('tells it to keep the subjects, and to change the composition', () => {
+    const prompt = withReference('subject');
+
+    expect(prompt).toContain('Keep the same characters or objects it shows');
+    expect(prompt).toContain('recognisably the same cast');
+    expect(prompt).toContain('Do not copy the composition');
+  });
+
+  /** The two must not blur into each other — that was the whole problem. */
+  it('never sends the layout wording when the reference is the subjects', () => {
+    expect(withReference('subject')).not.toContain('Follow it only for the arrangement');
+    expect(withReference('layout')).not.toContain('Keep the same characters');
+  });
+
+  it('says nothing about a reference when none is attached', () => {
+    const prompt = composePrompt({ prompt: 'a wizard', style: '', hasReference: false, referenceUse: 'subject' });
+
+    expect(prompt).not.toContain('reference image');
+    expect(prompt).toBe('a wizard');
+  });
+
+  /** Steps built before this setting existed carry a theme sketch. */
+  it('treats an unset mode as a layout, which is what older steps meant', () => {
+    const prompt = composePrompt({ prompt: 'a wizard', style: '', hasReference: true });
+
+    expect(prompt).toContain('Follow it only for the arrangement of the scene');
   });
 });

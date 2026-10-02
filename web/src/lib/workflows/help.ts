@@ -204,6 +204,14 @@ export const WORKFLOW_FIELD_HELP: Partial<
       description: 'The look every image is rendered in — pixel art, anime, 1960s film photography, a technical illustration. It is appended to every prompt word for word and overrides anything in the prompt that conflicts with it, so a run cannot come back half in one style and half in another. Worth being specific; it can run to several paragraphs.',
       multiline: true,
     },
+    referenceUse: {
+      label: 'What the reference is',
+      description: 'Only matters when a Reference image is connected, or when a theme carries a sketch. A layout is followed for where things sit and ignored for how it looks; subjects are the other way round — the characters, clothing and palette carry over so a set of scenes is recognisably the same cast.',
+      optionLabels: {
+        layout: 'A layout sketch',
+        subject: 'The subjects to keep consistent',
+      },
+    },
     size: {
       label: 'Image shape',
       description: 'The OpenAI API offers 2:3, 3:2 and 1:1 only, so a vertical frame has to be cropped out of 2:3. Codex adds a true 9:16 that needs no crop at all — it appears here once this step is set to generate with Codex.',

@@ -12,6 +12,8 @@ import type { NodeRunContext } from '@/lib/workflows/node-context';
 export interface Config {
   size: ImageSize;
   style: string;
+  /** What an attached reference is for; decides what the model is told. */
+  referenceUse: 'layout' | 'subject';
   maxImages: number;
   /** Which source renders this step, independent of the deployment's setting. */
   provider: ImageProviderName;
@@ -68,6 +70,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       prompt: prompts[index],
       style: config.style,
       hasReference: Boolean(reference),
+      referenceUse: config.referenceUse,
     });
     const result = await generateImage({
       workspaceId: ctx.workspaceId,
@@ -129,10 +132,24 @@ const slug = (value: string) =>
  * approximate — a reference followed to the pixel produces eight images that
  * are the same picture, which is not what a reference is for.
  */
-const REFERENCE_NOTE =
+const LAYOUT_NOTE =
   'A layout reference image is attached. Follow it only for the arrangement of the scene — where the elements sit in the frame, their relative size and spacing, and the camera angle. '
   + 'Do not reproduce any words, labels, lettering, arrows or annotations that appear in it, and do not imitate how it is drawn; it is a guide, not artwork to copy. '
   + 'Treat the layout as approximate: follow it closely enough to be recognisable, and deviate where it makes a better image.';
+
+/**
+ * The other half of the same question, and almost the opposite instruction.
+ *
+ * A set of scenes meant to read as one story needs the same faces in each, and
+ * a description cannot carry that — "a wizard, a knight and a young woman"
+ * written eight times produces eight different trios. The reference is the
+ * cast, so how it is drawn is exactly what has to survive; the arrangement is
+ * what must not, or every scene is the same picture.
+ */
+const SUBJECT_NOTE =
+  'A reference image of the subjects is attached. Keep the same characters or objects it shows: their faces, build, hair, clothing, colouring and any distinguishing details must stay consistent, so every image in this set is recognisably the same cast. '
+  + 'Do not copy the composition — the pose, camera angle, setting and framing come from the description below and should differ from the reference. '
+  + 'Do not reproduce any words or lettering that appear in it.';
 
 /**
  * The style, appended as the instruction that wins.
@@ -152,11 +169,14 @@ export function composePrompt(input: {
   prompt: string;
   style: string;
   hasReference: boolean;
+  referenceUse?: 'layout' | 'subject';
 }): string {
   const style = input.style.trim();
   return [
     input.prompt.trim(),
-    input.hasReference ? REFERENCE_NOTE : null,
+    input.hasReference
+      ? (input.referenceUse === 'subject' ? SUBJECT_NOTE : LAYOUT_NOTE)
+      : null,
     style
       ? 'STYLE — render this image in exactly this style, identically to every other image in this set. '
         + `Where anything above implies a different medium, finish or rendering technique, follow the style instead: ${style}`
