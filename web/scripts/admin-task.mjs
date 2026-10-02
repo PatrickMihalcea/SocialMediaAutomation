@@ -164,7 +164,56 @@ async function createStoryWorkflow() {
   for (const [s, sp, t, tp] of wires) console.log(`  ${byId[s]}.${sp}  ->  ${byId[t]}.${tp}`);
 }
 
-const tasks = { 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow };
+/**
+ * Why a schedule did not fire as often as it asks to.
+ *
+ * Six slots a day against the runs that actually happened, plus where the next
+ * one is booked. Nothing in the app watches a clock: slots are noticed only
+ * when a worker pass happens to run, and a pass that arrives late fires the
+ * slot it finds and books the next future one — so every slot that went by
+ * without a pass is not late, it is gone.
+ */
+async function scheduleReport() {
+  const now = new Date();
+  const wfs = await db.workflow.findMany({
+    where: { scheduleEnabled: true, archivedAt: null },
+    select: {
+      id: true, name: true, enabled: true, timezone: true,
+      scheduleWeekdays: true, scheduleTimes: true, scheduleHour: true, scheduleMinute: true,
+      nextRunAt: true, lastRunAt: true,
+    },
+  });
+  console.log(`now (UTC): ${now.toISOString()}\n`);
+
+  for (const w of wfs) {
+    const times = (w.scheduleTimes?.length ? w.scheduleTimes : [w.scheduleHour * 60 + w.scheduleMinute])
+      .map((m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+    const slotsPerDay = times.length * (w.scheduleWeekdays?.length ?? 0) / 7;
+
+    const since = new Date(now.getTime() - 24 * 3600_000);
+    const runs = await db.workflowRun.findMany({
+      where: { workflowId: w.id, startedAt: { gte: since } },
+      select: { startedAt: true, trigger: true, status: true },
+      orderBy: { startedAt: 'desc' },
+    });
+    const scheduled = runs.filter((r) => r.trigger === 'SCHEDULE');
+
+    console.log(`${w.name}  (${w.id})`);
+    console.log(`  enabled=${w.enabled}  zone=${w.timezone}`);
+    console.log(`  slots: ${times.join(', ')}  on ${w.scheduleWeekdays?.length ?? 0} day(s)  = ${slotsPerDay.toFixed(0)} a day`);
+    console.log(`  nextRunAt: ${w.nextRunAt ? w.nextRunAt.toISOString() : 'NULL — the scan can never see it'}`);
+    if (w.nextRunAt) {
+      const mins = Math.round((now - w.nextRunAt) / 60000);
+      console.log(`             ${mins > 0 ? `OVERDUE by ${mins} min` : `due in ${-mins} min`}`);
+    }
+    console.log(`  lastRunAt: ${w.lastRunAt ? w.lastRunAt.toISOString() : 'never'}`);
+    console.log(`  in the last 24h: ${scheduled.length} scheduled run(s) against ${slotsPerDay.toFixed(0)} slots`);
+    for (const r of scheduled.slice(0, 8)) console.log(`     ${r.startedAt.toISOString().slice(5, 16)}  ${r.status}`);
+    console.log('');
+  }
+}
+
+const tasks = { 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow };
 
 const run = tasks[task];
 if (!run) {

@@ -16,6 +16,7 @@ on:
         required: true
         type: choice
         options:
+          - schedule-report
           - inspect-workflow
           - create-story-workflow
       name:
