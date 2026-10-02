@@ -5,7 +5,7 @@ import { db } from '@/lib/db';
 import { toAppError } from '@/lib/errors';
 import { postsForRun } from '@/lib/workflows/run-posts';
 import { storage } from '@/lib/storage';
-import { hasReviewableOutput } from '@/lib/workflows/node-output';
+import { hasReviewableOutput, nodeProgress } from '@/lib/workflows/node-output';
 
 /**
  * Live status for one run.
@@ -123,6 +123,10 @@ export async function GET(
           // A boolean, not the output: enough to decide whether the control is
           // worth showing, without re-sending a prompt list every poll.
           hasOutput: hasReviewableOutput(output),
+          // The counter, not the output: a step part-way through a set should
+          // say so while it is still working, which is exactly when the output
+          // itself is too big to re-send every poll.
+          progress: nodeProgress(output),
           produced: producedAssets.map(({ mediaAsset: asset }) => ({
             id: asset.id,
             filename: asset.filename,

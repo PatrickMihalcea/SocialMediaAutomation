@@ -8,7 +8,7 @@ import { descendantsOf, indegrees, successorsOf } from '@/lib/workflows/graph';
 import { WorkflowRunView } from '@/components/workflow-run-view';
 import { postsForRun } from '@/lib/workflows/run-posts';
 import { storage } from '@/lib/storage';
-import { hasReviewableOutput } from '@/lib/workflows/node-output';
+import { hasReviewableOutput, nodeProgress } from '@/lib/workflows/node-output';
 
 export const metadata = { title: 'Workflow run' };
 
@@ -108,6 +108,7 @@ async function RunDetail({
             durationMs: node.durationMs,
             error: node.error,
             hasOutput: hasReviewableOutput(node.output),
+            progress: nodeProgress(node.output),
             produced: node.producedAssets.map((link) => ({
               id: link.mediaAsset.id,
               filename: link.mediaAsset.filename,

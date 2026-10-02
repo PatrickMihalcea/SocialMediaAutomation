@@ -46,3 +46,30 @@ export function reviewableOutput(output: unknown): Record<string, unknown> | nul
 export function hasReviewableOutput(output: unknown): boolean {
   return reviewableOutput(output) !== null;
 }
+
+/** How far through a step that counts its own work is. */
+export interface NodeProgress {
+  done: number;
+  total: number;
+}
+
+/**
+ * The progress marker a step writes as it goes, if it writes one.
+ *
+ * Steps that produce a set one item at a time record this after each — it is
+ * the same marker that makes them resumable. Reading it back is what turns a
+ * step that has sat on RUNNING for four minutes from "something may be wrong"
+ * into "four of seven done", which is the difference between waiting and
+ * wondering.
+ *
+ * Client-safe, like the rest of this module.
+ */
+export function nodeProgress(output: unknown): NodeProgress | null {
+  if (typeof output !== 'object' || output === null) return null;
+  const raw = (output as { _progress?: unknown })._progress;
+  if (typeof raw !== 'object' || raw === null) return null;
+  const { done, total } = raw as { done?: unknown; total?: unknown };
+  if (typeof done !== 'number' || typeof total !== 'number') return null;
+  if (total <= 0) return null;
+  return { done, total };
+}

@@ -51,6 +51,8 @@ interface NodeRun {
    * generator's pictures — where the control would cost a click to show a uuid.
    */
   hasOutput?: boolean;
+  /** How far through its set a step that counts its own work has got. */
+  progress?: { done: number; total: number } | null;
 }
 
 interface RunStatus {
@@ -328,6 +330,7 @@ export function WorkflowRunView({
           error: null,
           attempt: 0,
           hasOutput: false,
+          progress: null,
           produced: [],
           post: null,
         }
@@ -431,6 +434,13 @@ export function WorkflowRunView({
                       </div>
                       <span className="b88-caption">
                         {elapsedFor(node)}
+                        {/* Said while it is still working, which is the only
+                            time it answers anything: a step on four of seven
+                            is working, a step on four of seven ten minutes
+                            later is not. */}
+                        {node.progress && node.status === 'RUNNING'
+                          ? ` · ${node.progress.done} OF ${node.progress.total}`
+                          : ''}
                         {node.attempt > 1 ? ` · ATTEMPT ${node.attempt} OF ${node.maxAttempts}` : ''}
                       </span>
                     </div>

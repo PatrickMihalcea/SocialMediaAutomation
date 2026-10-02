@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasReviewableOutput, reviewableOutput } from '@/lib/workflows/node-output';
+import { hasReviewableOutput, nodeProgress, reviewableOutput } from '@/lib/workflows/node-output';
 
 const ID = '3f2504e0-4f89-11d3-9a0c-0305e82c3301';
 const OTHER = '9c858901-8a57-4791-81fe-4c455b099bc9';
@@ -60,5 +60,31 @@ describe('reviewableOutput', () => {
   it('does not mistake ordinary text for a reference', () => {
     expect(reviewableOutput({ note: 'not-a-uuid', titles: ['a', 'b'] }))
       .toEqual({ note: 'not-a-uuid', titles: ['a', 'b'] });
+  });
+});
+
+/**
+ * A step that generates seven pictures sat on RUNNING with nothing to say for
+ * minutes at a time, so "working" and "wedged" looked identical. It records a
+ * counter after every item — the same marker that lets it resume — and reading
+ * that back is the whole difference between waiting and wondering.
+ */
+describe('nodeProgress', () => {
+  it('reads the counter a step writes as it goes', () => {
+    expect(nodeProgress({ images: ['a', 'b'], _progress: { done: 2, total: 7 } }))
+      .toEqual({ done: 2, total: 7 });
+  });
+
+  it('has nothing to say about a step that does not count', () => {
+    expect(nodeProgress({ video: 'asset-1' })).toBeNull();
+  });
+
+  it.each([
+    ['no output at all', null],
+    ['a total of zero, which would render as 3 of 0', { _progress: { done: 3, total: 0 } }],
+    ['counts that are not numbers', { _progress: { done: 'two', total: 'seven' } }],
+    ['a marker that is not an object', { _progress: 'halfway' }],
+  ])('ignores %s', (_label, output) => {
+    expect(nodeProgress(output)).toBeNull();
   });
 });
