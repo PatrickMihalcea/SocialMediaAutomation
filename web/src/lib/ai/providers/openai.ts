@@ -143,8 +143,12 @@ export class OpenAiProvider implements AiProvider {
       }
 
       if (!parsed.success) {
+        // Named, not just reported. "Something Bridge88 could not use" is true
+        // and useless: the reply failed on one field, and which field it was
+        // is the whole of what the reader needs to fix it.
         throw new AiError(
-          'The AI returned something Bridge88 could not use. Try again, or rephrase the request.',
+          `The AI's reply did not fit what this step expects — ${describeIssues(parsed.issues)}. `
+            + 'Try again, or adjust what the step asks for.',
           { retryable: true, cause: parsed.error },
         );
       }
@@ -220,18 +224,35 @@ function stripFence(text: string): string {
 function safeParseJson<T>(
   schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   raw: string,
-): { success: true; data: T } | { success: false; error: string } {
+):
+  | { success: true; data: T }
+  // The issues as well as the text: the retry prompt wants them written out,
+  // and the person reading the failure wants the field name out of them.
+  | { success: false; error: string; issues: SchemaIssue[] } {
   let json: unknown;
   try {
     json = JSON.parse(stripFence(raw));
   } catch {
-    return { success: false, error: 'The reply was not valid JSON.' };
+    return {
+      success: false,
+      error: 'The reply was not valid JSON.',
+      issues: [{ path: [], message: 'the reply was not valid JSON' }],
+    };
   }
   const parsed = schema.safeParse(json);
   if (!parsed.success) {
-    return { success: false, error: JSON.stringify(parsed.error.issues, null, 2) };
+    return {
+      success: false,
+      error: JSON.stringify(parsed.error.issues, null, 2),
+      issues: parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })),
+    };
   }
   return { success: true, data: parsed.data };
+}
+
+interface SchemaIssue {
+  path: Array<string | number>;
+  message: string;
 }
 
 function wrap(error: unknown): AiError {
@@ -246,4 +267,19 @@ function wrap(error: unknown): AiError {
     );
   }
   return new AiError('The AI service could not be reached.', { retryable: true, cause: error });
+}
+
+/**
+ * The first couple of schema complaints, as a sentence.
+ *
+ * Only the first few: a model that answered with prose produces an issue per
+ * field, and a wall of them says less than two does.
+ */
+function describeIssues(all: SchemaIssue[]): string {
+  const issues = all.slice(0, 2).map((issue) => {
+    const field = issue.path.join('.') || 'the reply';
+    return `${field}: ${issue.message.toLowerCase()}`;
+  });
+  const more = all.length - issues.length;
+  return issues.join('; ') + (more > 0 ? ` (and ${more} more)` : '');
 }

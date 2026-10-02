@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assistantReplySchema } from '@/lib/ai/schemas';
+import { assistantReplySchema, imagePromptsSchema } from '@/lib/ai/schemas';
 
 const POST_ID = '11111111-1111-4111-8111-111111111111';
 const CAMPAIGN_ID = '22222222-2222-4222-8222-222222222222';
@@ -115,5 +115,36 @@ describe('assistant action contract', () => {
     { ...validActions[8], workflowName: '' },
   ])('rejects malformed $kind payloads', (action) => {
     expect(assistantReplySchema.safeParse({ reply: 'Malformed proposal', action }).success).toBe(false);
+  });
+});
+
+/**
+ * The cap that produced "the AI returned something Bridge88 could not use".
+ *
+ * A named output asked to carry a description of a cast ran well past two
+ * hundred characters every time, and one oversized value fails the whole
+ * reply — so a step that was working apart from one long field looked
+ * completely broken, with nothing naming the field.
+ */
+describe('named extra outputs', () => {
+  const reply = (subject: string) => imagePromptsSchema.safeParse({
+    postTitle: 'A trio on the road',
+    caption: '',
+    hashtags: [],
+    additionalOutputs: { subject },
+    prompts: [{ title: 'One', prompt: 'a wizard reads by candlelight' }],
+  });
+
+  it('takes a description long enough to be worth asking for', () => {
+    expect(reply('A'.repeat(1_500)).success).toBe(true);
+  });
+
+  it('still refuses one that has clearly run away', () => {
+    expect(reply('A'.repeat(2_001)).success).toBe(false);
+  });
+
+  it('used to refuse anything past a sentence', () => {
+    // The old ceiling. A cast of three never fitted inside it.
+    expect(reply('A'.repeat(201)).success).toBe(true);
   });
 });

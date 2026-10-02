@@ -207,7 +207,15 @@ export const imagePromptsSchema = z.object({
    */
   caption: z.string().max(5000).default(''),
   hashtags: z.array(z.string().max(100)).max(30).default([]),
-  additionalOutputs: z.record(z.string().max(200)).default({}),
+  /**
+   * Named text fields a step asked for. 2,000 rather than 200: these hold
+   * whatever the step was told to write, and 200 characters is a sentence —
+   * a field asked to carry a description of a cast overran it every time, and
+   * one oversized value fails the whole reply, which reached the person as
+   * "the AI returned something Bridge88 could not use" with nothing naming
+   * the field.
+   */
+  additionalOutputs: z.record(z.string().max(2_000)).default({}),
   prompts: z
     .array(
       z.object({
