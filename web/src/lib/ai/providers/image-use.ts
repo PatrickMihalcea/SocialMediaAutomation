@@ -73,6 +73,7 @@ export class ImageUseProvider implements AiProvider {
   }
 
   async generateImage(input: {
+    onStage?: (stage: string) => void;
     prompt: string;
     size?: ImageSize;
     reference?: { data: Buffer; mimeType: string };
@@ -126,6 +127,7 @@ export class ImageUseProvider implements AiProvider {
           // per-call temp directory that is removed below.
           XDG_CONFIG_HOME: directory,
         },
+        input.onStage,
       );
 
       if (result.timedOut) {
@@ -229,6 +231,7 @@ function run(
   args: string[],
   killAfterMs: number,
   env?: NodeJS.ProcessEnv,
+  onStage?: (stage: string) => void,
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     // No stdin: the CLI never prompts, and an inherited one would let a
@@ -241,7 +244,17 @@ function run(
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => { stdout = keepTail(stdout + chunk); });
-    child.stderr.on('data', (chunk: string) => { stderr = keepTail(stderr + chunk); });
+    child.stderr.on('data', (chunk: string) => {
+      stderr = keepTail(stderr + chunk);
+      // The CLI narrates itself on stderr — "[  1.1s] queued", then
+      // "[  7.6s] generating". Reading it back is the only account anyone has
+      // of what a five-minute call is doing, and it was being thrown away.
+      if (!onStage) return;
+      for (const line of chunk.split('\n')) {
+        const stage = PROGRESS_LINE.exec(line)?.[1]?.trim();
+        if (stage) onStage(stage);
+      }
+    });
 
     const deadline = setTimeout(() => {
       timedOut = true;
@@ -395,3 +408,12 @@ function extensionFor(mimeType: string): string {
   if (mimeType.includes('webp')) return 'webp';
   return 'png';
 }
+
+/**
+ * A progress line from the CLI: an elapsed stamp, then what it is doing.
+ *
+ * Only the word, not the stamp — the stamp is this run's own clock and the
+ * step already knows how long it has been waiting. Anchored so a prompt that
+ * happens to contain brackets cannot be read as progress.
+ */
+const PROGRESS_LINE = /^\s*\[\s*[\d.]+s\]\s*([A-Za-z][A-Za-z \-]{0,40})/;

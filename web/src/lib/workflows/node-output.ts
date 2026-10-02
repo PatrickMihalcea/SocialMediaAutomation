@@ -51,6 +51,10 @@ export function hasReviewableOutput(output: unknown): boolean {
 export interface NodeProgress {
   done: number;
   total: number;
+  /** What the step is doing right now, where it can say. */
+  stage?: string;
+  /** When the item in hand was started, so the wait can be shown. */
+  since?: number;
 }
 
 /**
@@ -68,8 +72,13 @@ export function nodeProgress(output: unknown): NodeProgress | null {
   if (typeof output !== 'object' || output === null) return null;
   const raw = (output as { _progress?: unknown })._progress;
   if (typeof raw !== 'object' || raw === null) return null;
-  const { done, total } = raw as { done?: unknown; total?: unknown };
+  const { done, total, stage, since } = raw as Record<string, unknown>;
   if (typeof done !== 'number' || typeof total !== 'number') return null;
   if (total <= 0) return null;
-  return { done, total };
+  return {
+    done,
+    total,
+    ...(typeof stage === 'string' && stage ? { stage } : {}),
+    ...(typeof since === 'number' ? { since } : {}),
+  };
 }

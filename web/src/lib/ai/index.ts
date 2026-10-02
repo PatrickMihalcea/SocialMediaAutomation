@@ -147,6 +147,8 @@ export async function generateImage(input: {
   reference?: { data: Buffer; mimeType: string };
   /** Per-call choice of source; omitted means the deployment's configured one. */
   provider?: ImageProviderName;
+  /** Called as the provider reports what it is doing, where it reports at all. */
+  onStage?: (stage: string) => void;
 }): Promise<AiImageResult & { generationId: string }> {
   const used = await currentMonthUsage(input.workspaceId, 'ai_generations');
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);

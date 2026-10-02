@@ -72,6 +72,21 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       hasReference: Boolean(reference),
       referenceUse: config.referenceUse,
     });
+    // What this picture is doing, written down as the provider says it.
+    //
+    // One call can legitimately take minutes, and without this the step shows
+    // the same number for the whole of it — so a picture being made and a
+    // picture wedged look identical from the outside.
+    let stage = 'starting';
+    const record = async () => {
+      await ctx.saveProgress({
+        images,
+        _progress: { done: images.length, total: prompts.length, stage, since: startedThisImage },
+      });
+    };
+    const startedThisImage = Date.now();
+    await record();
+
     const result = await generateImage({
       workspaceId: ctx.workspaceId,
       userId: ctx.userId,
@@ -79,6 +94,12 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       size: config.size,
       reference,
       provider: resolveStepProvider(config),
+      onStage: (next) => {
+        if (next === stage) return;
+        stage = next;
+        // Not awaited: the generation must not wait on a status write.
+        void record().catch(() => {});
+      },
     });
 
     const extension = result.mimeType === 'image/svg+xml' ? 'svg' : 'png';

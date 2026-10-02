@@ -82,9 +82,12 @@ describe('resuming a part-finished image step', () => {
 
     await run(ctx);
 
-    expect(ctx.saveProgress).toHaveBeenCalledTimes(4);
+    // Twice per image: once on starting it, so a picture that never comes
+    // back is visible while it is happening rather than only afterwards, and
+    // once on finishing it.
+    expect(ctx.saveProgress).toHaveBeenCalledTimes(8);
     expect(ctx.saveProgress).toHaveBeenLastCalledWith(
-      expect.objectContaining({ _progress: { done: 4, total: 4 } }),
+      expect.objectContaining({ _progress: expect.objectContaining({ done: 4, total: 4 }) }),
     );
   });
 
@@ -100,13 +103,63 @@ describe('resuming a part-finished image step', () => {
 
     const saved = (ctx.saveProgress as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
     expect(saved.images).toEqual(['asset-1', 'asset-2']);
-    expect(saved._progress).toEqual({ done: 2, total: 4 });
+    expect(saved._progress).toMatchObject({ done: 2, total: 4 });
   });
 
   it('resumes exactly where that failure left off', async () => {
     const output = await run(context({ images: ['asset-1', 'asset-2'], _progress: { done: 2, total: 4 } }));
 
     expect(mocks.generateImage).toHaveBeenCalledTimes(2);
+    expect(output.images).toHaveLength(4);
+  });
+});
+
+/**
+ * One call can legitimately take minutes, and for the whole of it the step
+ * used to show the same number — so a picture being made and a picture wedged
+ * looked identical from the outside. The provider narrates itself; the step
+ * writes down what it says.
+ */
+describe('saying what it is doing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    let created = 0;
+    mocks.mediaAssetCreate.mockImplementation(async () => ({ id: `asset-${++created}` }));
+  });
+
+  it('records the stage the provider reports, as it reports it', async () => {
+    mocks.generateImage.mockImplementation(async ({ onStage }) => {
+      onStage?.('queued');
+      onStage?.('generating');
+      return { data: Buffer.from('png'), mimeType: 'image/png', generationId: 'g1' };
+    });
+    const ctx = context(null);
+
+    await run(ctx);
+
+    const stages = (ctx.saveProgress as ReturnType<typeof vi.fn>).mock.calls
+      .map(([saved]) => saved._progress?.stage)
+      .filter(Boolean);
+    expect(stages).toContain('queued');
+    expect(stages).toContain('generating');
+  });
+
+  it('says when the picture in hand was started, so a wait can be measured', async () => {
+    mocks.generateImage.mockResolvedValue({ data: Buffer.from('png'), mimeType: 'image/png', generationId: 'g1' });
+    const ctx = context(null);
+
+    await run(ctx);
+
+    const [first] = (ctx.saveProgress as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(typeof first._progress.since).toBe('number');
+  });
+
+  /** A provider with nothing to say about itself must still work. */
+  it('copes with a provider that never reports a stage', async () => {
+    mocks.generateImage.mockResolvedValue({ data: Buffer.from('png'), mimeType: 'image/png', generationId: 'g1' });
+
+    const output = await run(context(null));
+
     expect(output.images).toHaveLength(4);
   });
 });

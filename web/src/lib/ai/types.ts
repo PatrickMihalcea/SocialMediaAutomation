@@ -99,7 +99,13 @@ export interface AiProvider {
     temperature?: number;
   }): Promise<AiObjectResult<T>>;
 
+  /**
+   * `onStage` is called as the provider reports what it is doing — queued,
+   * generating, saving. Optional, and providers that know nothing of their own
+   * progress simply never call it.
+   */
   generateImage(input: {
+    onStage?: (stage: string) => void;
     prompt: string;
     size?: ImageSize;
     /**

@@ -52,7 +52,7 @@ interface NodeRun {
    */
   hasOutput?: boolean;
   /** How far through its set a step that counts its own work has got. */
-  progress?: { done: number; total: number } | null;
+  progress?: { done: number; total: number; stage?: string; since?: number } | null;
 }
 
 interface RunStatus {
@@ -439,7 +439,7 @@ export function WorkflowRunView({
                             is working, a step on four of seven ten minutes
                             later is not. */}
                         {node.progress && node.status === 'RUNNING'
-                          ? ` · ${node.progress.done} OF ${node.progress.total}`
+                          ? ` · ${node.progress.done} OF ${node.progress.total}${stageOf(node.progress, now + skew.current)}`
                           : ''}
                         {node.attempt > 1 ? ` · ATTEMPT ${node.attempt} OF ${node.maxAttempts}` : ''}
                       </span>
@@ -825,4 +825,18 @@ function StepThrough({
       <Glyph size={18} />
     </button>
   );
+}
+
+/**
+ * What the step is doing, and how long it has been doing it.
+ *
+ * The elapsed matters more than the word: "generating" says a call is in
+ * flight, and "generating, 4m" says that call is not coming back. One image
+ * can legitimately take minutes, so a number is the only way to tell a slow
+ * one from a stuck one without waiting to find out.
+ */
+function stageOf(progress: { stage?: string; since?: number }, nowMs: number): string {
+  if (!progress.stage) return '';
+  const waited = progress.since ? formatElapsed(nowMs - progress.since) : null;
+  return ` · ${progress.stage.toUpperCase()}${waited ? ` ${waited}` : ''}`;
 }
