@@ -43,7 +43,128 @@ async function inspectWorkflow() {
   }
 }
 
-const tasks = { 'inspect-workflow': inspectWorkflow };
+/**
+ * Builds a story workflow from an existing one.
+ *
+ * The shape the reference input exists for: invent a cast once, draw it once,
+ * then render every scene against that one picture. A description cannot hold
+ * a cast together — the same three characters written seven times come back as
+ * seven different trios — so the picture is what carries them.
+ *
+ * Everything downstream of the images is copied from the source unchanged:
+ * the track, the slideshow, the overlay and the publish step are already how
+ * this account wants them.
+ */
+async function createStoryWorkflow() {
+  const source = await db.workflow.findFirst({
+    where: { name: { contains: name, mode: 'insensitive' }, archivedAt: null },
+    include: { nodes: true, edges: true },
+  });
+  if (!source) return console.log(`no workflow matching "${name}"`);
+
+  const target = process.env.NEW_WORKFLOW_NAME || `${source.name} — story`;
+  const clash = await db.workflow.findFirst({ where: { workspaceId: source.workspaceId, name: target } });
+  if (clash) return console.log(`"${target}" already exists (${clash.id}); nothing done`);
+
+  const from = (type) => source.nodes.find((n) => n.type === type);
+  const ideas = from('IDEA_GENERATOR');
+  const images = from('IMAGE_GENERATOR');
+  if (!ideas || !images) return console.log('the source has no idea or image step to copy settings from');
+
+  // Their own look and their own subject pool, carried over rather than retyped.
+  const style = images.config.style ?? '';
+  const size = images.config.size ?? '1024x1820';
+  const provider = images.config.provider ?? 'image-use';
+  const pool = ideas.config.themePool ?? [];
+  const count = ideas.config.count ?? 7;
+
+  const CAST_GUIDANCE = [
+    'Write exactly one entry. It describes the recurring cast this whole set features — the characters, creatures or objects that appear in every image.',
+    'Name them, and describe only what is visible: build, face, hair, clothing, armour, colours, and the one detail that makes each recognisable at a glance.',
+    'Do not describe a scene, a setting or an action. This is the sheet every later image is drawn against, nothing more.',
+    ideas.config.promptGuidance ?? '',
+  ].join(' ');
+
+  const SCENE_GUIDANCE = [
+    'Each entry is one moment from a story featuring the cast named in the theme.',
+    'Do not describe what the characters look like — a reference image carries their appearance, and describing them again is what makes a set drift apart.',
+    'Describe the setting, what is happening, the composition and the light. Change the location and the time of day between entries so the set reads as a journey rather than one scene repeated.',
+    ideas.config.promptGuidance ?? '',
+  ].join(' ');
+
+  const created = await db.workflow.create({
+    data: {
+      workspaceId: source.workspaceId,
+      createdById: source.createdById,
+      name: target,
+      description: 'Invents a cast, draws it once, then renders every scene against that picture.',
+      // Off, and on no schedule: this is reviewed by hand before it posts.
+      enabled: false,
+      scheduleEnabled: false,
+      scheduleWeekdays: [],
+      scheduleTimes: [],
+      timezone: source.timezone,
+    },
+    select: { id: true },
+  });
+
+  const spec = [
+    ['cast',    'IDEA_GENERATOR',  'Invent the cast',   -820, 190, { ...ideas.config, count: 1, promptGuidance: CAST_GUIDANCE, additionalOutputs: [{ id: 'subject', label: 'The subject' }] }],
+    ['draw',    'IMAGE_GENERATOR', 'Draw the cast',     -470,  40, { size, style, provider, maxImages: 1, referenceUse: 'layout', useMockGeneration: false }],
+    ['scenes',  'IDEA_GENERATOR',  'Write the scenes',  -470, 340, { ...ideas.config, count, themeMode: 'fixed', theme: '', promptGuidance: SCENE_GUIDANCE, additionalOutputs: [] }],
+    ['story',   'IMAGE_GENERATOR', 'Render the story',   -60, 190, { size, style, provider, maxImages: count, referenceUse: 'subject', useMockGeneration: false }],
+  ];
+  // Everything from the pictures onward is the source's, unchanged.
+  for (const n of source.nodes) {
+    if (n.type === 'IDEA_GENERATOR' || n.type === 'IMAGE_GENERATOR') continue;
+    spec.push([n.id, n.type, n.name, n.positionX, n.positionY, n.config]);
+  }
+
+  const id = {};
+  for (const [key, type, nodeName, x, y, config] of spec) {
+    const node = await db.workflowNode.create({
+      data: { workspaceId: source.workspaceId, workflowId: created.id, type, name: nodeName, config, positionX: x, positionY: y },
+      select: { id: true },
+    });
+    id[key] = node.id;
+  }
+
+  const sourceKey = (nodeId) => {
+    const n = source.nodes.find((x) => x.id === nodeId);
+    if (!n) return null;
+    if (n.type === 'IDEA_GENERATOR') return 'scenes';   // post copy comes from the scenes
+    if (n.type === 'IMAGE_GENERATOR') return 'story';
+    return n.id;
+  };
+
+  const wires = [
+    [id.cast,   'prompts', id.draw,  'prompts'],
+    [id.cast,   'subject', id.scenes, 'theme'],
+    [id.scenes, 'prompts', id.story, 'prompts'],
+    [id.draw,   'images',  id.story, 'reference'],
+  ];
+  // The source's own wiring, with its idea and image steps re-pointed.
+  for (const e of source.edges) {
+    const s = sourceKey(e.sourceNodeId);
+    const t = sourceKey(e.targetNodeId);
+    if (!s || !t) continue;
+    if (s === 'scenes' && t === 'story') continue;      // replaced by the pair above
+    wires.push([id[s], e.sourcePort, id[t], e.targetPort]);
+  }
+
+  for (const [sourceNodeId, sourcePort, targetNodeId, targetPort] of wires) {
+    await db.workflowEdge.create({
+      data: { workspaceId: source.workspaceId, workflowId: created.id, sourceNodeId, sourcePort, targetNodeId, targetPort },
+    });
+  }
+
+  const byId = Object.fromEntries(Object.entries(id).map(([k, v]) => [v, spec.find((s) => s[0] === k)[2]]));
+  console.log(`created "${target}"  (${created.id})  — disabled, no schedule`);
+  console.log(`steps: ${spec.length}, connections: ${wires.length}`);
+  for (const [s, sp, t, tp] of wires) console.log(`  ${byId[s]}.${sp}  ->  ${byId[t]}.${tp}`);
+}
+
+const tasks = { 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow };
 
 const run = tasks[task];
 if (!run) {

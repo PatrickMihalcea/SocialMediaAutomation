@@ -17,10 +17,15 @@ on:
         type: choice
         options:
           - inspect-workflow
+          - create-story-workflow
       name:
-        description: 'Workflow name to match (for inspect-workflow)'
+        description: 'Existing workflow to read'
         required: false
         default: 'dark fantasy'
+      newName:
+        description: 'Name for the workflow being created'
+        required: false
+        default: 'Dark Fantasy Dreams — story'
 
 jobs:
   admin:
@@ -48,5 +53,6 @@ jobs:
         env:
           ADMIN_TASK: ${{ inputs.task }}
           WORKFLOW_NAME: ${{ inputs.name }}
+          NEW_WORKFLOW_NAME: ${{ inputs.newName }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
