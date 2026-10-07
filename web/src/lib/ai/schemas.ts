@@ -198,7 +198,30 @@ export type AssistantReply = z.infer<typeof assistantReplySchema>;
  * can burn onto the clip, so it is kept short and human — "Coastal minimal",
  * not a restatement of the prompt.
  */
+/**
+ * One reply carrying a set of images and the post copy that goes with them.
+ *
+ * The prompts come first, and the order is the whole point. A reply is written
+ * from top to bottom, so anything above the prompts is written before the
+ * images exist — a caption asked to suit the pictures, placed first, could
+ * only guess at them from the theme. Putting the set first means the title and
+ * caption are written with the actual images in view.
+ */
 export const imagePromptsSchema = z.object({
+  prompts: z
+    .array(
+      z.object({
+        title: z.string().max(80),
+        /**
+         * Where this one is set, in a few words.
+         *
+         * Recorded so the copy below can refer to the set concretely.
+         */
+        prompt: z.string().max(2000),
+      }),
+    )
+    .min(1)
+    .max(20),
   postTitle: z.string().min(1).max(200),
   /**
    * Copy for the post itself, kept optional so a model that answers with only
@@ -211,19 +234,8 @@ export const imagePromptsSchema = z.object({
    * Named text fields a step asked for. 2,000 rather than 200: these hold
    * whatever the step was told to write, and 200 characters is a sentence —
    * a field asked to carry a description of a cast overran it every time, and
-   * one oversized value fails the whole reply, which reached the person as
-   * "the AI returned something Bridge88 could not use" with nothing naming
-   * the field.
+   * one oversized value fails the whole reply.
    */
   additionalOutputs: z.record(z.string().max(2_000)).default({}),
-  prompts: z
-    .array(
-      z.object({
-        title: z.string().max(80),
-        prompt: z.string().max(2000),
-      }),
-    )
-    .min(1)
-    .max(20),
 });
 export type ImagePrompts = z.infer<typeof imagePromptsSchema>;

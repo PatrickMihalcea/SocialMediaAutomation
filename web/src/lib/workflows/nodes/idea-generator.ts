@@ -42,7 +42,10 @@ const directed = (base: string, guidance: string) => {
  */
 export function buildIdeaInstruction(config: Config, recentTitles: string[] = []): string {
   return [
-    'Reply as {"postTitle":string,"caption":string,"hashtags":string[],"additionalOutputs":Record<string,string>,"prompts":[{"title":string,"prompt":string}]}.',
+    // Prompts first, deliberately. A reply is written top to bottom, so copy
+    // placed above the set is written before the set exists and can only
+    // guess at it.
+    'Reply as {"prompts":[{"title":string,"prompt":string}],"postTitle":string,"caption":string,"hashtags":string[],"additionalOutputs":Record<string,string>}.',
     `Produce exactly ${config.count} entries.`,
     // The model has no memory between runs, so a step left on the same theme
     // writes near enough the same set every week. Naming what it already
@@ -51,11 +54,11 @@ export function buildIdeaInstruction(config: Config, recentTitles: string[] = []
       ? [`This step has already covered these angles, so take a different one for every entry: ${recentTitles.join('; ')}.`]
       : []),
     directed(
-      'postTitle is a concise, compelling title for the finished social post. It must describe the whole set, not just one image.',
+      'postTitle is a concise, compelling title for the finished social post. Write it after the prompts above and make it describe that set, not just one image.',
       config.titleGuidance,
     ),
     directed(
-      'caption is the post copy itself, written for a social feed.',
+      'caption is the post copy itself, written for a social feed. Write it from the set above: it must make sense against those specific images and their titles, naming or alluding to what is actually in them rather than the theme in general.',
       config.captionGuidance,
     ),
     directed(
