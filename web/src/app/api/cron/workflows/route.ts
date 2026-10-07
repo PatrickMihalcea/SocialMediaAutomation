@@ -3,7 +3,8 @@ import { env } from '@/lib/env';
 import { db } from '@/lib/db';
 import { runJob } from '@/lib/queue/runner';
 import { scanDueWorkflows } from '@/lib/workflows/schedule';
-import { isWakeConfigured } from '@/lib/queue/wake-remote-worker';
+import { isWakeConfigured, wakeWorkerIfIdle } from '@/lib/queue/wake-remote-worker';
+import { reclaimStaleJobs } from '@/lib/queue/store';
 import { sweepWorkflowRuns } from '@/lib/workflows/engine';
 
 /**
@@ -29,6 +30,19 @@ export async function GET(request: Request) {
   // the work begins on a machine built for it within seconds of this call.
   const started = await scanDueWorkflows();
   const swept = await sweepWorkflowRuns();
+  // A worker that died mid-job leaves its rows RUNNING with nobody behind
+  // them. The worker reclaims these at the start of a pass — which is no help
+  // at all when the reason nothing is happening is that no pass is starting.
+  const reclaimed = await reclaimStaleJobs();
+
+  // The one check nothing else makes: work is waiting and no worker is up.
+  //
+  // Enqueueing wakes a worker, but that is a single fire-and-forget call. Lose
+  // it — a cancelled pass, a deploy mid-flight, a rejected token — and the job
+  // waits for GitHub's five-minute schedule, which has in practice gone over an
+  // hour between ticks. Asking here turns a permanent stall into a one-minute
+  // delay, because recovery no longer depends on any single call succeeding.
+  const woke = await wakeWorkerIfIdle(await queuedJobCount());
 
   // Draining the queue here is a last resort, not the normal path.
   //
@@ -47,7 +61,14 @@ export async function GET(request: Request) {
     ? await drainAFew()
     : 0;
 
-  return NextResponse.json({ ...started, ...swept, drained });
+  return NextResponse.json({ ...started, ...swept, reclaimed, woke, drained });
+}
+
+/** Work that is due and has nobody doing it. */
+async function queuedJobCount(): Promise<number> {
+  return db.job.count({
+    where: { queue: 'WORKFLOW', status: 'QUEUED', runAt: { lte: new Date() } },
+  });
 }
 
 /**
