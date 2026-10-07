@@ -20,6 +20,7 @@ on:
           - inspect-workflow
           - create-story-workflow
           - model-report
+          - run-report
       name:
         description: 'Existing workflow to read'
         required: false

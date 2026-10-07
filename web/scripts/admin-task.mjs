@@ -240,7 +240,74 @@ async function modelReport() {
   }
 }
 
-const tasks = { 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
+/**
+ * The latest run of a named workflow, step by step.
+ *
+ * Reads what actually happened rather than what the canvas says would: which
+ * steps ran, what each one produced, where one stopped and what it said. The
+ * run page shows this too, but only to someone signed in — this is the same
+ * answer from the side the database is on.
+ */
+async function runReport() {
+  const wf = await db.workflow.findFirst({
+    where: { name: { contains: name, mode: 'insensitive' }, archivedAt: null },
+    select: { id: true, name: true },
+  });
+  if (!wf) {
+    const all = await db.workflow.findMany({ where: { archivedAt: null }, select: { name: true } });
+    console.log(`no workflow matching "${name}"`);
+    console.log('available:', all.map((w) => w.name).join(' | '));
+    return;
+  }
+
+  const run = await db.workflowRun.findFirst({
+    where: { workflowId: wf.id },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, status: true, trigger: true, startedAt: true, finishedAt: true, error: true, createdAt: true },
+  });
+  if (!run) {
+    console.log(`${wf.name}: no runs`);
+    return;
+  }
+
+  const mins = (a, b) => (a && b ? `${Math.round((b - a) / 60000)} min` : '');
+  console.log(`${wf.name}`);
+  console.log(`run ${run.id.slice(0, 8)}  ${run.status}  trigger=${run.trigger}`);
+  console.log(`started ${run.startedAt?.toISOString() ?? '—'}  ${run.finishedAt ? `finished ${run.finishedAt.toISOString()} (${mins(run.startedAt, run.finishedAt)})` : `still going (${mins(run.startedAt, new Date())})`}`);
+  if (run.error) console.log(`run error: ${run.error}`);
+
+  const steps = await db.workflowNodeRun.findMany({
+    where: { runId: run.id },
+    orderBy: [{ startedAt: 'asc' }, { createdAt: 'asc' }],
+    select: {
+      nodeName: true, nodeType: true, status: true, attempt: true, maxAttempts: true,
+      error: true, startedAt: true, finishedAt: true, heartbeatAt: true, output: true, config: true,
+    },
+  });
+
+  console.log('\nSTEPS');
+  for (const s of steps) {
+    const out = s.output ?? {};
+    const shape = Object.entries(out)
+      .filter(([k]) => !k.startsWith('_'))
+      .map(([k, v]) => `${k}=${Array.isArray(v) ? `[${v.length}]` : JSON.stringify(v)?.slice(0, 60)}`)
+      .join('  ');
+    console.log(`  ${s.status.padEnd(9)} ${s.nodeName}  (${s.nodeType})  attempt ${s.attempt}/${s.maxAttempts}  ${mins(s.startedAt, s.finishedAt ?? new Date())}`);
+    const cfg = s.config ?? {};
+    const interesting = ['count', 'maxImages', 'referenceUse', 'temperature', 'mode'].filter((k) => cfg[k] !== undefined);
+    if (interesting.length) console.log(`            config: ${interesting.map((k) => `${k}=${JSON.stringify(cfg[k])}`).join('  ')}`);
+    if (shape) console.log(`            output: ${shape}`);
+    if (s.error) console.log(`            error: ${s.error}`);
+    if (s.status === 'RUNNING') {
+      const stale = s.heartbeatAt ? Math.round((Date.now() - s.heartbeatAt) / 60000) : null;
+      console.log(`            heartbeat: ${stale === null ? 'never' : `${stale} min ago`}`);
+      const p = (s.output ?? {})._progress;
+      if (p) console.log(`            progress: ${p.done ?? '?'} / ${p.total ?? '?'}  ${p.stage ?? ''}`);
+    }
+  }
+}
+
+const tasks = { 'run-report': runReport, 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
 
 const run = tasks[task];
 if (!run) {
