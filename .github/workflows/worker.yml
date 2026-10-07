@@ -88,7 +88,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/ffmpeg-debs
-          key: ffmpeg-debs-ubuntu-24.04-v2
+          key: ffmpeg-debs-ubuntu-24.04-v3
 
       - name: Install ffmpeg
         # Deliberately not `set -e`: everything above the last block is an
