@@ -75,16 +75,62 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # ffmpeg is not in the runner image, and apt pulls ninety-nine packages
+      # for it. Downloading them was costing between two and a half and five
+      # minutes of every pass — in one run, longer than all the work that pass
+      # actually did. The packages are the same every time, so they are fetched
+      # once and kept.
+      #
+      # The .debs rather than a prebuilt binary: they still come from Ubuntu's
+      # own archive, so caching changes only how often they are downloaded, not
+      # who they come from.
+      - name: Cache the ffmpeg packages
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg-debs
+          key: ffmpeg-debs-ubuntu-24.04-v1
+
       - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: |
+          set -euo pipefail
+          if command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; then
+            ffmpeg -version | head -1
+            exit 0
+          fi
+          mkdir -p ~/ffmpeg-debs
+          # Downloaded unprivileged, so the cache action can read them back.
+          if [ -z "$(ls -A ~/ffmpeg-debs)" ]; then
+            sudo apt-get update -qq
+            cd ~/ffmpeg-debs
+            apt-get install --print-uris -y ffmpeg \
+              | grep -oP "(?<=')http[^']+" \
+              | xargs -r -n1 -P8 curl -sSLO
+          fi
+          sudo dpkg -i ~/ffmpeg-debs/*.deb >/dev/null 2>&1 || sudo apt-get -y -f install
+          ffmpeg -version | head -1
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
+      # librosa and its numpy/scipy stack are rebuilt from nothing on every
+      # pass otherwise. The virtualenv is self-contained, so keeping it whole
+      # is simpler than keeping pip's cache and installing from that.
+      - name: Cache the audio virtualenv
+        uses: actions/cache@v4
+        with:
+          path: web/.venv-audio
+          key: venv-audio-ubuntu-24.04-py3.12-v1
+
       - name: Install librosa
         working-directory: web
         run: |
+          set -euo pipefail
+          if [ -x .venv-audio/bin/python ] && .venv-audio/bin/python -c 'import librosa' 2>/dev/null; then
+            echo "librosa already present"
+            exit 0
+          fi
+          rm -rf .venv-audio
           python3 -m venv .venv-audio
           .venv-audio/bin/pip install --quiet librosa soundfile numpy
 
