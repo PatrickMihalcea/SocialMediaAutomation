@@ -221,8 +221,27 @@ function estimateCost(
   completionTokens?: number,
 ): number | null {
   if (!promptTokens && !completionTokens) return null;
-  const rates = model.includes('gpt-4o-mini')
-    ? { input: 0.15 / 1_000_000, output: 0.6 / 1_000_000 }
-    : { input: 5 / 1_000_000, output: 15 / 1_000_000 };
+  const rates = RATES.find(([prefix]) => model.startsWith(prefix))?.[1] ?? FALLBACK_RATE;
   return (promptTokens ?? 0) * rates.input + (completionTokens ?? 0) * rates.output;
 }
+
+/**
+ * Dollars per million tokens, longest prefix first — the recorded model is the
+ * dated name the API answers with ("gpt-5.1-2025-11-13"), not the alias asked
+ * for, so these match on the family rather than the exact string.
+ *
+ * Every published rate here is a list price that changes without telling us,
+ * so this is an estimate shown to one person deciding whether a workflow is
+ * worth running, never a bill. The fallback is deliberately the expensive end:
+ * a cost that reads low is worse than one that reads high.
+ */
+const RATES = ([
+  ['gpt-4o-mini', { input: 0.15 / 1_000_000, output: 0.6 / 1_000_000 }],
+  ['gpt-4o', { input: 2.5 / 1_000_000, output: 10 / 1_000_000 }],
+  ['gpt-5.1', { input: 1.25 / 1_000_000, output: 10 / 1_000_000 }],
+  ['gpt-5-mini', { input: 0.25 / 1_000_000, output: 2 / 1_000_000 }],
+  ['gpt-5-nano', { input: 0.05 / 1_000_000, output: 0.4 / 1_000_000 }],
+  ['gpt-5', { input: 1.25 / 1_000_000, output: 10 / 1_000_000 }],
+] as Array<[string, { input: number; output: number }]>).sort((a, b) => b[0].length - a[0].length);
+
+const FALLBACK_RATE = { input: 5 / 1_000_000, output: 15 / 1_000_000 };
