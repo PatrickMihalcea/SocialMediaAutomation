@@ -105,6 +105,7 @@ function PresetField({
   presets,
   value,
   kind,
+  multiline,
   disabled,
   preview,
   onChange,
@@ -114,6 +115,8 @@ function PresetField({
   presets: Array<{ label: string; value: string | number }>;
   value: string | number | null;
   kind: 'text' | 'number';
+  /** The custom box holds paragraphs, so it has to be one you can read. */
+  multiline?: boolean;
   disabled: boolean;
   preview?: (value: string | number | null) => string;
   onChange: (value: string | number | null) => void;
@@ -145,7 +148,21 @@ function PresetField({
           if (preset) onChange(preset.value);
         }}
       />
-      {!selected && (
+      {/* A one-line input is wrong for the fields that end up here. Prompt
+          direction and caption direction run to a paragraph, and typing one
+          into a 48px box means scrolling it two words at a time to read back
+          what you wrote. The same field is a textarea when it has no presets,
+          so it was only this branch that disagreed. */}
+      {!selected && (multiline && kind !== 'number' ? (
+        <TextArea
+          label="Custom text"
+          rows={3}
+          value={value == null ? '' : String(value)}
+          disabled={disabled}
+          hint={preview?.(value)}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      ) : (
         <Field
           label={kind === 'number' ? 'Custom number' : 'Custom text'}
           type={kind === 'number' ? 'number' : 'text'}
@@ -158,7 +175,7 @@ function PresetField({
             onChange(raw === '' ? null : Number(raw));
           }}
         />
-      )}
+      ))}
       {hint && <p className="text-sm">{hint}</p>}
     </div>
   );
@@ -828,6 +845,7 @@ export function NodeConfigPanel({
           presets={field.presets}
           value={value as string | number | null}
           kind={field.kind === 'number' ? 'number' : 'text'}
+          multiline={field.multiline}
           disabled={!canEdit}
           onChange={(next) => setConfig((c) => ({ ...c, [field.key]: next }))}
         />
