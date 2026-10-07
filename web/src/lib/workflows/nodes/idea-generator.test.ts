@@ -202,3 +202,31 @@ describe('writing prompts to a layout', () => {
       .toContain('only the composition comes from the picture');
   });
 });
+
+/**
+ * The per-image titles had no control of their own: "How to write the title"
+ * steers postTitle, the single title for the whole post, and the short label
+ * burned onto each frame was governed by a fixed line nothing could reach.
+ */
+describe('steering the per-image titles', () => {
+  it('appends the direction to the image title line, not the post title line', () => {
+    const instruction = buildIdeaInstruction(config({
+      imageTitleGuidance: 'Name the main object. No adjectives.',
+      titleGuidance: 'Phrase it as a question.',
+    }));
+
+    expect(instruction).toContain(
+      'burning onto a video as a label. Follow this direction: Name the main object. No adjectives.',
+    );
+    expect(instruction).toContain(
+      'after the prompts above. Follow this direction: Phrase it as a question.',
+    );
+  });
+
+  it('leaves the default wording alone when nothing is given', () => {
+    const instruction = buildIdeaInstruction(config({ imageTitleGuidance: '  ' }));
+
+    expect(instruction).toContain('title is two or three words, suitable for burning onto a video as a label.');
+    expect(instruction).not.toContain('Follow this direction');
+  });
+});

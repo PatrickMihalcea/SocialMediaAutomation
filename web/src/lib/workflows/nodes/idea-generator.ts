@@ -18,6 +18,7 @@ interface Config {
   temperature: number;
   promptGuidance: string;
   titleGuidance: string;
+  imageTitleGuidance: string;
   captionGuidance: string;
   hashtagsGuidance: string;
   additionalOutputs: { id: string; label: string }[];
@@ -78,7 +79,10 @@ export function buildIdeaInstruction(
     ...(config.additionalOutputs.length
       ? [`Also create these named text fields, each consistent with the same overall concept: ${config.additionalOutputs.map((field) => `${field.id} (${field.label})`).join(', ')}.`]
       : []),
-    'title is two or three words, suitable for burning onto a video as a label.',
+    directed(
+      'title is two or three words, suitable for burning onto a video as a label.',
+      config.imageTitleGuidance,
+    ),
     directed('prompt is the full description.', config.promptGuidance),
   ].join(' ');
 }

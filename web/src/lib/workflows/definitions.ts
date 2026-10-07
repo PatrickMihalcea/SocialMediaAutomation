@@ -285,6 +285,7 @@ export const NODE_DEFINITIONS = {
         .default(0.7),
       promptGuidance: z.string().max(2_000, 'How to write the prompts must be 2,000 characters or fewer.').default(''),
       titleGuidance: z.string().max(2_000, 'How to write the title must be 2,000 characters or fewer.').default(''),
+      imageTitleGuidance: z.string().max(2_000, 'How to write the image titles must be 2,000 characters or fewer.').default(''),
       captionGuidance: z.string().max(2_000, 'How to write the caption must be 2,000 characters or fewer.').default(''),
       hashtagsGuidance: z.string().max(2_000, 'How to pick hashtags must be 2,000 characters or fewer.').default(''),
       /** Extra, named text fields created as ports on this particular step. */
