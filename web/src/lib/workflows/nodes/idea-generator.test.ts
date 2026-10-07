@@ -32,7 +32,7 @@ describe('buildIdeaInstruction', () => {
       hashtagsGuidance: 'Three tags at most.',
     }));
 
-    expect(instruction).toContain('not just one image. Follow this direction: Phrase it as a question.');
+    expect(instruction).toContain('after the prompts above. Follow this direction: Phrase it as a question.');
     expect(instruction).toContain('rather than the theme in general. Follow this direction: Two sentences, no emoji.');
     expect(instruction).toContain('without the # sign. Follow this direction: Three tags at most.');
   });

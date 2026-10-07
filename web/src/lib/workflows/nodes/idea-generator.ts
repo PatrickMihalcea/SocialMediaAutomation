@@ -64,7 +64,7 @@ export function buildIdeaInstruction(
       ? [`This step has already covered these angles, so take a different one for every entry: ${recentTitles.join('; ')}.`]
       : []),
     directed(
-      'postTitle is a concise, compelling title for the finished social post. Write it after the prompts above and make it describe that set, not just one image.',
+      'postTitle is a concise, compelling title for the finished social post. Write it after the prompts above.',
       config.titleGuidance,
     ),
     directed(
@@ -261,7 +261,7 @@ const INSTRUCTION: Record<Config['mode'], string> = {
   ].join(' '),
   text: [
     'You are writing short content ideas.',
-    'Each title is the hook. Each prompt is the idea, stated concretely in two or three sentences.',
+    'Each title is the hook. Each prompt is the idea, stated concretely in three or four sentences.',
     'No vague claims — name a number, a tool or a consequence.',
   ].join(' '),
 };
