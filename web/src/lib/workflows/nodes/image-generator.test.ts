@@ -100,8 +100,8 @@ describe('composePrompt with a layout reference', () => {
   it('rules out copying the sketch\'s lettering or its drawing style', () => {
     const composed = withRef();
 
-    expect(composed).toMatch(/Do not reproduce any words, labels, lettering/);
-    expect(composed).toMatch(/do not imitate how it is drawn/);
+    expect(composed).toMatch(/no words, labels, lettering, arrows or annotations/);
+    expect(composed).toMatch(/no imitation of how the guide is drawn/);
   });
 
   it('asks for the arrangement, and allows deviation from it', () => {
@@ -144,7 +144,7 @@ describe('what the reference is for', () => {
     const prompt = withReference('layout');
 
     expect(prompt).toContain('Follow it only for the arrangement of the scene');
-    expect(prompt).toContain('do not imitate how it is drawn');
+    expect(prompt).toContain('no imitation of how the guide is drawn');
   });
 
   it('tells it to keep the subjects, and to change the composition', () => {
@@ -173,5 +173,45 @@ describe('what the reference is for', () => {
     const prompt = composePrompt({ prompt: 'a wizard', style: '', hasReference: true });
 
     expect(prompt).toContain('Follow it only for the arrangement of the scene');
+  });
+});
+
+/**
+ * The failure this covers: labelled shapes in a layout were coming back as
+ * objects with the shape's silhouette — a circle produced something round, a
+ * box something square. "Follow the arrangement" was read as "match the
+ * outlines", so the note has to say what a shape is before saying what to do
+ * with it.
+ */
+describe('a layout shape is a region, not an outline', () => {
+  const layout = () => composePrompt({ prompt: 'a knight', style: '', hasReference: true, referenceUse: 'layout' });
+
+  it('says a shape marks an area of the frame rather than an object', () => {
+    expect(layout()).toContain('marks a REGION OF THE FRAME, not an object and not a silhouette');
+  });
+
+  it('names both shapes that were being copied literally', () => {
+    expect(layout()).toContain('a circle does not mean a round object');
+    expect(layout()).toContain('a rectangle does not mean a rectangular one');
+  });
+
+  it('forbids the outline becoming the edge of what is drawn', () => {
+    expect(layout()).toContain('must never become the edge of the thing drawn there');
+  });
+
+  it('says what a labelled region means, since labels are the common case', () => {
+    expect(layout()).toContain('render what the label names in its ordinary shape');
+  });
+
+  it('keeps the guides themselves out of the finished image', () => {
+    expect(layout()).toContain('no dotted or dashed lines');
+  });
+
+  /** None of this belongs on a subject reference, where the shape IS the point. */
+  it('says none of it when the reference is the cast', () => {
+    const subject = composePrompt({ prompt: 'a knight', style: '', hasReference: true, referenceUse: 'subject' });
+
+    expect(subject).not.toContain('REGION OF THE FRAME');
+    expect(subject).toContain('Keep the same characters or objects it shows');
   });
 });

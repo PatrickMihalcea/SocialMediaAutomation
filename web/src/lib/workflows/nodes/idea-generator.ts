@@ -56,7 +56,7 @@ export function buildIdeaInstruction(
     // Only when one is attached: told about a picture that is not there, a
     // model invents one and writes every prompt against it.
     ...(hasLayout
-      ? ['A layout reference image is attached. Every prompt must describe a scene arranged like it — where the main subject sits in the frame, the relative size and spacing of the elements, the camera angle and the sense of depth. Do not describe the reference itself, do not mention that it exists, and do not repeat any words, labels or lettering visible in it. What fills that arrangement comes from the theme; only the composition comes from the picture.']
+      ? ['A layout reference image is attached. Every prompt must describe a scene arranged like it — where the main subject sits in the frame, the relative size and spacing of the elements, the camera angle and the sense of depth. Its boxes, circles and outlines mark regions of the frame, not objects: they say where something sits and roughly how much room it takes, never what shape it is. Never describe a subject as round because the region is a circle, or rectangular because it is a box — describe what the theme calls for, in its own natural form, placed there. Do not describe the reference itself, do not mention that it exists, and do not repeat any words, labels or lettering visible in it. What fills that arrangement comes from the theme; only the composition comes from the picture.']
       : []),
     // The model has no memory between runs, so a step left on the same theme
     // writes near enough the same set every week. Naming what it already

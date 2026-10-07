@@ -164,10 +164,21 @@ const slug = (value: string) =>
  * drawing invites it to return a pencil drawing. It also says the layout is
  * approximate — a reference followed to the pixel produces eight images that
  * are the same picture, which is not what a reference is for.
+ *
+ * The long middle is there because "follow the arrangement" was read as
+ * "match the shapes": a labelled circle came back as a round object and a box
+ * as a square one, the guide's outline becoming the silhouette of whatever was
+ * drawn inside it. A shape marks an area of the frame and a rough size. Saying
+ * so once was not enough — it needs the rule, the two obvious failures named,
+ * and a worked example, because the wrong reading is the more literal one.
  */
 const LAYOUT_NOTE =
   'A layout reference image is attached. Follow it only for the arrangement of the scene — where the elements sit in the frame, their relative size and spacing, and the camera angle. '
-  + 'Do not reproduce any words, labels, lettering, arrows or annotations that appear in it, and do not imitate how it is drawn; it is a guide, not artwork to copy. '
+  + 'Every box, circle, outline or dotted shape in it marks a REGION OF THE FRAME, not an object and not a silhouette. '
+  + 'Whatever belongs in that region occupies roughly that area of the frame and keeps its own natural form: a circle does not mean a round object, a rectangle does not mean a rectangular one, and a shape\u2019s outline must never become the edge of the thing drawn there. '
+  + 'A circle near the top left means "the subject sits near the top left and takes up about this much room", nothing more. '
+  + 'Where a region is labelled, render what the label names in its ordinary shape, positioned there. '
+  + 'None of the guides themselves appear in the finished image: no boxes, no outlines, no dotted or dashed lines, no words, labels, lettering, arrows or annotations, and no imitation of how the guide is drawn. '
   + 'Treat the layout as approximate: follow it closely enough to be recognisable, and deviate where it makes a better image.';
 
 /**
