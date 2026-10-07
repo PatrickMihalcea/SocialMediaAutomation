@@ -91,31 +91,41 @@ jobs:
           key: ffmpeg-debs-ubuntu-24.04-v2
 
       - name: Install ffmpeg
+        # Deliberately not `set -e`: everything above the last block is an
+        # optimisation, and a worker without ffmpeg is worse than a slow one.
+        # Whatever happens, the fallback at the end puts ffmpeg on the machine.
         run: |
-          set -euo pipefail
+          set -uo pipefail
           if command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; then
             ffmpeg -version | head -1
             exit 0
           fi
+
           mkdir -p ~/ffmpeg-debs
           if [ -z "$(ls -A ~/ffmpeg-debs)" ]; then
-            sudo apt-get update -qq
-            # sudo: resolving the install takes dpkg's lock even to print the
-            # list. The download itself stays unprivileged, so the cache action
-            # can read the files back afterwards.
-            sudo apt-get install --print-uris -y ffmpeg \
-              | grep -oP "(?<=')http[^']+" > /tmp/ffmpeg-uris
+            sudo apt-get update -qq || true
+            # sudo: apt takes dpkg's lock even to print what it would fetch.
+            # The download itself stays unprivileged so the cache can read it.
+            sudo apt-get install --print-uris -y ffmpeg > /tmp/uris.raw 2>/tmp/uris.err || true
+            echo "--- first lines of the uri list"
+            head -3 /tmp/uris.raw || true
+            echo "--- stderr"
+            head -5 /tmp/uris.err || true
+            grep -oP "(?<=')http[^']+" /tmp/uris.raw > /tmp/ffmpeg-uris || true
             echo "$(wc -l < /tmp/ffmpeg-uris) packages to fetch"
-            (cd ~/ffmpeg-debs && xargs -r -n1 -P8 curl -fsSLO < /tmp/ffmpeg-uris)
+            (cd ~/ffmpeg-debs && xargs -r -n1 -P8 curl -fsSLO < /tmp/ffmpeg-uris) || true
           fi
-          # Nothing downloaded means the cache is poisoned or the list changed;
-          # fall back to a plain install rather than carrying on without it.
-          if ! ls ~/ffmpeg-debs/*.deb >/dev/null 2>&1; then
-            echo "no cached packages; installing from the archive"
+
+          if ls ~/ffmpeg-debs/*.deb >/dev/null 2>&1; then
+            echo "installing $(ls ~/ffmpeg-debs/*.deb | wc -l) cached packages"
+            sudo dpkg -i ~/ffmpeg-debs/*.deb || sudo apt-get -y -f install
+          fi
+
+          # The guarantee. Nothing above is allowed to leave this unmet.
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            echo "falling back to a plain install"
             sudo apt-get update -qq
             sudo apt-get install -y ffmpeg
-          else
-            sudo dpkg -i ~/ffmpeg-debs/*.deb || sudo apt-get -y -f install
           fi
           ffmpeg -version | head -1
 
