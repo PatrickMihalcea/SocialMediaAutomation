@@ -8,6 +8,7 @@ import { mediaKey, storage } from '@/lib/storage';
 import { filenameFromPrompt } from '@/lib/media/filename-from-prompt';
 import { PermanentJobError } from '@/lib/queue/runner';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
+import type { AiImageReference } from '@/lib/ai/types';
 import { loadReferenceImage } from '@/lib/workflows/nodes/reference-image';
 
 export interface Config {
@@ -15,6 +16,8 @@ export interface Config {
   style: string;
   /** What an attached reference is for; decides what the model is told. */
   referenceUse: 'layout' | 'subject';
+  /** A style reference set in the panel, used when nothing is wired to the port. */
+  styleImage: string | null;
   maxImages: number;
   /** Which source renders this step, independent of the deployment's setting. */
   provider: ImageProviderName;
@@ -53,10 +56,17 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     throw new PermanentJobError('This workflow has no owner to bill AI usage to. Open it and save it again.');
   }
 
-  // Loaded once for the whole run, not per image: it is the same bytes every
-  // time, and re-reading it from the store for each of eight images is eight
-  // downloads of one file.
+  // Loaded once for the whole run, not per image: they are the same bytes
+  // every time, and re-reading them from the store for each of eight images is
+  // eight downloads of the same two files.
   const reference = await loadReferenceImage(ctx);
+  const style = await loadReferenceImage(ctx, 'styleReference', config.styleImage);
+  const references: AiImageReference[] = [
+    ...(reference
+      ? [{ ...reference, role: config.referenceUse === 'subject' ? 'subject' as const : 'composition' as const }]
+      : []),
+    ...(style ? [{ ...style, role: 'style' as const }] : []),
+  ];
 
   // Resume: anything a previous attempt already produced stays produced.
   const done = asStringArray(ctx.previousOutput?.images);
@@ -72,6 +82,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       style: config.style,
       hasReference: Boolean(reference),
       referenceUse: config.referenceUse,
+      hasStyleReference: Boolean(style),
     });
     // What this picture is doing, written down as the provider says it.
     //
@@ -93,7 +104,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       userId: ctx.userId,
       prompt,
       size: config.size,
-      reference,
+      references,
       provider: resolveStepProvider(config),
       onStage: (next) => {
         if (next === stage) return;
@@ -174,6 +185,20 @@ const SUBJECT_NOTE =
   + 'Do not reproduce any words or lettering that appear in it.';
 
 /**
+ * A picture standing in for the words in the style box.
+ *
+ * Said separately from the other two notes because a run can carry both: this
+ * arrangement in that style, or these characters in that style. The wording is
+ * the exact inverse of the subject note — take how it looks, take nothing of
+ * what is in it — because the most likely failure is the model rendering the
+ * reference's content into the scene it was asked for.
+ */
+const STYLE_REFERENCE_NOTE =
+  'A style reference image is attached. Match its artistic treatment — palette, linework, brush or grain, level of detail, lighting quality and overall finish — so this image looks like it belongs in the same body of work. '
+  + 'Take nothing else from it: none of its subjects, objects, setting or composition appear in this image, and no words or lettering from it are reproduced. '
+  + 'What is depicted comes entirely from the description above.';
+
+/**
  * The style, appended as the instruction that wins.
  *
  * Identical text on every call, which is the whole point: the prompts vary by
@@ -192,6 +217,7 @@ export function composePrompt(input: {
   style: string;
   hasReference: boolean;
   referenceUse?: 'layout' | 'subject';
+  hasStyleReference?: boolean;
 }): string {
   const style = input.style.trim();
   return [
@@ -199,6 +225,7 @@ export function composePrompt(input: {
     input.hasReference
       ? (input.referenceUse === 'subject' ? SUBJECT_NOTE : LAYOUT_NOTE)
       : null,
+    input.hasStyleReference ? STYLE_REFERENCE_NOTE : null,
     style
       ? 'STYLE — render this image in exactly this style, identically to every other image in this set. '
         + `Where anything above implies a different medium, finish or rendering technique, follow the style instead: ${style}`

@@ -2,7 +2,7 @@ import 'server-only';
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { env } from '@/lib/env';
-import { AiError, type AiImageResult, type AiObjectResult, type AiProvider, type AiTextResult, type AiMessage } from '@/lib/ai/types';
+import { AiError, type AiImageReference, type AiImageResult, type AiObjectResult, type AiProvider, type AiTextResult, type AiMessage } from '@/lib/ai/types';
 import { isOpenAiImageSize, OPENAI_IMAGE_SIZES, type ImageSize } from '@/lib/ai/image-sizes';
 
 /**
@@ -170,7 +170,7 @@ export class OpenAiProvider implements AiProvider {
   }
 
   /**
-   * `reference` is accepted and ignored.
+   * `references` are accepted and ignored.
    *
    * images.generate has no composition-reference parameter, and images.edit is
    * a different operation — it works from the input's pixels rather than
@@ -181,7 +181,7 @@ export class OpenAiProvider implements AiProvider {
   async generateImage(input: {
     prompt: string;
     size?: ImageSize;
-    reference?: { data: Buffer; mimeType: string };
+    references?: AiImageReference[];
   }): Promise<AiImageResult> {
     const size = input.size ?? '1024x1024';
     // Refused rather than quietly reshaped. This API has no 9:16, and silently

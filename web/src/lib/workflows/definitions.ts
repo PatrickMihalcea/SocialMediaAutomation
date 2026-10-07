@@ -327,6 +327,21 @@ export const NODE_DEFINITIONS = {
         type: media([...IMAGES], true, { acceptsSingle: true }),
         description: 'One image every prompt is rendered against — the first, if a set arrives. Overrides a sketch carried by the prompts.',
       },
+      /**
+       * A separate port from Reference, not a third setting on it.
+       *
+       * Style is the one role that is orthogonal to the other two: "this
+       * arrangement, in this art style" and "these characters, in this art
+       * style" are both ordinary asks, and folding style into the same slot
+       * would have made them mutually exclusive for no reason. The generator
+       * takes a flag per role, so both can be sent at once.
+       */
+      {
+        id: 'styleReference',
+        label: 'Style reference',
+        type: media([...IMAGES], true, { acceptsSingle: true }),
+        description: 'An image whose look every prompt is rendered in — palette, linework, finish. Its content is not copied. Overrides the style image set below.',
+      },
     ],
     outputs: [
       { id: 'images', label: 'Images', type: media([...IMAGES], true) },
@@ -367,6 +382,15 @@ export const NODE_DEFINITIONS = {
        * already means.
        */
       referenceUse: z.enum(['layout', 'subject']).default('layout'),
+      /**
+       * A style reference chosen in the panel rather than wired.
+       *
+       * The same thing the Style reference port carries, settable without a
+       * step upstream to carry it: a look is usually one picture somebody
+       * already has, not something the run produces. A wire wins when both
+       * exist, matching every other port on the step.
+       */
+      styleImage: z.string().uuid().nullable().default(null),
       /** Stops a runaway prompt list from spending the whole month's quota. */
       maxImages: z.number().int().min(1).max(20).default(8),
       /**

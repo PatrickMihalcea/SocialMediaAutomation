@@ -201,7 +201,7 @@ describe('ImageUseProvider', () => {
     process.env.FAKE_MODE = 'ok';
     await new ImageUseProvider().generateImage({
       prompt: 'a villa on a cliff',
-      reference: { data: Buffer.from('89504e470d0a1a0a', 'hex'), mimeType: 'image/png' },
+      references: [{ data: Buffer.from('89504e470d0a1a0a', 'hex'), mimeType: 'image/png', role: 'composition' }],
     });
 
     const argv = lastArgv();
@@ -412,5 +412,54 @@ describe('config directory isolation', () => {
     const homes = configHomes();
     expect(homes).toHaveLength(4);
     expect(new Set(homes).size).toBe(4);
+  });
+});
+
+/**
+ * The role is most of the meaning, and it used to be thrown away: every
+ * reference went out as --composition-ref whatever the step said it was, so
+ * "keep this cast" was prompt text contradicted by the flag beside it.
+ */
+describe('reference roles', () => {
+  const png = (seed: string) => ({ data: Buffer.from(seed), mimeType: 'image/png' as const });
+
+  it.each([
+    ['subject', '--ref'],
+    ['style', '--style-ref'],
+    ['composition', '--composition-ref'],
+  ] as const)('sends a %s reference as %s', async (role, flag) => {
+    process.env.FAKE_MODE = 'ok';
+    await new ImageUseProvider().generateImage({ prompt: 'a villa', references: [{ ...png('x'), role }] });
+
+    const argv = lastArgv();
+    expect(argv.indexOf(flag)).toBeGreaterThan(-1);
+    expect(argv.indexOf(flag)).toBeLessThan(argv.indexOf('--'));
+  });
+
+  /** The reason style is its own port: both roles at once is the common ask. */
+  it('sends a layout and a style together, each under its own flag', async () => {
+    process.env.FAKE_MODE = 'ok';
+    await new ImageUseProvider().generateImage({
+      prompt: 'a villa',
+      references: [{ ...png('layout'), role: 'composition' }, { ...png('style'), role: 'style' }],
+    });
+
+    const argv = lastArgv();
+    const layout = argv[argv.indexOf('--composition-ref') + 1];
+    const style = argv[argv.indexOf('--style-ref') + 1];
+    expect(layout).toMatch(/\.png$/);
+    expect(style).toMatch(/\.png$/);
+    // Written to files of their own, or the second would overwrite the first.
+    expect(layout).not.toBe(style);
+  });
+
+  it('passes no reference flag at all when none is attached', async () => {
+    process.env.FAKE_MODE = 'ok';
+    await new ImageUseProvider().generateImage({ prompt: 'a villa' });
+
+    const argv = lastArgv();
+    for (const flag of ['--ref', '--style-ref', '--composition-ref']) {
+      expect(argv).not.toContain(flag);
+    }
   });
 });

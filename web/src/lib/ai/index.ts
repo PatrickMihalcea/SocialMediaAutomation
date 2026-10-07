@@ -7,7 +7,7 @@ import { OpenAiProvider } from '@/lib/ai/providers/openai';
 import { MockAiProvider } from '@/lib/ai/providers/mock';
 import { ImageUseProvider } from '@/lib/ai/providers/image-use';
 import { resolveImageProviderName, type ImageProviderName } from '@/lib/ai/provider-selection';
-import type { AiImageResult, AiMessage, AiObjectResult, AiProvider } from '@/lib/ai/types';
+import type { AiImageReference, AiImageResult, AiMessage, AiObjectResult, AiProvider } from '@/lib/ai/types';
 import type { ImageSize } from '@/lib/ai/image-sizes';
 import { assertWithinLimit, currentMonthUsage, incrementUsage } from '@/lib/billing/limits';
 
@@ -145,8 +145,8 @@ export async function generateImage(input: {
   userId: string;
   prompt: string;
   size?: ImageSize;
-  /** Advisory layout for providers that can follow one; see AiProvider. */
-  reference?: { data: Buffer; mimeType: string };
+  /** Advisory reference pictures for providers that can follow them; see AiProvider. */
+  references?: AiImageReference[];
   /** Per-call choice of source; omitted means the deployment's configured one. */
   provider?: ImageProviderName;
   /** Called as the provider reports what it is doing, where it reports at all. */
@@ -159,7 +159,7 @@ export async function generateImage(input: {
     const result = await provider.generateImage({
       prompt: input.prompt,
       size: input.size,
-      reference: input.reference,
+      references: input.references,
     });
     const generation = await recordGeneration({
       workspaceId: input.workspaceId,

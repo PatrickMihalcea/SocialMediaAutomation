@@ -1,7 +1,7 @@
 import 'server-only';
 import sharp from 'sharp';
 import type { z } from 'zod';
-import { AiError, type AiImageResult, type AiObjectResult, type AiMessage, type AiProvider, type AiTextResult } from '@/lib/ai/types';
+import { AiError, type AiImageReference, type AiImageResult, type AiObjectResult, type AiMessage, type AiProvider, type AiTextResult } from '@/lib/ai/types';
 import { weeklyReelTemplate } from '@/lib/workflows/assistant-graph';
 
 /**
@@ -51,11 +51,11 @@ export class MockAiProvider implements AiProvider {
     };
   }
 
-  /** `reference` is accepted and ignored — the placeholder has no layout to follow. */
+  /** `references` are accepted and ignored — the placeholder has nothing to follow. */
   async generateImage(input: {
     prompt: string;
     size?: string;
-    reference?: { data: Buffer; mimeType: string };
+    references?: AiImageReference[];
   }): Promise<AiImageResult> {
     const [w, h] = parseSize(input.size);
     return {

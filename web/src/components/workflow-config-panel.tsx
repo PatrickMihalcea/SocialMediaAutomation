@@ -50,6 +50,7 @@ import {
 } from '@/components/workflow-combine-order';
 import { WorkflowTrimmerEditor } from '@/components/workflow-trimmer-editor';
 import { WorkflowThemePool } from '@/components/workflow-theme-pool';
+import { WorkflowImageField } from '@/components/workflow-image-picker';
 
 const CUSTOM_VIDEO_SIZE = '__custom__';
 const CUSTOM_VALUE = '__custom__';
@@ -869,6 +870,27 @@ export function NodeConfigPanel({
           onChange={(event) =>
             setConfig((current) => ({ ...current, temperature: Number(event.target.value) }))
           }
+        />
+      );
+    }
+    // A picture, not a string of characters nobody could type from memory.
+    if (node.type === 'IMAGE_GENERATOR' && field.key === 'styleImage') {
+      return (
+        <WorkflowImageField
+          key={field.key}
+          slug={slug}
+          label={field.label}
+          hint={showHelp ? field.description : undefined}
+          eyebrow="Style reference"
+          assetId={typeof value === 'string' ? value : null}
+          folders={mediaFolders}
+          disabled={!canEdit}
+          overriddenBy={
+            connections.some((connection) => connection.portId === 'styleReference')
+              ? 'Style reference'
+              : undefined
+          }
+          onChange={(assetId) => setConfig((c) => ({ ...c, styleImage: assetId }))}
         />
       );
     }

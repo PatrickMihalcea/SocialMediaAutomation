@@ -115,14 +115,28 @@ export interface AiProvider {
     prompt: string;
     size?: ImageSize;
     /**
-     * A rough layout to follow — a sketch, a blocking, an existing frame.
+     * Pictures the generator should look at, each saying what it is for.
      *
-     * Advisory: only a provider with a composition-reference mechanism can act
-     * on it, and the others generate from the prompt alone rather than failing.
-     * Never the subject of the image; it supplies framing and placement.
+     * A list with roles rather than one image, because the three roles answer
+     * different questions and a run can want more than one answered at once:
+     * this arrangement, that cast, in this art style. Role matters as much as
+     * the bytes — the same photograph means "keep these faces" as a subject and
+     * "match this palette and finish" as a style.
+     *
+     * Advisory: only a provider with a reference mechanism can act on these,
+     * and the others generate from the prompt alone rather than failing.
      */
-    reference?: { data: Buffer; mimeType: string };
+    references?: AiImageReference[];
   }): Promise<AiImageResult>;
+}
+
+/** What a reference picture is for. Named as the image CLI names them. */
+export type AiImageRole = 'subject' | 'style' | 'composition';
+
+export interface AiImageReference {
+  data: Buffer;
+  mimeType: string;
+  role: AiImageRole;
 }
 
 export class AiError extends Error {

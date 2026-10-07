@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { env } from '@/lib/env';
-import { AiCredentialError, AiError, type AiImageResult, type AiMessage, type AiObjectResult, type AiProvider, type AiTextResult } from '@/lib/ai/types';
+import { AiCredentialError, AiError, type AiImageReference, type AiImageResult, type AiMessage, type AiObjectResult, type AiProvider, type AiTextResult } from '@/lib/ai/types';
 import type { ImageSize } from '@/lib/ai/image-sizes';
 
 /**
@@ -76,7 +76,7 @@ export class ImageUseProvider implements AiProvider {
     onStage?: (stage: string) => void;
     prompt: string;
     size?: ImageSize;
-    reference?: { data: Buffer; mimeType: string };
+    references?: AiImageReference[];
   }): Promise<AiImageResult> {
     const { command, leading, timeoutMs } = config();
     const format = env.IMAGE_USE_FORMAT;
@@ -86,11 +86,14 @@ export class ImageUseProvider implements AiProvider {
     const directory = await mkdtemp(join(tmpdir(), 'image-use-'));
     const requested = join(directory, `image.${format}`);
 
-    // Written into the same directory, so the one cleanup below covers it.
-    let referencePath: string | undefined;
-    if (input.reference) {
-      referencePath = join(directory, `reference.${extensionFor(input.reference.mimeType)}`);
-      await writeFile(referencePath, input.reference.data);
+    // Written into the same directory, so the one cleanup below covers them.
+    // Numbered because two references can share a type, and the CLI reads the
+    // format from the extension.
+    const referencePaths: Array<{ role: AiImageReference['role']; path: string }> = [];
+    for (const [index, reference] of (input.references ?? []).entries()) {
+      const path = join(directory, `reference-${index}.${extensionFor(reference.mimeType)}`);
+      await writeFile(path, reference.data);
+      referencePaths.push({ role: reference.role, path });
     }
 
     try {
@@ -102,7 +105,7 @@ export class ImageUseProvider implements AiProvider {
           size: input.size,
           timeoutMs,
           prompt: input.prompt,
-          compositionRef: referencePath,
+          references: referencePaths,
         })],
         // The CLI's own --timeout starts only once it holds a concurrency slot,
         // so this outer deadline has to cover the queue wait in front of it as
@@ -185,13 +188,19 @@ export class ImageUseProvider implements AiProvider {
  * to begin with the word "doctor", "update" or "animate" would run that
  * subcommand instead of generating anything.
  */
+const ROLE_FLAG: Record<AiImageReference['role'], string> = {
+  composition: '--composition-ref',
+  style: '--style-ref',
+  subject: '--ref',
+};
+
 function cliArgs(input: {
   out: string;
   format: string;
   size?: ImageSize;
   timeoutMs: number;
   prompt: string;
-  compositionRef?: string;
+  references?: Array<{ role: AiImageReference['role']; path: string }>;
 }): string[] {
   const args = [
     '--quiet',
@@ -207,10 +216,16 @@ function cliArgs(input: {
   // Unlike a UI, the CLI takes the shape as an argument — so the prompt stays
   // the brief and nothing has to ask for a ratio in words.
   if (input.size) args.push('--size', input.size);
-  // composition-ref, not --ref: the sketch supplies framing, crop and camera
-  // angle, and must not be read as the subject to render. The CLI documents
-  // this as "keep a layout while replacing the subject", which is the job.
-  if (input.compositionRef) args.push('--composition-ref', input.compositionRef);
+  // One flag per role, because the role is most of the meaning. The same
+  // photograph passed as a composition means "borrow this framing, render
+  // something else", as a subject means "keep these faces", and as a style
+  // means "match this palette and finish, copy none of the content" — and the
+  // CLI has a flag for each. Sending every reference as a composition, which
+  // is what this did, made the other two settings prompt text and nothing
+  // more: the generator was told one thing in words and another in flags.
+  for (const { role, path } of input.references ?? []) {
+    args.push(ROLE_FLAG[role], path);
+  }
   for (const style of env.IMAGE_USE_STYLE.split(',').map((name) => name.trim()).filter(Boolean)) {
     args.push('--style', style);
   }

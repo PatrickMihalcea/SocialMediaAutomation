@@ -209,9 +209,13 @@ export const WORKFLOW_FIELD_HELP: Partial<
       description: 'The look every image is rendered in — pixel art, anime, 1960s film photography, a technical illustration. It is appended to every prompt word for word and overrides anything in the prompt that conflicts with it, so a run cannot come back half in one style and half in another. Worth being specific; it can run to several paragraphs.',
       multiline: true,
     },
+    styleImage: {
+      label: 'Style image',
+      description: 'A picture to copy the look of — palette, linework, finish — when words are easier to show than to write. Nothing in it is reproduced; what the image depicts still comes from the prompt. Connecting Style reference overrides this.',
+    },
     referenceUse: {
       label: 'What the reference is',
-      description: 'Only matters when a Reference image is connected, or when a theme carries a sketch. A layout is followed for where things sit and ignored for how it looks; subjects are the other way round — the characters, clothing and palette carry over so a set of scenes is recognisably the same cast.',
+      description: 'Only matters when a Reference image is connected, or when a theme carries a sketch. A layout is followed for where things sit and ignored for how it looks; subjects are the other way round — the characters, clothing and palette carry over so a set of scenes is recognisably the same cast. A style reference is separate from both and can be used alongside either.',
       optionLabels: {
         layout: 'A layout sketch',
         subject: 'The subjects to keep consistent',

@@ -8,6 +8,7 @@ const config = (overrides: Partial<Config>): Config => ({
   size: '1024x1536',
   style: '',
   referenceUse: 'layout',
+  styleImage: null,
   maxImages: 8,
   provider: 'image-use',
   useMockGeneration: false,
