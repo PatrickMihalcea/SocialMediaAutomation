@@ -101,19 +101,16 @@ jobs:
             exit 0
           fi
 
-          mkdir -p ~/ffmpeg-debs
-          if [ -z "$(ls -A ~/ffmpeg-debs)" ]; then
+          # apt's own download-only mode, pointed at a directory we keep.
+          # Parsing --print-uris was the first attempt and it printed no URIs
+          # at all; -d is apt doing the same job without the screen-scrape.
+          mkdir -p ~/ffmpeg-debs/partial
+          if ! ls ~/ffmpeg-debs/*.deb >/dev/null 2>&1; then
             sudo apt-get update -qq || true
-            # sudo: apt takes dpkg's lock even to print what it would fetch.
-            # The download itself stays unprivileged so the cache can read it.
-            sudo apt-get install --print-uris -y ffmpeg > /tmp/uris.raw 2>/tmp/uris.err || true
-            echo "--- first lines of the uri list"
-            head -3 /tmp/uris.raw || true
-            echo "--- stderr"
-            head -5 /tmp/uris.err || true
-            grep -oP "(?<=')http[^']+" /tmp/uris.raw > /tmp/ffmpeg-uris || true
-            echo "$(wc -l < /tmp/ffmpeg-uris) packages to fetch"
-            (cd ~/ffmpeg-debs && xargs -r -n1 -P8 curl -fsSLO < /tmp/ffmpeg-uris) || true
+            sudo apt-get install -y -d -o Dir::Cache::archives="$HOME/ffmpeg-debs" ffmpeg || true
+            # Downloaded as root; the cache action reads them as the runner.
+            sudo chown -R "$(id -u):$(id -g)" ~/ffmpeg-debs || true
+            echo "fetched $(ls ~/ffmpeg-debs/*.deb 2>/dev/null | wc -l) packages"
           fi
 
           if ls ~/ffmpeg-debs/*.deb >/dev/null 2>&1; then
