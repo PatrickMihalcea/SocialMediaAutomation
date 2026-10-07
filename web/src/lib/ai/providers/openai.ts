@@ -91,6 +91,7 @@ export class OpenAiProvider implements AiProvider {
 
   async completeObject<T>(input: {
     messages: AiMessage[];
+    images?: Array<{ data: Buffer; mimeType: string }>;
     schema: z.ZodType<T, z.ZodTypeDef, unknown>;
     schemaName: string;
     temperature?: number;
@@ -117,7 +118,9 @@ export class OpenAiProvider implements AiProvider {
       const create = (msgs: AiMessage[]) =>
         this.createChat({
           model: this.textModel,
-          messages: msgs,
+          // Images last: a reference is attached to the messages, so a plain
+          // `messages` written after this would quietly drop it again.
+          messages: input.images?.length ? withImages(msgs, input.images) : msgs,
           temperature: input.temperature ?? 0.7,
           response_format: { type: 'json_object' },
         });
@@ -282,4 +285,35 @@ function describeIssues(all: SchemaIssue[]): string {
   });
   const more = all.length - issues.length;
   return issues.join('; ') + (more > 0 ? ` (and ${more} more)` : '');
+}
+
+/**
+ * The same conversation, with pictures attached to what the person asked.
+ *
+ * They go on the last user message rather than one of their own, because a
+ * bare image with no sentence beside it reads as a new subject: the model
+ * describes it instead of using it. Attached to the request, it is understood
+ * as something the request refers to.
+ *
+ * Sent inline as data URIs — these are private workspace assets, and a URL
+ * would have to be one OpenAI could fetch, which means making them public.
+ */
+function withImages(
+  messages: AiMessage[],
+  images: Array<{ data: Buffer; mimeType: string }>,
+): OpenAI.Chat.ChatCompletionMessageParam[] {
+  const lastUser = messages.map((m) => m.role).lastIndexOf('user');
+  return messages.map((message, index) => {
+    if (index !== lastUser) return message as OpenAI.Chat.ChatCompletionMessageParam;
+    return {
+      role: 'user',
+      content: [
+        { type: 'text', text: message.content },
+        ...images.map((image) => ({
+          type: 'image_url' as const,
+          image_url: { url: `data:${image.mimeType};base64,${image.data.toString('base64')}` },
+        })),
+      ],
+    };
+  });
 }

@@ -97,3 +97,72 @@ describe('OpenAiProvider.completeObject', () => {
     expect(createMock).toHaveBeenCalledTimes(2);
   });
 });
+
+/**
+ * A reference picture is the whole point of the layout feature: a step that
+ * silently sent the words alone would still produce a plausible answer, which
+ * is exactly why this needs a test rather than a look at the output.
+ */
+describe('OpenAiProvider.completeObject with a reference image', () => {
+  beforeEach(() => createMock.mockReset());
+
+  const image = { data: Buffer.from('fake-png'), mimeType: 'image/png' };
+
+  it('attaches the picture to what the person asked, not to a message of its own', async () => {
+    createMock.mockResolvedValueOnce(response('{"reply":"ok"}'));
+
+    const provider = new OpenAiProvider();
+    await provider.completeObject({
+      messages: [
+        { role: 'system', content: 'You write prompts.' },
+        { role: 'user', content: 'Write 4 prompts about rain' },
+        { role: 'system', content: 'Reply as JSON.' },
+      ],
+      images: [image],
+      schema,
+      schemaName: 'reply',
+    });
+
+    const sent = createMock.mock.calls[0][0].messages;
+    const user = sent.find((m: { role: string }) => m.role === 'user');
+    expect(user.content[0]).toEqual({ type: 'text', text: 'Write 4 prompts about rain' });
+    expect(user.content[1].image_url.url).toBe(
+      `data:image/png;base64,${Buffer.from('fake-png').toString('base64')}`,
+    );
+    expect(sent.filter((m: { role: string }) => m.role === 'user')).toHaveLength(1);
+  });
+
+  it('sends the words alone when no picture is attached', async () => {
+    createMock.mockResolvedValueOnce(response('{"reply":"ok"}'));
+
+    const provider = new OpenAiProvider();
+    await provider.completeObject({
+      messages: [{ role: 'user', content: 'Write 4 prompts about rain' }],
+      schema,
+      schemaName: 'reply',
+    });
+
+    const user = createMock.mock.calls[0][0].messages.find((m: { role: string }) => m.role === 'user');
+    expect(user.content).toBe('Write 4 prompts about rain');
+  });
+
+  /** The repair turn re-sends the conversation, and must re-send the picture with it. */
+  it('keeps the picture attached on the self-repair turn', async () => {
+    createMock
+      .mockResolvedValueOnce(response('{"wrong":"shape"}'))
+      .mockResolvedValueOnce(response('{"reply":"ok"}'));
+
+    const provider = new OpenAiProvider();
+    await provider.completeObject({
+      messages: [{ role: 'user', content: 'Write 4 prompts about rain' }],
+      images: [image],
+      schema,
+      schemaName: 'reply',
+    });
+
+    const retry = createMock.mock.calls[1][0].messages;
+    const user = retry.find((m: { role: string }) => m.role === 'user');
+    expect(Array.isArray(user.content)).toBe(true);
+    expect(user.content[1].type).toBe('image_url');
+  });
+});

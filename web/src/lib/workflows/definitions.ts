@@ -179,6 +179,20 @@ export const NODE_DEFINITIONS = {
     icon: 'lightbulb',
     inputs: [
       { id: 'theme', label: 'Theme', type: text(), description: 'Overrides the theme set below.' },
+      /**
+       * A composition for the prompts to describe.
+       *
+       * Shown to the model writing the prompts, not merely carried past it: a
+       * step that only forwards a sketch writes prompts blind to it, and the
+       * picture is then made from a description that never knew the layout it
+       * was supposed to fill.
+       */
+      {
+        id: 'reference',
+        label: 'Layout reference',
+        type: media([...IMAGES], true, { acceptsSingle: true }),
+        description: 'A composition the prompts should describe. Also passed on to the Image generator.',
+      },
     ],
     outputs: [
       { id: 'prompts', label: 'Prompts', type: text(true) },

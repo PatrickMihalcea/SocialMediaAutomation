@@ -168,3 +168,37 @@ describe('buildIdeaInstruction recent work', () => {
     expect(buildIdeaInstruction(config())).not.toContain('already covered');
   });
 });
+
+/**
+ * A layout reaching this step used to be carried straight past it: the prompts
+ * were written blind, and the picture was then made from a description that
+ * never knew the arrangement it was meant to fill. The model is shown the
+ * image now, so the composition is in the prompt rather than bolted on after.
+ */
+describe('writing prompts to a layout', () => {
+  it('says nothing about a layout when none is attached', () => {
+    const instruction = buildIdeaInstruction(config());
+
+    expect(instruction).not.toContain('layout reference image is attached');
+  });
+
+  it('describes the arrangement to follow when one is', () => {
+    const instruction = buildIdeaInstruction(config(), [], true);
+
+    expect(instruction).toContain('A layout reference image is attached.');
+    expect(instruction).toContain('camera angle');
+  });
+
+  /** Describing the reference instead of using it is the obvious failure. */
+  it('forbids describing the reference or repeating what is written in it', () => {
+    const instruction = buildIdeaInstruction(config(), [], true);
+
+    expect(instruction).toContain('Do not describe the reference itself');
+    expect(instruction).toContain('do not repeat any words, labels or lettering');
+  });
+
+  it('keeps the subject coming from the theme, not the picture', () => {
+    expect(buildIdeaInstruction(config(), [], true))
+      .toContain('only the composition comes from the picture');
+  });
+});

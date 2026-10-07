@@ -8,6 +8,7 @@ import { mediaKey, storage } from '@/lib/storage';
 import { filenameFromPrompt } from '@/lib/media/filename-from-prompt';
 import { PermanentJobError } from '@/lib/queue/runner';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
+import { loadReferenceImage } from '@/lib/workflows/nodes/reference-image';
 
 export interface Config {
   size: ImageSize;
@@ -55,7 +56,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   // Loaded once for the whole run, not per image: it is the same bytes every
   // time, and re-reading it from the store for each of eight images is eight
   // downloads of one file.
-  const reference = await loadReference(ctx);
+  const reference = await loadReferenceImage(ctx);
 
   // Resume: anything a previous attempt already produced stays produced.
   const done = asStringArray(ctx.previousOutput?.images);
@@ -203,31 +204,4 @@ export function composePrompt(input: {
         + `Where anything above implies a different medium, finish or rendering technique, follow the style instead: ${style}`
       : null,
   ].filter(Boolean).join('\n\n');
-}
-
-/**
- * The layout reference, when one is wired in.
- *
- * Re-fetched scoped to the workspace rather than trusted: the id arrives as
- * plain JSON from an upstream step, the same reason the image inputs above are
- * re-queried. A reference that has since been deleted is not worth failing a
- * run over — the prompts still describe the scene — so it degrades to none.
- */
-async function loadReference(
-  ctx: NodeRunContext,
-): Promise<{ data: Buffer; mimeType: string } | undefined> {
-  const id = typeof ctx.inputs.reference === 'string'
-    ? ctx.inputs.reference
-    : Array.isArray(ctx.inputs.reference) && typeof ctx.inputs.reference[0] === 'string'
-      ? ctx.inputs.reference[0]
-      : null;
-  if (!id) return undefined;
-
-  const asset = await db.mediaAsset.findFirst({
-    where: { id, workspaceId: ctx.workspaceId, type: MediaType.IMAGE },
-    select: { storageKey: true, mimeType: true },
-  });
-  if (!asset) return undefined;
-
-  return { data: await storage().get(asset.storageKey), mimeType: asset.mimeType };
 }

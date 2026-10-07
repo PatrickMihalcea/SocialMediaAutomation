@@ -148,7 +148,7 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
     themePool: {
       label: 'Theme pool',
-      description: 'Themes separated by commas. Each run draws one at random from the whole list, so the same theme can come up twice — the ideas will still differ, because the step is told what it already covered. Each theme can also carry a layout sketch: connect the Layout reference output to an Image generator and the run uses the sketch belonging to the theme it drew. Rewording a theme drops its sketch.',
+      description: 'Themes separated by commas. Each run draws one at random from the whole list, so the same theme can come up twice — the ideas will still differ, because the step is told what it already covered. Each theme can also carry a layout sketch: connect the Layout reference output to an Image generator and the run uses the sketch belonging to the theme it drew. A picture connected to this step’s own Layout reference input is used instead of any sketch. Rewording a theme drops its sketch.',
       multiline: true,
     },
     count: {

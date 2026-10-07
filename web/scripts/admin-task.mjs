@@ -213,7 +213,34 @@ async function scheduleReport() {
   }
 }
 
-const tasks = { 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow };
+/**
+ * Which model production has actually been calling.
+ *
+ * The model is a Sensitive environment variable, so it cannot be read back
+ * from Vercel — but every call records the model the API answered with, which
+ * is the better answer anyway: it is what ran, not what was configured.
+ */
+async function modelReport() {
+  const since = new Date(Date.now() - 30 * 24 * 3600_000);
+  const rows = await db.aiGeneration.groupBy({
+    by: ['operation', 'model'],
+    where: { createdAt: { gte: since } },
+    _count: { _all: true },
+    _sum: { promptTokens: true, completionTokens: true, estimatedCost: true },
+  });
+  rows.sort((a, b) => a.operation.localeCompare(b.operation) || b._count._all - a._count._all);
+
+  console.log('last 30 days\n');
+  for (const r of rows) {
+    const cost = r._sum.estimatedCost ? `$${Number(r._sum.estimatedCost).toFixed(2)}` : '—';
+    console.log(
+      `${r.operation.padEnd(12)} ${r.model.padEnd(28)} ${String(r._count._all).padStart(5)} calls  ` +
+      `in ${r._sum.promptTokens ?? 0}  out ${r._sum.completionTokens ?? 0}  ${cost}`,
+    );
+  }
+}
+
+const tasks = { 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
 
 const run = tasks[task];
 if (!run) {

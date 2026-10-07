@@ -19,6 +19,7 @@ on:
           - schedule-report
           - inspect-workflow
           - create-story-workflow
+          - model-report
       name:
         description: 'Existing workflow to read'
         required: false

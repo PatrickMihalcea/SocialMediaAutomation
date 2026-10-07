@@ -87,7 +87,13 @@ export interface AiProvider {
    * a schedule goes through here with a Zod schema, and a response that does not
    * satisfy it is an error rather than something to parse hopefully.
    */
+  /**
+   * `images` are shown to the model alongside the messages, for a call that has
+   * to look at something — a layout to follow, a picture to describe. Providers
+   * that cannot see simply ignore them.
+   */
   completeObject<T>(input: {
+    images?: Array<{ data: Buffer; mimeType: string }>;
     messages: AiMessage[];
     /**
      * Output type and input type are separate on purpose: a schema may repair

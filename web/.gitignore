@@ -17,3 +17,4 @@ logs/
 .worker.pid
 # Screenshots, downloaded images and reports from the closed-loop e2e run.
 e2e-artifacts/
+.vercel

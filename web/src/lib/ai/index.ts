@@ -102,6 +102,8 @@ export async function generateObject<T>(input: {
   schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   schemaName: string;
   temperature?: number;
+  /** Shown to the model alongside the messages, for a call that must look. */
+  images?: Array<{ data: Buffer; mimeType: string }>;
 }): Promise<AiObjectResult<T>> {
   const used = await currentMonthUsage(input.workspaceId, 'ai_generations');
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);

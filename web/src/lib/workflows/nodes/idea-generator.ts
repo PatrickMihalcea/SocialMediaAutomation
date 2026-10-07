@@ -6,6 +6,7 @@ import { buildSystemPrompt } from '@/lib/ai/brand-voice';
 import { imagePromptsSchema } from '@/lib/ai/schemas';
 import { PermanentJobError } from '@/lib/queue/runner';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
+import { loadReferenceImage, referenceId } from '@/lib/workflows/nodes/reference-image';
 
 interface Config {
   mode: 'image' | 'text' | 'video';
@@ -40,13 +41,22 @@ const directed = (base: string, guidance: string) => {
  * the guidance settings, and it is otherwise only observable by mocking the
  * model.
  */
-export function buildIdeaInstruction(config: Config, recentTitles: string[] = []): string {
+export function buildIdeaInstruction(
+  config: Config,
+  recentTitles: string[] = [],
+  hasLayout = false,
+): string {
   return [
     // Prompts first, deliberately. A reply is written top to bottom, so copy
     // placed above the set is written before the set exists and can only
     // guess at it.
     'Reply as {"prompts":[{"title":string,"prompt":string}],"postTitle":string,"caption":string,"hashtags":string[],"additionalOutputs":Record<string,string>}.',
     `Produce exactly ${config.count} entries.`,
+    // Only when one is attached: told about a picture that is not there, a
+    // model invents one and writes every prompt against it.
+    ...(hasLayout
+      ? ['A layout reference image is attached. Every prompt must describe a scene arranged like it — where the main subject sits in the frame, the relative size and spacing of the elements, the camera angle and the sense of depth. Do not describe the reference itself, do not mention that it exists, and do not repeat any words, labels or lettering visible in it. What fills that arrangement comes from the theme; only the composition comes from the picture.']
+      : []),
     // The model has no memory between runs, so a step left on the same theme
     // writes near enough the same set every week. Naming what it already
     // covered is the cheapest way to keep a feed from repeating itself.
@@ -99,6 +109,9 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     throw new PermanentJobError('This workflow has no owner to bill AI usage to. Open it and save it again.');
   }
   const recentTitles = coveredTitles(history, theme);
+  // A wired image wins over the sketch a drawn theme carries: someone who
+  // connected one meant that one.
+  const layout = await loadReferenceImage(ctx);
 
   const system = await buildSystemPrompt({
     workspaceId: ctx.workspaceId,
@@ -121,8 +134,10 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
         role: 'user',
         content: `Write ${config.count} ${config.mode} prompts about: ${theme}`,
       },
-      { role: 'system', content: buildIdeaInstruction(config, recentTitles) },
+      { role: 'system', content: buildIdeaInstruction(config, recentTitles, Boolean(layout)) },
     ],
+    // Shown to the model, so the prompts can be written to fit it.
+    ...(layout ? { images: [layout] } : {}),
   });
 
   const prompts = object.prompts.slice(0, config.count).map((p) => p.prompt.trim());
@@ -142,7 +157,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     // generator by riding along with the prompts, so a connector for it would
     // be one nothing can be plugged into. The ride-along reads this value off
     // the upstream run's output, which is why it still has to be written here.
-    reference: config.themeImages[theme] ?? null,
+    reference: referenceId(ctx) ?? config.themeImages[theme] ?? null,
     postTitle: object.postTitle.trim(),
     caption: (object.caption ?? '').trim(),
     // One space-separated string rather than a list, because that is what the
