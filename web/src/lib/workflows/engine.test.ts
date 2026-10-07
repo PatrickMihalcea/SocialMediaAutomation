@@ -66,7 +66,7 @@ vi.mock('@/lib/queue', () => ({ enqueue: mocks.enqueue }));
 vi.mock('@/lib/workflows/executors', () => ({ getExecutor: mocks.getExecutor }));
 vi.mock('@/lib/audit', () => ({ audit: mocks.audit }));
 
-import { cancelWorkflowRun, retryWorkflowNode, runWorkflowNode, startWorkflowRun } from '@/lib/workflows/engine';
+import { cancelWorkflowRun, retryWorkflowNode, runWorkflowNode, startWorkflowRun, unsweptProgress } from '@/lib/workflows/engine';
 
 describe('startWorkflowRun', () => {
   it('blocks runs when a publish step has no channels selected', async () => {
@@ -453,5 +453,48 @@ describe('retryWorkflowNode', () => {
     });
 
     await expect(retryWorkflowNode('pick-run', 'workspace-1')).rejects.toThrow(/has not finished/i);
+  });
+});
+
+/**
+ * What this rule exists to stop: a run of seven images died at six with
+ * nothing wrong with it. Each worker pass ended on its time budget, mid
+ * picture, and every one of those endings spent an attempt — so the attempt
+ * limit, which is meant to bound *failure*, was being spent on the length of a
+ * VM's life. The step was working the whole time and could never have won.
+ *
+ * Progress therefore buys another pass for free, and the watermark is what
+ * keeps that from being unlimited: a step that is truly wedged advances
+ * nothing, so it exhausts its attempts exactly as before.
+ */
+describe('unsweptProgress', () => {
+  it('grants a pass to a step that made its first pictures', () => {
+    expect(unsweptProgress({ images: ['a', 'b'], _progress: { done: 2, total: 7 } })).toBe(2);
+  });
+
+  it('grants another once it has got further still', () => {
+    expect(unsweptProgress({ _progress: { done: 5, total: 7 }, _swept: { done: 2 } })).toBe(5);
+  });
+
+  it('refuses one to a step that has not moved since the last sweep', () => {
+    expect(unsweptProgress({ _progress: { done: 2, total: 7 }, _swept: { done: 2 } })).toBeNull();
+  });
+
+  /** Going backwards is not progress, whatever wrote it. */
+  it('refuses one when the count has gone down', () => {
+    expect(unsweptProgress({ _progress: { done: 1, total: 7 }, _swept: { done: 4 } })).toBeNull();
+  });
+
+  it('refuses one to a step that reports no progress at all', () => {
+    expect(unsweptProgress({ images: ['a'] })).toBeNull();
+    expect(unsweptProgress({ _progress: { total: 7 } })).toBeNull();
+    expect(unsweptProgress(null)).toBeNull();
+    expect(unsweptProgress('done')).toBeNull();
+  });
+
+  /** A step stuck on its very first picture must still die on schedule. */
+  it('refuses one to a step that has never produced anything', () => {
+    expect(unsweptProgress({ _progress: { done: 0, total: 7 } })).toBe(0);
+    expect(unsweptProgress({ _progress: { done: 0, total: 7 }, _swept: { done: 0 } })).toBeNull();
   });
 });

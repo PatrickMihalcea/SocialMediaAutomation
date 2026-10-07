@@ -844,22 +844,41 @@ export async function sweepWorkflowRuns(): Promise<{ requeued: number; settled: 
     },
     select: {
       id: true, workspaceId: true, attempt: true, maxAttempts: true,
-      runId: true, nodeId: true, nodeName: true, startedAt: true,
+      runId: true, nodeId: true, nodeName: true, startedAt: true, output: true,
     },
     take: 50,
   });
   for (const row of stale) {
-    // Out of attempts: putting it back would start the same loop again.
-    if (row.attempt >= row.maxAttempts) {
+    // A step that produced something before the worker died is working, not
+    // failing, and must not be charged for the worker's lifespan.
+    //
+    // `attempt` is the budget for things going wrong. A pass ends when its
+    // time is up, mid-picture, through no fault of the step — and that used to
+    // spend an attempt exactly like a crash. Seven images at three minutes
+    // each against an eight-minute pass therefore could not finish at any
+    // attempt limit: the budget ran out before the work did, every time, and
+    // the run died at six of seven with nothing actually wrong.
+    //
+    // So progress buys another pass for free. A step that is genuinely wedged
+    // produces nothing, advances no watermark, and still exhausts its attempts
+    // on schedule — this widens the door for work that is moving, not for work
+    // that is stuck.
+    const advanced = await grantFreePass(row);
+    if (!advanced && row.attempt >= row.maxAttempts) {
       await giveUpOnNodeRun(row, exhaustedMessage(row.nodeName, row.attempt));
       continue;
     }
     const reclaimed = await db.workflowNodeRun.updateMany({
       where: { id: row.id, status: WorkflowNodeRunStatus.RUNNING },
-      data: { status: WorkflowNodeRunStatus.QUEUED },
+      // Decremented so the increment in runWorkflowNode lands back on the
+      // number it started at. Cheaper than threading "do not count this one"
+      // through the dispatch and the claim.
+      data: advanced
+        ? { status: WorkflowNodeRunStatus.QUEUED, attempt: { decrement: 1 } }
+        : { status: WorkflowNodeRunStatus.QUEUED },
     });
     if (reclaimed.count === 0) continue;
-    await redispatch(row);
+    await redispatch(advanced ? { ...row, attempt: row.attempt - 1 } : row);
     requeued += 1;
   }
 
@@ -934,6 +953,53 @@ function hasProgressMarker(output: unknown): boolean {
   return typeof output === 'object'
     && output !== null
     && '_progress' in (output as Record<string, unknown>);
+}
+
+/**
+ * Whether this step has produced anything since the sweeper last looked, and
+ * the recording of that fact so the next sweep can tell.
+ *
+ * The watermark lives in the step's own output beside the progress marker,
+ * which costs no column and travels with the thing it describes. Writing the
+ * whole output back is safe here precisely because this row is stale: the
+ * handler that owned it is gone, which is why the sweeper has it at all.
+ *
+ * `false` whenever the question cannot be answered — a step with no progress
+ * marker, a marker with no count — so a step that cannot report progress is
+ * treated exactly as it was before.
+ */
+async function grantFreePass(row: { id: string; output: unknown }): Promise<boolean> {
+  const done = unsweptProgress(row.output);
+  if (done === null) return false;
+
+  await db.workflowNodeRun.update({
+    where: { id: row.id },
+    data: {
+      output: { ...(row.output as Record<string, unknown>), _swept: { done } } as Prisma.InputJsonValue,
+    },
+  });
+  return true;
+}
+
+/**
+ * How far a step had got, if that is further than the last sweep recorded.
+ *
+ * `null` means "do not grant a free pass": no progress marker, no count in it,
+ * or a count that has not moved since last time. Separated from the write so
+ * the rule itself can be read and tested without a database — it is the whole
+ * of the decision, and the write is bookkeeping.
+ */
+export function unsweptProgress(output: unknown): number | null {
+  if (typeof output !== 'object' || output === null) return null;
+
+  const record = output as Record<string, unknown>;
+  const progress = record._progress as { done?: unknown } | undefined;
+  const done = typeof progress?.done === 'number' ? progress.done : null;
+  if (done === null) return null;
+
+  const seen = (record._swept as { done?: unknown } | undefined)?.done;
+  if (typeof seen === 'number' && done <= seen) return null;
+  return done;
 }
 
 /** Said plainly, because this one is almost always "the step is too slow". */
