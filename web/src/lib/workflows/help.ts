@@ -178,11 +178,6 @@ export const WORKFLOW_FIELD_HELP: Partial<
       label: 'How to write the image titles',
       description: 'Direction for the short title written beside each prompt — the one a Text overlay burns onto each frame. Two or three words by default, because it has to be legible on a video; say so here if you want something else. Leave empty to let the model name each image from its own prompt.',
       multiline: true,
-      presets: [
-        { label: 'Name the thing', value: 'Name the main object or place in the image. No adjectives, no mood words.' },
-        { label: 'One word', value: 'A single word for each image.' },
-        { label: 'Number the set', value: 'Two or three words, each ending with its position in the set, like "Broken Crown 3".' },
-      ],
     },
     captionGuidance: {
       label: 'How to write the caption',
