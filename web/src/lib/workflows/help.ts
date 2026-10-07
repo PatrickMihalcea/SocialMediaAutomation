@@ -239,6 +239,7 @@ export const WORKFLOW_FIELD_HELP: Partial<
     prompt: {
       label: 'Camera movement',
       description: 'One continuous shot. Custom text is passed to the model as written.',
+      multiline: true,
       presets: [
         { label: 'Slow push in', value: 'Slow cinematic push in, subject stays centred.' },
         { label: 'Gentle orbit', value: 'Gentle camera orbit with natural parallax, subject stays stable.' },
@@ -376,6 +377,7 @@ export const WORKFLOW_FIELD_HELP: Partial<
     firstTemplate: {
       label: 'Opening text',
       description: 'Used when Overlay structure includes opening text. Connecting the Opening text input overrides this, so an Idea generator can write it per run.',
+      multiline: true,
     },
     font: {
       label: 'Typeface',

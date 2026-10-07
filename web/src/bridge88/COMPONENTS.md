@@ -303,6 +303,11 @@ One-line: the system's single text field — contact forms, in-app settings, com
 
 - 8px radius (`--radius-md`), 12px/14px padding, 1px `--hairline` border, 48px minimum height.
 - `multiline` swaps to a textarea; keep the same border and radius.
+- A textarea grows to fit what is in it. `rows` sets the minimum, `maxHeight`
+  (default `24rem`) is where it stops growing and scrolls instead. Pass
+  `autoGrow={false}` for a fixed box. A field holding paragraphs — prompt
+  direction, a style description — must never be a box you scroll two lines
+  at a time.
 - Error styling is undocumented in the source — see readme Known Gaps before inventing one.
 
 ```ts

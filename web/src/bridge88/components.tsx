@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, Ref, SelectHTMLAttributes, TextareaHTMLAttributes, VideoHTMLAttributes } from 'react';
 import { Check, ChevronDown, Music } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -614,6 +614,27 @@ export function Dropdown({
   );
 }
 
+/**
+ * Runs before paint in the browser and does nothing on the server, where there
+ * is no layout to measure. Plain useLayoutEffect warns during SSR; plain
+ * useEffect runs after paint, which shows the box at its collapsed height for a
+ * frame and then jumps.
+ */
+const useMeasure = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
+/**
+ * Grows to fit what is in it, up to a point.
+ *
+ * A fixed three-row box turns a paragraph of direction into a slot you scroll
+ * through two lines at a time, which makes it genuinely hard to read back what
+ * you wrote — and these boxes hold prompt instructions and style descriptions
+ * that run to paragraphs. `rows` still sets the minimum, so an empty box keeps
+ * the height the caller asked for.
+ *
+ * `maxHeight` is what keeps this from taking over the page: the image style
+ * field alone accepts five thousand characters. Past it the box stops growing
+ * and scrolls, which is the old behaviour at a size worth having.
+ */
 export function TextArea({
   label,
   hint,
@@ -621,18 +642,59 @@ export function TextArea({
   id,
   className,
   containerClassName,
+  autoGrow = true,
+  maxHeight = '24rem',
+  style,
+  onInput,
   'aria-describedby': describedBy,
   ...props
-}: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; hint?: string; error?: string; containerClassName?: string }) {
+}: TextareaHTMLAttributes<HTMLTextAreaElement> & {
+  label: string;
+  hint?: string;
+  error?: string;
+  containerClassName?: string;
+  /** Set false to keep a fixed box, sized by `rows`. */
+  autoGrow?: boolean;
+  /** Where growing stops and scrolling starts. Any CSS length. */
+  maxHeight?: string;
+}) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const messageId = `${inputId}-message`;
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  const fit = useCallback(() => {
+    const element = ref.current;
+    if (!element || !autoGrow) return;
+    // Cleared first so the box can shrink: scrollHeight never reports less
+    // than the height already set on it.
+    element.style.height = 'auto';
+    element.style.height = `${element.scrollHeight}px`;
+  }, [autoGrow]);
+
+  // props.value for a controlled box, defaultValue for the first paint of an
+  // uncontrolled one. Typing is handled by onInput below, which fires for both.
+  useMeasure(fit, [fit, props.value, props.defaultValue]);
+
+  // A narrower box rewraps its text and needs more height for the same words.
+  useEffect(() => {
+    if (!autoGrow) return;
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [autoGrow, fit]);
+
   return (
     <div className={containerClassName ? `block ${containerClassName}` : 'block'}>
       <label className="b88-label" htmlFor={inputId}>{label}</label>
       <textarea
         id={inputId}
+        ref={ref}
         className={inputClass(className)}
+        style={autoGrow ? { maxHeight, overflowY: 'auto', ...style } : style}
+        onInput={(event) => {
+          fit();
+          onInput?.(event);
+        }}
         aria-invalid={error ? true : undefined}
         aria-describedby={[describedBy, error || hint ? messageId : null].filter(Boolean).join(' ') || undefined}
         {...props}
