@@ -42,7 +42,14 @@ export async function GET(request: Request) {
   // waits for GitHub's five-minute schedule, which has in practice gone over an
   // hour between ticks. Asking here turns a permanent stall into a one-minute
   // delay, because recovery no longer depends on any single call succeeding.
-  const woke = await wakeWorkerIfIdle(await queuedJobCount());
+  // Queued work, plus slots about to fire.
+  //
+  // A worker takes about a minute to come up, so starting one at the moment a
+  // scheduled slot arrives means the run spends its first minute watching a VM
+  // install things. Started a couple of minutes early it is already polling
+  // when the slot fires. This costs nothing extra: it is the same worker, begun
+  // sooner, for work that is certainly coming.
+  const woke = await wakeWorkerIfIdle(await queuedJobCount() + await dueSoonCount());
 
   // Draining the queue here is a last resort, not the normal path.
   //
@@ -62,6 +69,24 @@ export async function GET(request: Request) {
     : 0;
 
   return NextResponse.json({ ...started, ...swept, reclaimed, woke, drained });
+}
+
+/**
+ * How early to start a worker for a slot that has not arrived yet. Slightly
+ * longer than a cold start, measured at about seventy seconds.
+ */
+const PREWARM_MS = 2 * 60 * 1000;
+
+/** Scheduled runs whose slot is about to arrive. */
+async function dueSoonCount(): Promise<number> {
+  return db.workflow.count({
+    where: {
+      enabled: true,
+      archivedAt: null,
+      scheduleEnabled: true,
+      nextRunAt: { lte: new Date(Date.now() + PREWARM_MS) },
+    },
+  });
 }
 
 /** Work that is due and has nobody doing it. */

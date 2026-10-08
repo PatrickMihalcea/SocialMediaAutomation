@@ -127,6 +127,7 @@ jobs:
           ffmpeg -version | head -1
 
       - uses: actions/setup-python@v5
+        id: python
         with:
           python-version: '3.12'
 
@@ -137,7 +138,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: web/.venv-audio
-          key: venv-audio-ubuntu-24.04-py3.12-v1
+          # The exact patch version, not just 3.12: a virtualenv points at the
+          # interpreter it was built from, and a runner image that bumps the
+          # patch leaves the cached one pointing at a path that is gone.
+          key: venv-audio-ubuntu-24.04-py${{ steps.python.outputs.python-version }}-v2
 
       - name: Install librosa
         working-directory: web
