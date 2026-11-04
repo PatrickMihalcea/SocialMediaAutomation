@@ -817,8 +817,13 @@ def _build_payload(
         "tool_choice": tool_choice,
         "parallel_tool_calls": False,
         "store": False,
-        "reasoning": {"effort": "low", "summary": "auto"},
-        "include": ["reasoning.encrypted_content"],
+        # LOCAL PATCH (Bridge88), pending upstream leeguooooo/image-use#69.
+        # Since 2026-11-04 ~17:22 UTC the Codex backend maps reasoning.effort to
+        # a "complexity" for the image tool and rejects every value with
+        # "Complexity '<value>' is not supported for this image model". Sending
+        # no reasoning block at all is the only shape that still generates, so
+        # the field and the encrypted-reasoning include it governed are gone.
+        "include": [],
         "text": {"verbosity": "low"},
     }
 
