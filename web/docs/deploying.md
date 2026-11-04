@@ -211,10 +211,14 @@ lose the refreshed copy and eventually stop authenticating.
 
 Two things that will bite:
 
-- **`IMAGE_USE_MODEL` is pinned to `gpt-5.5` in `worker.yml`.** The CLI's own
-  default driver model is refused with *"requires a newer version of Codex"*
-  unless the caller reports a very recent codex CLI, and a runner with no codex
-  installed reports the script's floor. Measured, not guessed.
+- **The worker reports a current Codex version on every pass.** The Codex
+  backend refuses newer driver models with *"requires a newer version of
+  Codex"* unless the caller reports a recent codex CLI, and a runner with no
+  codex installed reports the image script's floor. The *Report a current Codex
+  version* step reads the latest release from npm and writes it to
+  `~/.codex/version.json`. This replaced pinning `IMAGE_USE_MODEL` to an old
+  model, which broke in November 2026 when OpenAI withdrew `gpt-5.5` for
+  ChatGPT accounts — a pin only works until the pinned model is retired.
 - **Requested sizes are a hint, not a contract.** The subscription backend
   normalises them — asking for 1024×1024 has come back 1254×1254. The aspect
   ratio holds; the pixel count does not. Asset rows record what actually came

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, onTestFinished } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   workflowFindMany: vi.fn(),
@@ -74,6 +74,12 @@ describe('retimeWorkflows', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('moves every workflow to the new zone and rebooks the slot it had already taken', async () => {
+    // Pinned to a summer date. 09:00 in Bucharest is 06:00 UTC under summer
+    // time and 07:00 UTC after the clocks go back, and this read the real
+    // clock — so it passed from April to October and failed the rest of the
+    // year. Only Date is faked; the mocked promises still resolve.
+    vi.useFakeTimers({ now: new Date('2026-07-06T00:00:00Z'), toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     mocks.workflowFindMany.mockResolvedValue([
       { id: 'scheduled', scheduleEnabled: true, scheduleWeekdays: [1], scheduleHour: 9, scheduleMinute: 0 },
       { id: 'manual', scheduleEnabled: false, scheduleWeekdays: [], scheduleHour: 9, scheduleMinute: 0 },

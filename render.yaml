@@ -54,7 +54,7 @@ services:
       - key: IMAGE_USE_BACKEND
         value: codex
       - key: IMAGE_USE_MODEL
-        value: gpt-5.5
+        value: gpt-5.6-luna
       - key: CODEX_AUTH_STORE_KEY
         value: system/codex-auth.enc
       - key: CODEX_AUTH_BOOTSTRAP

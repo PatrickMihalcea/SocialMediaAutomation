@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, onTestFinished } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   requireWorkspace: vi.fn(),
@@ -119,6 +119,12 @@ describe('updateWorkflowAction', () => {
   });
 
   it('ignores a timezone sent by the client and schedules in the workspace zone', async () => {
+    // Pinned to a summer date. 09:00 in Bucharest is 06:00 UTC under summer
+    // time and 07:00 UTC after the clocks go back, and this read the real
+    // clock — so it passed from April to October and failed the rest of the
+    // year. Only Date is faked; the mocked promises still resolve.
+    vi.useFakeTimers({ now: new Date('2026-07-06T00:00:00Z'), toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     await updateWorkflowAction('demo', 'workflow-1', {
       scheduleHour: 9,
       timezone: 'Asia/Tokyo',

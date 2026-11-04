@@ -176,6 +176,24 @@ jobs:
           # lock does not survive a transaction pooler.
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
+      # The Codex backend gates newer models on the client version the caller
+      # reports. A runner has no codex install, so the image CLI fell back to
+      # its own floor, 0.130.0 — a year-old client. That is why a model had to
+      # be pinned at all, and why it broke when OpenAI withdrew the pinned one:
+      # nothing newer would talk to a client that old.
+      #
+      # So report the current release, read from npm on every pass, so this
+      # cannot go stale the same way again. The pinned fallback only matters if
+      # npm is unreachable, and is the release current when this was written.
+      - name: Report a current Codex version
+        run: |
+          set -uo pipefail
+          version=$(npm view @openai/codex version 2>/dev/null || true)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then version='0.166.0'; fi
+          mkdir -p ~/.codex
+          printf '{"latest_version":"%s"}\n' "$version" > ~/.codex/version.json
+          echo "reporting codex $version"
+
       - name: Run due work
         working-directory: web
         # A comfortable margin under timeout-minutes above, so this process
@@ -232,12 +250,17 @@ jobs:
           # chatgpt.com, which a throwaway runner cannot have, so auto would
           # only probe for it and fall back here anyway.
           IMAGE_USE_BACKEND: 'codex'
-          # Pinned deliberately. The CLI's default driver model is refused with
-          # "requires a newer version of Codex" unless the caller reports a very
-          # recent codex CLI, and a runner with no codex install reports the
-          # script's floor (0.130.0) — measured, not guessed. This model is
-          # accepted at that floor. Revisit if image generation starts 400ing.
-          IMAGE_USE_MODEL: 'gpt-5.5'
+          # The driver model only reads the prompt and calls the image tool —
+          # the picture is rendered by the server's own image model either way —
+          # so this is the cheap one Codex itself uses for small jobs.
+          #
+          # This was pinned to gpt-5.5 because newer models refused the old
+          # client version a runner reported (see "Report a current Codex
+          # version" above). OpenAI then withdrew gpt-5.5 from ChatGPT-account
+          # Codex use, the pin started returning model_not_found, and the CLI's
+          # one retry was to gpt-5.5 again. With a current version reported,
+          # the CLI's own default is accepted.
+          IMAGE_USE_MODEL: 'gpt-5.6-luna'
           # The OAuth credential the codex backend runs on. The store holds the
           # refreshed copy between runs; the bootstrap secret seeds it once.
           CODEX_AUTH_STORE_KEY: 'system/codex-auth.enc'
