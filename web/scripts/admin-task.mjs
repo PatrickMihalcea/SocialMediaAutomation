@@ -191,10 +191,13 @@ async function scheduleReport() {
     const slotsPerDay = times.length * (w.scheduleWeekdays?.length ?? 0) / 7;
 
     const since = new Date(now.getTime() - 24 * 3600_000);
+    // By creation, not start: a run booked by the scheduler and still waiting
+    // for a worker has no start time yet, and filtering on one hid exactly the
+    // runs this report exists to find.
     const runs = await db.workflowRun.findMany({
-      where: { workflowId: w.id, startedAt: { gte: since } },
-      select: { startedAt: true, trigger: true, status: true },
-      orderBy: { startedAt: 'desc' },
+      where: { workflowId: w.id, createdAt: { gte: since } },
+      select: { createdAt: true, startedAt: true, trigger: true, status: true },
+      orderBy: { createdAt: 'desc' },
     });
     const scheduled = runs.filter((r) => r.trigger === 'SCHEDULE');
 
@@ -208,7 +211,9 @@ async function scheduleReport() {
     }
     console.log(`  lastRunAt: ${w.lastRunAt ? w.lastRunAt.toISOString() : 'never'}`);
     console.log(`  in the last 24h: ${scheduled.length} scheduled run(s) against ${slotsPerDay.toFixed(0)} slots`);
-    for (const r of scheduled.slice(0, 8)) console.log(`     ${r.startedAt.toISOString().slice(5, 16)}  ${r.status}`);
+    for (const r of runs.slice(0, 10)) {
+      console.log(`     created ${r.createdAt.toISOString().slice(5, 16)}  started ${r.startedAt ? r.startedAt.toISOString().slice(11, 16) : '—    '}  ${r.trigger.padEnd(8)} ${r.status}`);
+    }
     console.log('');
   }
 }
