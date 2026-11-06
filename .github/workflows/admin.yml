@@ -22,6 +22,7 @@ on:
           - model-report
           - run-report
           - facebook-videos
+          - repost-facebook-reels
       name:
         description: 'Existing workflow to read'
         required: false
@@ -30,6 +31,20 @@ on:
         description: 'Name for the workflow being created'
         required: false
         default: 'Dark Fantasy Dreams — story'
+      # repost-facebook-reels only. Plan prints what would be booked and writes
+      # nothing; it takes choosing schedule, by hand, to put anything on a Page.
+      mode:
+        description: 'repost-facebook-reels: plan (read only) or schedule (books the Reels)'
+        required: false
+        type: choice
+        default: plan
+        options:
+          - plan
+          - schedule
+      perDay:
+        description: 'repost-facebook-reels: Reels per Page per day'
+        required: false
+        default: '5'
 
 jobs:
   admin:
@@ -58,5 +73,7 @@ jobs:
           ADMIN_TASK: ${{ inputs.task }}
           WORKFLOW_NAME: ${{ inputs.name }}
           NEW_WORKFLOW_NAME: ${{ inputs.newName }}
+          REPOST_MODE: ${{ inputs.mode }}
+          REPOST_PER_DAY: ${{ inputs.perDay }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}

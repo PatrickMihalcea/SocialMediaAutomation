@@ -9,6 +9,7 @@
  *
  * Every task is explicit and named. Nothing here runs on a schedule.
  */
+import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 
 const db = new PrismaClient();
@@ -346,7 +347,157 @@ async function facebookVideos() {
   }
 }
 
-const tasks = { 'facebook-videos': facebookVideos, 'run-report': runReport, 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
+/** The UTC instant of a wall-clock time in a zone. */
+function zonedToUtc(year, month, day, hour, minute, timeZone) {
+  const offsetAt = (instant) => {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+      timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    }).formatToParts(instant).map((p) => [p.type, p.value]));
+    const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute);
+    return asUtc - Math.floor(instant.getTime() / 60000) * 60000;
+  };
+  const guess = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  const first = new Date(guess.getTime() - offsetAt(guess));
+  return new Date(guess.getTime() - offsetAt(first));
+}
+
+/**
+ * Reposts every plain Facebook video as a Reel, a few a day.
+ *
+ * Facebook cannot turn an existing video into a Reel, so each is posted again
+ * — same video, same copy — through the ordinary scheduled queue, where it
+ * shows on the calendar and can be cancelled like any other post. The old row
+ * is marked as replaced; the publishing engine deletes the old video only
+ * once its Reel is live.
+ *
+ * Plans by default and writes nothing. Booking needs REPOST_MODE=schedule,
+ * and a video already booked is never booked twice.
+ */
+async function repostFacebookReels() {
+  const mode = process.env.REPOST_MODE === 'schedule' ? 'schedule' : 'plan';
+  const perPagePerDay = Math.max(1, Math.min(25, Number(process.env.REPOST_PER_DAY) || 5));
+
+  const rows = await db.postPlatform.findMany({
+    where: { platform: 'FACEBOOK', status: 'PUBLISHED' },
+    orderBy: { publishedAt: 'asc' },
+    include: {
+      post: { select: { title: true, authorId: true, workspaceId: true, workspace: { select: { timezone: true } } } },
+      socialAccount: { select: { accountName: true } },
+      media: true,
+    },
+  });
+  const assets = new Map((await db.mediaAsset.findMany({
+    where: { id: { in: rows.flatMap((r) => r.media.map((m) => m.mediaAssetId)) } },
+    select: { id: true, type: true, width: true, height: true, duration: true, status: true },
+  })).map((a) => [a.id, a]));
+
+  const reelable = (a) => a && a.type === 'VIDEO' && a.status === 'READY'
+    && !(a.duration != null && (a.duration < 3 || a.duration > 90))
+    && !(a.width != null && a.height != null && (a.width >= a.height || a.width < 540 || a.height < 960));
+
+  const candidates = rows.filter((r) => {
+    const meta = r.responseMeta ?? {};
+    if (meta.replacedBy || meta.retiredAt) return false;
+    if ((r.platformUrl ?? '').includes('/reel/')) return false;
+    return r.media.some((m) => reelable(assets.get(m.mediaAssetId)));
+  });
+  const skipped = rows.length - candidates.length;
+
+  // Alternate between Pages so neither gets a day of nothing but reposts.
+  const byPage = new Map();
+  for (const r of candidates) {
+    if (!byPage.has(r.socialAccountId)) byPage.set(r.socialAccountId, []);
+    byPage.get(r.socialAccountId).push(r);
+  }
+  const queues = [...byPage.values()];
+  const order = [];
+  while (queues.some((q) => q.length)) for (const q of queues) if (q.length) order.push(q.shift());
+
+  const zones = new Set(order.map((r) => r.post.workspace.timezone));
+  if (zones.size > 1) throw new Error(`these posts span more than one workspace zone: ${[...zones].join(', ')}`);
+  const zone = [...zones][0] ?? 'UTC';
+
+  // Even slots between 09:20 and 21:20 local, starting tomorrow. Off the hour
+  // so they do not land on top of the workflows, which fire on the hour.
+  const perDay = perPagePerDay * Math.max(1, byPage.size);
+  const gap = (12 * 60) / perDay;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(new Date()).split('-').map(Number);
+  const slotFor = (index) => {
+    const day = Math.floor(index / perDay) + 1;
+    const minutes = 9 * 60 + 20 + Math.round((index % perDay) * gap);
+    const date = new Date(Date.UTC(today[0], today[1] - 1, today[2] + day));
+    return zonedToUtc(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate(), Math.floor(minutes / 60), minutes % 60, zone);
+  };
+
+  const fmt = (d) => new Intl.DateTimeFormat('en-US', { timeZone: zone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d);
+  console.log(`mode: ${mode.toUpperCase()}${mode === 'plan' ? ' (nothing is written)' : ''}`);
+  console.log(`zone: ${zone}`);
+  console.log(`to repost: ${order.length}   left alone: ${skipped} (already Reels, already booked, or not Reel-shaped)`);
+  for (const [, list] of byPage) console.log(`  ${list[0]?.socialAccount?.accountName ?? '?'}: ${list.length + 0}`);
+  console.log(`pace: ${perPagePerDay} per Page per day = ${perDay} a day across ${byPage.size} Page(s)`);
+  if (order.length) {
+    console.log(`first: ${fmt(slotFor(0))}   last: ${fmt(slotFor(order.length - 1))}   (${Math.ceil(order.length / perDay)} days)`);
+    console.log('\nfirst day:');
+    for (let i = 0; i < Math.min(perDay, order.length); i++) {
+      console.log(`  ${fmt(slotFor(i)).padEnd(18)} ${order[i].socialAccount?.accountName ?? ''}   (originally ${order[i].publishedAt?.toISOString().slice(0, 10)})`);
+    }
+  }
+  if (mode !== 'schedule') return;
+
+  let booked = 0;
+  for (const [i, old] of order.entries()) {
+    const scheduledAt = slotFor(i);
+    await db.$transaction(async (tx) => {
+      // Re-read inside the transaction: a run that overlaps this one must not
+      // book the same video twice.
+      const fresh = await tx.postPlatform.findUnique({ where: { id: old.id }, select: { responseMeta: true } });
+      if (fresh?.responseMeta?.replacedBy) return;
+
+      const post = await tx.post.create({
+        data: {
+          workspaceId: old.workspaceId,
+          authorId: old.post.authorId,
+          title: old.post.title,
+          status: 'SCHEDULED',
+          scheduledAt,
+          timezone: zone,
+        },
+      });
+      const platform = await tx.postPlatform.create({
+        data: {
+          postId: post.id,
+          workspaceId: old.workspaceId,
+          socialAccountId: old.socialAccountId,
+          platform: 'FACEBOOK',
+          text: old.text,
+          firstComment: old.firstComment,
+          hashtags: old.hashtags,
+          mentions: old.mentions,
+          link: old.link,
+          idempotencyKey: randomUUID(),
+          media: {
+            create: old.media.map((m) => ({
+              mediaAssetId: m.mediaAssetId,
+              position: m.position,
+              altText: m.altText,
+              thumbnailOffset: m.thumbnailOffset,
+              audioAssetId: m.audioAssetId,
+              audioStart: m.audioStart,
+            })),
+          },
+        },
+      });
+      await tx.postPlatform.update({
+        where: { id: old.id },
+        data: { responseMeta: { ...(old.responseMeta ?? {}), replacedBy: platform.id } },
+      });
+      booked += 1;
+    });
+  }
+  console.log(`\nbooked ${booked} Reel(s). Each shows on the calendar and can be cancelled there.`);
+}
+
+const tasks = { 'repost-facebook-reels': repostFacebookReels, 'facebook-videos': facebookVideos, 'run-report': runReport, 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
 
 const run = tasks[task];
 if (!run) {

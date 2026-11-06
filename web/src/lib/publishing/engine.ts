@@ -175,11 +175,71 @@ export async function publishPostPlatform(postPlatformId: string): Promise<void>
       { postPlatformId: row.id },
       { workspaceId: row.workspaceId, runAt: new Date(Date.now() + 60 * 60 * 1000) },
     );
+
+    await retireReplaced(row.id, row.socialAccountId, adapter, account);
   } catch (error) {
     await handleFailure(row.id, row.postId, row.workspaceId, workspace.slug, row.socialAccountId, row.platform, error);
     throw error;
   } finally {
     await reconcilePostStatus(row.postId);
+  }
+}
+
+/**
+ * Takes down the post this one was published to replace.
+ *
+ * Used when an old post is reposted in a better form — a plain Facebook video
+ * reposted as a Reel — so the Page does not end up showing both. The old row
+ * names its replacement when the repost is booked; only once that replacement
+ * is live does the old one come down, so a repost that fails never leaves the
+ * Page with neither.
+ *
+ * Never throws. This runs after the new post is already live, and a failure
+ * here propagating would mark the publish failed and retry it — posting the
+ * Reel a second time to fix a delete. A delete that fails is written on the
+ * old row instead, where it can be seen and tried again.
+ */
+async function retireReplaced(
+  postPlatformId: string,
+  socialAccountId: string,
+  adapter: { deletePost(account: never, platformPostId: string): Promise<void> },
+  account: unknown,
+): Promise<void> {
+  try {
+    const replaced = await db.postPlatform.findMany({
+      where: {
+        socialAccountId,
+        responseMeta: { path: ['replacedBy'], equals: postPlatformId },
+      },
+      select: { id: true, platformPostId: true, responseMeta: true },
+    });
+    for (const old of replaced) {
+      const meta = (old.responseMeta ?? {}) as Record<string, unknown>;
+      if (meta.retiredAt || !old.platformPostId) continue;
+      try {
+        await adapter.deletePost(account as never, old.platformPostId);
+        await db.postPlatform.update({
+          where: { id: old.id },
+          data: {
+            platformUrl: null,
+            responseMeta: { ...meta, retiredAt: new Date().toISOString(), retireError: null } as never,
+          },
+        });
+      } catch (error) {
+        console.error('[publishing] could not take down the post this one replaced', old.id, error);
+        await db.postPlatform.update({
+          where: { id: old.id },
+          data: {
+            responseMeta: {
+              ...meta,
+              retireError: error instanceof Error ? error.message.slice(0, 500) : 'delete failed',
+            } as never,
+          },
+        });
+      }
+    }
+  } catch (error) {
+    console.error('[publishing] could not look for a post this one replaced', postPlatformId, error);
   }
 }
 

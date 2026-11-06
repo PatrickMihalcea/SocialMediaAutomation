@@ -8,6 +8,7 @@ const dbMock = vi.hoisted(() => ({
     updateMany: vi.fn(),
     findUniqueOrThrow: vi.fn(),
     update: vi.fn(),
+    findMany: vi.fn(async (): Promise<unknown[]> => []),
   },
   workspace: { findUniqueOrThrow: vi.fn() },
   socialAccount: { update: vi.fn(), findUnique: vi.fn() },
@@ -19,6 +20,7 @@ const adapter = vi.hoisted(() => ({
   validatePost: vi.fn(() => []),
   publish: vi.fn(),
   getPost: vi.fn(),
+  deletePost: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
@@ -190,5 +192,90 @@ describe('publishing reliability', () => {
       ]),
     );
     expect(adapter.publish).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * A Reel reposted to replace a plain Facebook video takes the old video down
+ * once it is itself live, so the Page never shows both — and never neither.
+ */
+describe('retiring the post a repost replaces', () => {
+  const publishing = () => {
+    dbMock.postPlatform.findUnique.mockResolvedValue({ id: 'reel-row', status: 'PENDING', post: { status: 'PUBLISHING' } });
+    dbMock.postPlatform.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.postPlatform.findUniqueOrThrow.mockResolvedValue({
+      id: 'reel-row',
+      postId: 'post-2',
+      workspaceId: 'workspace-1',
+      socialAccountId: 'page-1',
+      platform: 'FACEBOOK',
+      attempts: 1,
+      idempotencyKey: 'idem-2',
+      platformPostId: null,
+      post: { title: null },
+      media: [],
+      socialAccount: {},
+    });
+    dbMock.workspace.findUniqueOrThrow.mockResolvedValue({ slug: 'northwind' });
+    dbMock.postPlatform.update.mockResolvedValue({});
+    dbMock.post.findUnique.mockResolvedValue(null);
+    adapter.publish.mockResolvedValue({ platformPostId: 'reel-9', publishedAt: new Date() });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    publishing();
+  });
+
+  it('deletes the old video once the Reel has published, on the same Page', async () => {
+    dbMock.postPlatform.findMany.mockResolvedValue([
+      { id: 'old-row', platformPostId: 'video-1', responseMeta: { replacedBy: 'reel-row' } },
+    ]);
+
+    await publishPostPlatform('reel-row');
+
+    expect(dbMock.postPlatform.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { socialAccountId: 'page-1', responseMeta: { path: ['replacedBy'], equals: 'reel-row' } },
+    }));
+    expect(adapter.deletePost).toHaveBeenCalledWith(expect.anything(), 'video-1');
+    expect(dbMock.postPlatform.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'old-row' },
+      data: expect.objectContaining({ platformUrl: null, responseMeta: expect.objectContaining({ retiredAt: expect.any(String) }) }),
+    }));
+  });
+
+  /** A failed delete must not fail the publish, or the retry posts the Reel twice. */
+  it('reports the Reel published even when the delete fails, and records why', async () => {
+    dbMock.postPlatform.findMany.mockResolvedValue([
+      { id: 'old-row', platformPostId: 'video-1', responseMeta: { replacedBy: 'reel-row' } },
+    ]);
+    adapter.deletePost.mockRejectedValue(new Error('Unsupported delete request'));
+
+    await expect(publishPostPlatform('reel-row')).resolves.toBeUndefined();
+
+    expect(dbMock.postPlatform.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'old-row' },
+      data: { responseMeta: expect.objectContaining({ retireError: 'Unsupported delete request' }) },
+    }));
+  });
+
+  it('does not delete twice', async () => {
+    dbMock.postPlatform.findMany.mockResolvedValue([
+      { id: 'old-row', platformPostId: 'video-1', responseMeta: { replacedBy: 'reel-row', retiredAt: '2026-11-05T10:00:00Z' } },
+    ]);
+
+    await publishPostPlatform('reel-row');
+
+    expect(adapter.deletePost).not.toHaveBeenCalled();
+  });
+
+  it('deletes nothing when the publish fails', async () => {
+    adapter.publish.mockRejectedValue(new Error('network down'));
+    dbMock.socialAccount.findUnique.mockResolvedValue({ id: 'page-1' });
+
+    await expect(publishPostPlatform('reel-row')).rejects.toThrow();
+
+    expect(dbMock.postPlatform.findMany).not.toHaveBeenCalled();
+    expect(adapter.deletePost).not.toHaveBeenCalled();
   });
 });
