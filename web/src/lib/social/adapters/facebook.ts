@@ -1,7 +1,7 @@
 import { Platform } from '@prisma/client';
 import { CAPABILITIES } from '@/lib/social/capabilities';
 import { composeText } from '@/lib/social/base';
-import { GRAPH, MetaAdapter } from '@/lib/social/adapters/meta';
+import { GRAPH, GRAPH_VERSION, MetaAdapter } from '@/lib/social/adapters/meta';
 import { platformJson } from '@/lib/social/http';
 import { PlatformError } from '@/lib/social/errors';
 import type {
@@ -11,6 +11,7 @@ import type {
   PlatformPostStatus,
   PlatformProfile,
   PostMetrics,
+  OutgoingMedia,
   PublishContext,
   PublishResult,
 } from '@/lib/social/types';
@@ -111,9 +112,117 @@ export class FacebookAdapter extends MetaAdapter {
     return this.finish(ctx, res.id, token);
   }
 
+  /**
+   * A video goes out as a Reel whenever it can be one.
+   *
+   * This used to post every video to /videos, which makes a plain Page video:
+   * shown to the Page's followers and almost nobody else. Reels are what
+   * Facebook recommends to people who do not follow you, so for a new Page a
+   * plain video is close to invisible however public it is. Everything this
+   * app renders is a vertical short, so the Reel path is the normal one; a
+   * video Meta would refuse as a Reel still goes out, as a Page video.
+   */
   async publishVideoPost(ctx: PublishContext): Promise<PublishResult> {
     const token = this.requireToken(ctx.account);
     const video = ctx.post.media.find((m) => m.type === 'VIDEO')!;
+    if (!canBeReel(video)) return this.publishPageVideo(ctx, token, video);
+    return this.publishReel(ctx, token, video);
+  }
+
+  /**
+   * Meta's three-step Reels upload: open an upload, have Facebook fetch the
+   * file from our URL, then publish it.
+   */
+  private async publishReel(ctx: PublishContext, token: string, video: OutgoingMedia): Promise<PublishResult> {
+    const pageId = ctx.account.externalAccountId;
+
+    const started = await platformJson<{ video_id?: string }>({
+      platform: this.platform,
+      method: 'POST',
+      url: `${GRAPH}/${pageId}/video_reels`,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ access_token: token, upload_phase: 'start' }).toString(),
+    });
+    const videoId = started.video_id;
+    if (!videoId) {
+      throw new PlatformError({
+        platform: this.platform,
+        code: 'BAD_RESPONSE',
+        message: 'Facebook did not open an upload for this Reel.',
+        retryable: true,
+      });
+    }
+
+    // Facebook pulls the file itself from the signed URL, so the bytes never
+    // pass through this process — the same way the old /videos call worked.
+    const uploaded = await platformJson<{ success?: boolean }>({
+      platform: this.platform,
+      method: 'POST',
+      url: `https://rupload.facebook.com/video-upload/${GRAPH_VERSION}/${videoId}`,
+      headers: { authorization: `OAuth ${token}`, file_url: video.url },
+      timeoutMs: 120_000,
+    });
+    if (uploaded.success === false) {
+      throw new PlatformError({
+        platform: this.platform,
+        code: 'MEDIA_REJECTED',
+        message: 'Facebook could not fetch this video to make a Reel from it.',
+        retryable: true,
+      });
+    }
+
+    const params = new URLSearchParams({
+      access_token: token,
+      upload_phase: 'finish',
+      video_id: videoId,
+      video_state: 'PUBLISHED',
+      description: composeText(ctx.post),
+    });
+    if (ctx.post.title) params.set('title', ctx.post.title);
+    await platformJson<{ success?: boolean }>({
+      platform: this.platform,
+      method: 'POST',
+      url: `${GRAPH}/${pageId}/video_reels`,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+      timeoutMs: 60_000,
+    });
+
+    await this.waitForReel(videoId, token);
+    return { ...(await this.finish(ctx, videoId, token)), url: `https://www.facebook.com/reel/${videoId}` };
+  }
+
+  /**
+   * Watches the Reel through processing, for long enough to catch Meta
+   * refusing it.
+   *
+   * It deliberately does not fail on running out of patience. Once the
+   * publish call has been accepted the Reel goes live on its own, and a
+   * retry from here would upload it a second time — a duplicate post is
+   * worse than reporting success a minute early. Only a definite error from
+   * Meta fails the step.
+   */
+  private async waitForReel(videoId: string, token: string): Promise<void> {
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const { status } = await platformJson<{ status?: ReelStatus }>({
+        platform: this.platform,
+        url: `${GRAPH}/${videoId}?fields=status&access_token=${encodeURIComponent(token)}`,
+      });
+      const failure = reelFailure(status);
+      if (failure) {
+        throw new PlatformError({
+          platform: this.platform,
+          code: 'MEDIA_REJECTED',
+          message: `Facebook refused this Reel: ${failure}`,
+        });
+      }
+      if (status?.publishing_phase?.status === 'complete') return;
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+    }
+  }
+
+  /** The old path, kept for videos Meta would not accept as a Reel. */
+  private async publishPageVideo(ctx: PublishContext, token: string, video: OutgoingMedia): Promise<PublishResult> {
     const params = new URLSearchParams({
       access_token: token,
       file_url: video.url,
@@ -249,4 +358,45 @@ export class FacebookAdapter extends MetaAdapter {
       raw: insights as Record<string, unknown>,
     };
   }
+}
+
+interface ReelPhase {
+  status?: string;
+  errors?: Array<{ message?: string }>;
+}
+
+interface ReelStatus {
+  video_status?: string;
+  uploading_phase?: ReelPhase;
+  processing_phase?: ReelPhase;
+  publishing_phase?: ReelPhase;
+}
+
+/** What Meta said went wrong, or null while nothing has. */
+export function reelFailure(status: ReelStatus | undefined): string | null {
+  if (!status) return null;
+  const phases = [status.uploading_phase, status.processing_phase, status.publishing_phase];
+  const failed = phases.find((phase) => phase?.status === 'error');
+  if (failed) return failed.errors?.[0]?.message ?? 'it failed while processing.';
+  if (status.video_status === 'error') return 'it failed while processing.';
+  return null;
+}
+
+/**
+ * Whether Meta will take this video as a Reel: vertical, 3 to 90 seconds,
+ * at least 540x960.
+ *
+ * Unknown dimensions or length count as yes. Everything this app renders is a
+ * vertical short, and a file we know nothing about is far more likely one of
+ * those than not — refusing to try would quietly send it out as the plain
+ * video nobody sees.
+ */
+export function canBeReel(video: Pick<OutgoingMedia, 'width' | 'height' | 'durationSeconds'>): boolean {
+  const { width, height, durationSeconds } = video;
+  if (durationSeconds != null && (durationSeconds < 3 || durationSeconds > 90)) return false;
+  if (width != null && height != null) {
+    if (width >= height) return false;
+    if (width < 540 || height < 960) return false;
+  }
+  return true;
 }
