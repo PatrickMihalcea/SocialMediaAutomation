@@ -10,7 +10,7 @@ const dbMock = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
-import { reclaimStaleJobs, storeJob } from '@/lib/queue/store';
+import { reclaimLocalJobs, reclaimStaleJobs, storeJob } from '@/lib/queue/store';
 
 describe('durable queue deduplication', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -88,5 +88,42 @@ describe('reclaiming jobs left behind', () => {
     // Older than the worker's own ten-minute budget, so a job still running
     // inside a live pass is never taken from it.
     expect(age).toBeGreaterThanOrEqual(10 * 60 * 1000);
+  });
+});
+
+/**
+ * ComfyUI work lives on a queue only the operator's Mac consumes. A shared
+ * worker reclaiming it would hand a render that is still running on the laptop
+ * to the next consumer — and the only next consumer is that same laptop.
+ */
+describe('the local queue', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('stores a job on the queue the caller names, over the type\'s usual one', async () => {
+    dbMock.job.findFirst.mockResolvedValue(null);
+    dbMock.job.create.mockResolvedValue({ id: 'local-job' });
+
+    await storeJob('run-workflow-node', { nodeRunId: 'n1' }, { queue: 'LOCAL_GENERATION', dedupeKey: 'k' });
+
+    expect(dbMock.job.findFirst.mock.calls[0][0].where.queue).toBe('LOCAL_GENERATION');
+    expect(dbMock.job.create.mock.calls[0][0].data.queue).toBe('LOCAL_GENERATION');
+  });
+
+  it('is never reclaimed on the shared timer', async () => {
+    dbMock.job.updateMany.mockResolvedValue({ count: 0 });
+
+    await reclaimStaleJobs();
+
+    expect(dbMock.job.updateMany.mock.calls[0][0].where.queue).toEqual({ not: 'LOCAL_GENERATION' });
+  });
+
+  it('is reclaimed whole by the local worker on start, however long it ran', async () => {
+    dbMock.job.updateMany.mockResolvedValue({ count: 2 });
+
+    expect(await reclaimLocalJobs()).toBe(2);
+
+    const [args] = dbMock.job.updateMany.mock.calls[0];
+    expect(args.where).toEqual({ queue: 'LOCAL_GENERATION', status: 'RUNNING' });
+    expect(args.data).toEqual({ status: 'QUEUED' });
   });
 });

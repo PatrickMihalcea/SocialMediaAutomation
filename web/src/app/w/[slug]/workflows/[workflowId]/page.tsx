@@ -1,10 +1,12 @@
 import { Suspense } from 'react';
 import Link from 'next/link';
-import { Badge, Button, EmptyState } from '@/bridge88/components';
+import { Badge, Button, EmptyState, StatusMessage } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { env } from '@/lib/env';
 import { resolveImageProviderName } from '@/lib/ai/provider-selection';
+import { describeLocalWorker, localWorkerStatus } from '@/lib/queue/local-worker';
+import { stepRunsLocally } from '@/lib/workflows/local-steps';
 import { notFound } from '@/lib/errors';
 import { formatInZone, timezoneLabel, WEEKDAY_SHORT } from '@/lib/scheduling/time';
 import { toGraph } from '@/lib/workflows/snapshot';
@@ -141,6 +143,10 @@ async function WorkflowDetail({
     })),
   });
   const order = safeOrder(graph, workflow.nodes.map((n) => n.id));
+  // Only asked when a step renders on the Mac; nobody else needs to know it exists.
+  const localWorker = workflow.nodes.some((n) => stepRunsLocally(n.type, n.config))
+    ? describeLocalWorker(await localWorkerStatus())
+    : null;
   const lanes = order
     .map((id) => workflow.nodes.find((n) => n.id === id))
     .filter((n): n is (typeof workflow.nodes)[number] => Boolean(n))
@@ -208,6 +214,9 @@ async function WorkflowDetail({
           details move underneath it instead of fighting it for room. */}
       {view === 'steps' ? (
         <>
+          {localWorker && (
+            <StatusMessage tone={localWorker.tone} className="mt-6">{localWorker.text}</StatusMessage>
+          )}
           <div className="mt-6">
             <WorkflowCanvasLoader
               slug={slug}

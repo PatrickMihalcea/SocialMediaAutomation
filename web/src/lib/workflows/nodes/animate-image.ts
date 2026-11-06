@@ -5,6 +5,7 @@ import type { NodeRunContext } from '@/lib/workflows/node-context';
 interface Config {
   prompt: string;
   maxClips: number;
+  provider: 'default' | 'comfyui';
   useMockGeneration: boolean;
 }
 
@@ -44,10 +45,18 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       kind: 'VIDEO_ANIMATE',
       prompt: config.prompt,
       inputAssetIds: [images[index]],
-      // Video has no subscription backend; the choice here is only mock or not.
-      provider: config.useMockGeneration ? 'mock' : undefined,
+      provider: animationProvider(config),
+      inline: true,
     });
-    await runAiMediaJob(job.id);
+    // A clip on a laptop GPU can take longer than the sweeper waits for a
+    // silent step, and nothing else writes while it renders. Without this the
+    // step is declared dead and dispatched again mid-render.
+    const beat = setInterval(() => void ctx.heartbeat(), 60_000);
+    try {
+      await runAiMediaJob(job.id);
+    } finally {
+      clearInterval(beat);
+    }
 
     const finished = await db.aiMediaJob.findUnique({
       where: { id: job.id },
@@ -63,4 +72,10 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   }
 
   return { clips };
+}
+
+/** Mock wins, as it always has; otherwise ComfyUI when chosen, else the deployment's own. */
+export function animationProvider(config: Pick<Config, 'provider' | 'useMockGeneration'>) {
+  if (config.useMockGeneration) return 'mock' as const;
+  return config.provider === 'comfyui' ? 'comfyui' as const : undefined;
 }

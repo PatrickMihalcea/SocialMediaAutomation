@@ -4,13 +4,15 @@ import {
   WorkflowNodeRunStatus,
   WorkflowRunStatus,
   WorkflowRunTrigger,
+  type QueueName,
   type WorkflowNodeRun,
 } from '@prisma/client';
 import { db } from '@/lib/db';
 import { enqueue } from '@/lib/queue';
 import { applyRideAlongs } from '@/lib/workflows/ride-alongs';
 import { PermanentJobError } from '@/lib/queue/runner';
-import { backoffMs } from '@/lib/queue/types';
+import { backoffMs, LOCAL_QUEUE } from '@/lib/queue/types';
+import { stepRunsLocally } from '@/lib/workflows/local-steps';
 import { conflict, invalid, notFound } from '@/lib/errors';
 import { audit } from '@/lib/audit';
 import { notify } from '@/lib/notifications/service';
@@ -180,6 +182,7 @@ async function claimAndEnqueue(nodeRun: { id: string; workspaceId: string }): Pr
     { nodeRunId: nodeRun.id },
     {
       workspaceId: nodeRun.workspaceId,
+      queue: await dispatchQueue(nodeRun.id),
       // Retries belong to this engine, not the queue: a node stuck RUNNING
       // across five invisible attempts is unreadable on the canvas, and the
       // queue's generic budget is wrong for a step that costs money per call.
@@ -192,6 +195,19 @@ async function claimAndEnqueue(nodeRun: { id: string; workspaceId: string }): Pr
     },
   );
   await db.workflowNodeRun.updateMany({ where: { id: nodeRun.id }, data: { jobId } });
+}
+
+/**
+ * The local queue for a step that renders with ComfyUI, otherwise the step's
+ * usual one. Read from the node run rather than passed in, so the first
+ * dispatch and every retry and sweep decide it the same way.
+ */
+async function dispatchQueue(nodeRunId: string): Promise<QueueName | undefined> {
+  const row = await db.workflowNodeRun.findUnique({
+    where: { id: nodeRunId },
+    select: { nodeType: true, config: true },
+  });
+  return row && stepRunsLocally(row.nodeType, row.config) ? LOCAL_QUEUE : undefined;
 }
 
 /** One key per dispatch, so consecutive attempts never collapse into one. */
@@ -212,6 +228,7 @@ async function redispatch(
     { nodeRunId: nodeRun.id },
     {
       workspaceId: nodeRun.workspaceId,
+      queue: await dispatchQueue(nodeRun.id),
       maxAttempts: 1,
       runAt,
       dedupeKey: dispatchKey(nodeRun.id, (nodeRun.attempt ?? 0) + 1),

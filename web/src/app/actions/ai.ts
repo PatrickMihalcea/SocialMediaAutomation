@@ -107,7 +107,7 @@ export async function generateStudioImageAction(
 
 export async function createAiMediaJobAction(
   slug: string,
-  input: { kind: AiMediaJobKind; prompt: string; inputAssetIds?: string[] },
+  input: { kind: AiMediaJobKind; prompt: string; inputAssetIds?: string[]; provider?: ImageProviderName },
 ) {
   const ctx = await requireWorkspace(slug, 'ai:use');
   if (!['IMAGE_EDIT', 'IMAGE_VARIATION', 'VIDEO_GENERATE', 'VIDEO_ANIMATE', 'AUDIO_TTS'].includes(input.kind)) {
@@ -126,6 +126,9 @@ export async function createAiMediaJobAction(
     kind: input.kind,
     prompt,
     inputAssetIds: ids,
+    // Only ComfyUI is choosable here: it is the one source with its own edit
+    // and video workflows. Anything else keeps the deployment's provider.
+    provider: input.provider === 'comfyui' ? 'comfyui' : undefined,
   });
   revalidatePath(`/w/${slug}/studio`);
   return { id: job.id, kind: job.kind, status: job.status, provider: job.provider };
@@ -156,6 +159,9 @@ export async function retryAiMediaJobAction(slug: string, jobId: string, prompt?
     kind: previous.kind,
     prompt: prompt?.trim() || previous.prompt,
     inputAssetIds: previous.inputAssetIds,
+    // A ComfyUI job retried on the deployment's provider would be a different
+    // thing entirely, and possibly a billed one.
+    provider: previous.provider === 'comfyui' ? 'comfyui' : undefined,
   });
 }
 
@@ -201,11 +207,11 @@ export async function deleteGeneratedAssetAction(slug: string, assetId: string) 
 }
 
 /**
- * The studio picks between the API and the subscription; anything else means
- * no choice was made and the deployment's own setting stands. A client cannot
- * elect 'mock' here — a free result is a deployment mode, not a request
+ * The studio picks between the API, the subscription and ComfyUI; anything
+ * else means no choice was made and the deployment's own setting stands. A
+ * client cannot elect 'mock' here — a free result is a deployment mode, not a request
  * parameter, and honouring it would let the browser opt out of billing.
  */
 function imageSourceOf(value: unknown): ImageProviderName | undefined {
-  return value === 'openai' || value === 'image-use' ? value : undefined;
+  return value === 'openai' || value === 'image-use' || value === 'comfyui' ? value : undefined;
 }

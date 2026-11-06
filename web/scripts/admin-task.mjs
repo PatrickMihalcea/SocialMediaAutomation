@@ -560,7 +560,30 @@ async function repostStatus() {
   }
 }
 
-const tasks = { 'repost-now': repostNow, 'repost-status': repostStatus, 'repost-facebook-reels': repostFacebookReels, 'facebook-videos': facebookVideos, 'run-report': runReport, 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
+/**
+ * Calls off every Reel repost that has not gone out yet.
+ *
+ * Cancels the booked post, and unlinks the old video it was going to replace,
+ * so a cancelled booking can never cause an old video to be deleted later.
+ * Reels already published are left exactly as they are.
+ */
+async function cancelReposts() {
+  const pending = (await bookedReposts(name.trim() && name !== 'dark fantasy' ? name : ''))
+    .filter(({ reel }) => reel?.post && reel.status !== 'PUBLISHED' && reel.post.status !== 'PUBLISHED');
+  let cancelled = 0;
+  for (const { old, reel } of pending) {
+    await db.$transaction(async (tx) => {
+      await tx.post.update({ where: { id: reel.post.id }, data: { status: 'CANCELLED', scheduledAt: null } });
+      await tx.postPlatform.update({ where: { id: reel.id }, data: { status: 'CANCELLED' } });
+      const { replacedBy: _unlinked, ...rest } = old.responseMeta;
+      await tx.postPlatform.update({ where: { id: old.id }, data: { responseMeta: rest } });
+    });
+    cancelled += 1;
+  }
+  console.log(`cancelled ${cancelled} booked Reel(s); their old videos are unlinked and will not be touched`);
+}
+
+const tasks = { 'cancel-reposts': cancelReposts, 'repost-now': repostNow, 'repost-status': repostStatus, 'repost-facebook-reels': repostFacebookReels, 'facebook-videos': facebookVideos, 'run-report': runReport, 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
 
 const run = tasks[task];
 if (!run) {

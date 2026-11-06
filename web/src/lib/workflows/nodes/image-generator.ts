@@ -99,6 +99,10 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     const startedThisImage = Date.now();
     await record();
 
+    // Stage changes write a heartbeat, but a provider can sit on one stage for
+    // longer than the sweeper waits — a large ComfyUI render on a laptop with
+    // no step progress to report. Alive is alive, whatever it is saying.
+    const beat = setInterval(() => void ctx.heartbeat(), 60_000);
     const result = await generateImage({
       workspaceId: ctx.workspaceId,
       userId: ctx.userId,
@@ -112,7 +116,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
         // Not awaited: the generation must not wait on a status write.
         void record().catch(() => {});
       },
-    });
+    }).finally(() => clearInterval(beat));
 
     const extension = result.mimeType === 'image/svg+xml' ? 'svg' : 'png';
     const title = titles[index];

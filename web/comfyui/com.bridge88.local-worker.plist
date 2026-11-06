@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Starts the local worker at login and restarts it if it exits.
+  Replace /PATH/TO/web with this checkout's web/ directory and /PATH/TO/npm
+  with the output of `which npm`, then see comfyui/README.md.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.bridge88.local-worker</string>
+  <key>WorkingDirectory</key>
+  <string>/PATH/TO/web</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/PATH/TO/npm</string>
+    <string>run</string>
+    <string>worker:local</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd starts with a bare PATH; npm needs to find node beside it. -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/bridge88-local-worker.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/bridge88-local-worker.log</string>
+</dict>
+</plist>

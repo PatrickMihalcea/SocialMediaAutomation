@@ -1,0 +1,245 @@
+import { createServer, type IncomingMessage, type Server } from 'node:http';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { AddressInfo } from 'node:net';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('server-only', () => ({}));
+vi.mock('@/lib/env', () => ({
+  env: { COMFYUI_URL: '', COMFYUI_WORKFLOWS_DIR: '', COMFYUI_TIMEOUT_MS: 10_000 },
+}));
+
+import {
+  ComfyClient,
+  ComfyUiProvider,
+  fillTemplate,
+  loadTemplates,
+  outputFiles,
+  pickTemplate,
+  type ComfyTemplate,
+} from '@/lib/ai/providers/comfyui';
+import { AiError } from '@/lib/ai/types';
+import { env } from '@/lib/env';
+
+const PNG = Buffer.from('89504e470d0a1a0a', 'hex');
+const MP4 = Buffer.from('000000186674797069736f6d', 'hex');
+
+const template = (name: string, graph: Record<string, unknown>): ComfyTemplate => {
+  const text = JSON.stringify(graph);
+  const placeholders = new Set([...text.matchAll(/\{\{(\w+)\}\}/g)].map((match) => match[1]));
+  const roles = new Set((['subject', 'style', 'composition'] as const).filter((role) => placeholders.has(`${role}_image`)));
+  return { name, operation: name.split('-')[0] as ComfyTemplate['operation'], roles, placeholders, graph };
+};
+
+describe('picking a workflow file', () => {
+  const plain = template('txt2img', { '1': { inputs: { text: '{{prompt}}' } } });
+  const style = template('txt2img-style', { '1': { inputs: { image: '{{style_image}}' } } });
+  const both = template('txt2img-subject-style', { '1': { inputs: { a: '{{subject_image}}', b: '{{style_image}}' } } });
+  const all = [plain, style, both, template('img2vid', {})];
+
+  it('uses the plain file when no references are sent', () => {
+    expect(pickTemplate(all, 'txt2img', new Set()).name).toBe('txt2img');
+  });
+
+  it('uses the file that takes the most of the references on offer', () => {
+    expect(pickTemplate(all, 'txt2img', new Set(['style'])).name).toBe('txt2img-style');
+    expect(pickTemplate(all, 'txt2img', new Set(['style', 'subject'])).name).toBe('txt2img-subject-style');
+  });
+
+  it('never picks a file that wants a picture the call does not have', () => {
+    expect(pickTemplate(all, 'txt2img', new Set(['subject'])).name).toBe('txt2img');
+  });
+
+  it('names the file to create when the operation has none', () => {
+    expect(() => pickTemplate(all, 'edit', new Set())).toThrow(/save it as edit\.json/);
+  });
+});
+
+describe('filling a workflow in', () => {
+  it('turns a whole-value placeholder into the value itself, typed', () => {
+    const filled = fillTemplate(
+      template('txt2img', { '5': { inputs: { width: '{{width}}', text: 'a photo of {{prompt}}, sharp' } } }),
+      { width: 1024, prompt: 'a cat' },
+    );
+    expect(filled).toEqual({ '5': { inputs: { width: 1024, text: 'a photo of a cat, sharp' } } });
+  });
+
+  it('refuses a file asking for something the operation does not supply', () => {
+    expect(() => fillTemplate(template('txt2img', { '1': { inputs: { x: '{{frames}}' } } }), {}))
+      .toThrow(/\{\{frames\}\}/);
+  });
+});
+
+describe('loading workflow files', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'comfy-templates-'));
+  afterAll(() => rmSync(directory, { recursive: true, force: true }));
+
+  it('reads roles off the placeholders and ignores files for no known operation', async () => {
+    writeFileSync(join(directory, 'txt2img-style.json'), JSON.stringify({ '1': { inputs: { image: '{{style_image}}' } } }));
+    writeFileSync(join(directory, 'notes.json'), '{}');
+    const templates = await loadTemplates(directory);
+    expect(templates.map((t) => t.name)).toEqual(['txt2img-style']);
+    expect([...templates[0].roles]).toEqual(['style']);
+  });
+
+  it('says so when a file was saved in the editor format instead of the API one', async () => {
+    writeFileSync(join(directory, 'edit.json'), JSON.stringify({ nodes: [], links: [] }));
+    await expect(loadTemplates(directory)).rejects.toThrow(/Export \(API\)/);
+    rmSync(join(directory, 'edit.json'));
+  });
+});
+
+describe('reading what a prompt saved', () => {
+  it('collects files from any output key and puts previews last', () => {
+    const files = outputFiles({
+      outputs: {
+        '9': { images: [{ filename: 'preview.png', subfolder: '', type: 'temp' }] },
+        '12': { gifs: [{ filename: 'clip.mp4', subfolder: 'video', type: 'output' }] },
+      },
+    });
+    expect(files.map((file) => file.filename)).toEqual(['clip.mp4', 'preview.png']);
+  });
+});
+
+/**
+ * A stand-in ComfyUI on a real socket.
+ *
+ * The provider's contract is entirely the HTTP conversation — what it posts to
+ * /prompt, that it waits on /history, that it fetches the saved file through
+ * /view — so it is tested against a server rather than a mocked fetch.
+ */
+describe('ComfyUiProvider against a ComfyUI server', () => {
+  let server: Server;
+  let baseUrl = '';
+  const directory = mkdtempSync(join(tmpdir(), 'comfy-provider-'));
+  let posted: Record<string, unknown> | null = null;
+  let uploads = 0;
+  let mode: 'ok' | 'refuse' | 'fail' = 'ok';
+  let pollsBeforeDone = 0;
+
+  beforeAll(async () => {
+    writeFileSync(join(directory, 'txt2img.json'), JSON.stringify({
+      '3': { class_type: 'KSampler', inputs: { seed: '{{seed}}' } },
+      '5': { class_type: 'EmptyLatentImage', inputs: { width: '{{width}}', height: '{{height}}' } },
+      '6': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}' } },
+    }));
+    writeFileSync(join(directory, 'img2vid.json'), JSON.stringify({
+      '1': { class_type: 'LoadImage', inputs: { image: '{{image}}' } },
+      '2': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}' } },
+    }));
+    server = createServer(async (request, response) => {
+      const url = new URL(request.url ?? '/', 'http://x');
+      const send = (status: number, body: unknown) => {
+        response.writeHead(status, { 'content-type': 'application/json' });
+        response.end(JSON.stringify(body));
+      };
+      if (url.pathname === '/prompt') {
+        posted = JSON.parse(await body(request)) as Record<string, unknown>;
+        if (mode === 'refuse') {
+          return send(400, {
+            error: { message: 'Prompt outputs failed validation' },
+            node_errors: { '4': { class_type: 'CheckpointLoaderSimple', errors: [{ message: 'Value not in list', details: 'ckpt_name: flux.safetensors' }] } },
+          });
+        }
+        return send(200, { prompt_id: 'p1', number: 1 });
+      }
+      if (url.pathname === '/upload/image') {
+        uploads += 1;
+        await body(request);
+        return send(200, { name: 'still.png', subfolder: 'bridge88', type: 'input' });
+      }
+      if (url.pathname === '/history/p1') {
+        if (pollsBeforeDone-- > 0) return send(200, {});
+        if (mode === 'fail') {
+          return send(200, { p1: { outputs: {}, status: { status_str: 'error', completed: false, messages: [['execution_error', { node_type: 'KSampler', exception_message: 'MPS backend out of memory' }]] } } });
+        }
+        const video = (posted?.prompt as Record<string, unknown>)?.['1'] !== undefined;
+        return send(200, {
+          p1: {
+            outputs: { '9': video ? { gifs: [{ filename: 'clip.mp4', subfolder: '', type: 'output' }] } : { images: [{ filename: 'out.png', subfolder: '', type: 'output' }] } },
+            status: { status_str: 'success', completed: true, messages: [] },
+          },
+        });
+      }
+      if (url.pathname === '/queue') return send(200, { queue_running: [[1, 'p1']], queue_pending: [] });
+      if (url.pathname === '/view') {
+        response.writeHead(200);
+        return response.end(url.searchParams.get('filename') === 'clip.mp4' ? MP4 : PNG);
+      }
+      if (url.pathname === '/system_stats') return send(200, {});
+      send(404, {});
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    Object.assign(env, { COMFYUI_URL: baseUrl, COMFYUI_WORKFLOWS_DIR: directory });
+  });
+
+  afterAll(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    posted = null;
+    uploads = 0;
+    mode = 'ok';
+    pollsBeforeDone = 0;
+  });
+
+  it('fills the graph in, waits for history and returns the saved image', async () => {
+    pollsBeforeDone = 1;
+    const stages: string[] = [];
+    const result = await new ComfyUiProvider().generateImage({
+      prompt: 'a lighthouse at dusk',
+      size: '1024x1820',
+      onStage: (stage) => stages.push(stage),
+    });
+    const graph = posted?.prompt as Record<string, { inputs: Record<string, unknown> }>;
+    expect(graph['6'].inputs.text).toBe('a lighthouse at dusk');
+    // 1820 is off the latent grid; the nearest a model can make is 1824.
+    expect(graph['5'].inputs).toEqual({ width: 1024, height: 1824 });
+    expect(typeof graph['3'].inputs.seed).toBe('number');
+    expect(result).toMatchObject({ data: PNG, mimeType: 'image/png', model: 'comfyui:txt2img' });
+    expect(stages).toContain('rendering');
+  });
+
+  it('uploads the still and returns the clip for an animation', async () => {
+    const result = await new ComfyUiProvider().animateImage({ prompt: 'slow push in', image: PNG });
+    const graph = posted?.prompt as Record<string, { inputs: Record<string, unknown> }>;
+    expect(uploads).toBe(1);
+    expect(graph['1'].inputs.image).toBe('bridge88/still.png');
+    expect(result).toMatchObject({ data: MP4, mimeType: 'video/mp4', extension: 'mp4', model: 'comfyui:img2vid' });
+  });
+
+  it('passes on what ComfyUI said when it refuses the graph, and does not retry it', async () => {
+    mode = 'refuse';
+    const error = await new ComfyUiProvider().generateImage({ prompt: 'x' }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(AiError);
+    expect((error as AiError).message).toMatch(/CheckpointLoaderSimple: Value not in list ckpt_name: flux\.safetensors/);
+    expect((error as AiError).retryable).toBe(false);
+  });
+
+  it('retries a render that ran out of memory', async () => {
+    mode = 'fail';
+    const error = await new ComfyUiProvider().generateImage({ prompt: 'x' }).catch((caught: unknown) => caught);
+    expect((error as AiError).message).toMatch(/KSampler failed: MPS backend out of memory/);
+    expect((error as AiError).retryable).toBe(true);
+  });
+
+  it('treats a closed ComfyUI as something to wait out, not a broken job', async () => {
+    const client = new ComfyClient('http://127.0.0.1:1');
+    expect(await client.ping()).toBe(false);
+    const error = await client.queue({}, 'c').catch((caught: unknown) => caught);
+    expect((error as AiError).retryable).toBe(true);
+    expect((error as AiError).message).toMatch(/Is it running\?/);
+  });
+});
+
+function body(request: IncomingMessage): Promise<string> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+  });
+}

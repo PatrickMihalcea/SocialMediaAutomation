@@ -6,6 +6,7 @@ import { env } from '@/lib/env';
 import { OpenAiProvider } from '@/lib/ai/providers/openai';
 import { MockAiProvider } from '@/lib/ai/providers/mock';
 import { ImageUseProvider } from '@/lib/ai/providers/image-use';
+import { ComfyUiProvider } from '@/lib/ai/providers/comfyui';
 import { resolveImageProviderName, type ImageProviderName } from '@/lib/ai/provider-selection';
 import type { AiImageReference, AiImageResult, AiMessage, AiObjectResult, AiProvider } from '@/lib/ai/types';
 import type { ImageSize } from '@/lib/ai/image-sizes';
@@ -41,7 +42,9 @@ export function imageProvider(override?: ImageProviderName): AiProvider {
       ? new OpenAiProvider()
       : selected === 'image-use'
         ? new ImageUseProvider()
-        : new MockAiProvider();
+        : selected === 'comfyui'
+          ? new ComfyUiProvider()
+          : new MockAiProvider();
   imageProviderInstances.set(selected, created);
   return created;
 }
@@ -57,6 +60,9 @@ export function imageProvider(override?: ImageProviderName): AiProvider {
  */
 export function imageGenerationRunsInProcess(provider?: ImageProviderName): boolean {
   const selected = provider ?? resolveImageProviderName(env.AI_PROVIDER, env.AI_IMAGE_PROVIDER);
+  // Always queued, even where COMFYUI_URL is set: the local worker is the one
+  // consumer of that work, so there is one place to look when it stalls.
+  if (selected === 'comfyui') return false;
   return selected !== 'image-use' || new ImageUseProvider().isConfigured();
 }
 
@@ -160,6 +166,7 @@ export async function generateImage(input: {
       prompt: input.prompt,
       size: input.size,
       references: input.references,
+      onStage: input.onStage,
     });
     const generation = await recordGeneration({
       workspaceId: input.workspaceId,

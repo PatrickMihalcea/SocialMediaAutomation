@@ -4,7 +4,9 @@ import { AiMediaJobKind, JobStatus, MediaType } from '@prisma/client';
 import { db } from '@/lib/db';
 import { PermanentJobError } from '@/lib/queue/runner';
 import { imageProvider } from '@/lib/ai';
-import { resolveImageProviderName, type ImageProviderName } from '@/lib/ai/provider-selection';
+import { resolveImageProviderName, runsLocally, type ImageProviderName } from '@/lib/ai/provider-selection';
+import { ComfyUiProvider } from '@/lib/ai/providers/comfyui';
+import { LOCAL_QUEUE } from '@/lib/queue/types';
 import { mediaKey, storage } from '@/lib/storage';
 import {
   MockAudioProvider,
@@ -34,6 +36,12 @@ export function mediaProviderDescriptor(kind: AiMediaJobKind, override?: ImagePr
   // use it. An edit or a variation has to hand an existing image to a model
   // that accepts one, which is AI_PROVIDER's job — falling through to the mock
   // editor instead would quietly return something unrelated to the source.
+  // Everything but speech: ComfyUI has a workflow file for each, and the
+  // operator who chose it chose it for the edits and the video too.
+  if (selected === 'comfyui') {
+    if (kind.startsWith('AUDIO')) return { provider: 'mock', model: 'mock-audio-1' };
+    return { provider: 'comfyui', model: 'comfyui' };
+  }
   if (selected === 'image-use') {
     if (kind === 'IMAGE_GENERATE') return { provider: 'image-use', model: 'image-use' };
     const editable = env.AI_PROVIDER === 'openai';
@@ -69,6 +77,12 @@ export async function createAiMediaJob(input: {
    * made when it was queued rather than whatever the environment says later.
    */
   provider?: ImageProviderName;
+  /**
+   * The caller runs the job itself with runAiMediaJob, so nothing is queued.
+   * Queueing it as well let a second worker render the same clip at the same
+   * time — on a laptop GPU, half the speed for both.
+   */
+  inline?: boolean;
 }): Promise<{ id: string; kind: AiMediaJobKind; status: JobStatus; provider: string }> {
   const used = await currentMonthUsage(input.workspaceId, 'ai_generations');
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);
@@ -91,9 +105,11 @@ export async function createAiMediaJob(input: {
     // moment it is queued, not once the picture arrives.
     select: { id: true, kind: true, status: true, provider: true },
   });
+  if (input.inline) return job;
   await enqueue('ai-media-job', { aiMediaJobId: job.id }, {
     workspaceId: input.workspaceId,
     dedupeKey: `ai-media:${job.id}`,
+    ...(runsLocally(job.provider) ? { queue: LOCAL_QUEUE } : {}),
   });
   return job;
 }
@@ -233,8 +249,9 @@ async function produce(
 ): Promise<AiMediaResult> {
   const external = provider === 'openai';
   const image = inputs[0];
-  const editor = external ? new OpenAiImageEditingProvider() : new MockImageEditingProvider();
-  const video = external ? new OpenAiVideoGenerationProvider() : new MockVideoGenerationProvider();
+  const local = provider === 'comfyui' ? new ComfyUiProvider() : null;
+  const editor = local ?? (external ? new OpenAiImageEditingProvider() : new MockImageEditingProvider());
+  const video = local ?? (external ? new OpenAiVideoGenerationProvider() : new MockVideoGenerationProvider());
   const audio = external ? new OpenAiAudioProvider() : new MockAudioProvider();
   if (kind === 'IMAGE_GENERATE') {
     const result = await imageProvider(imageProviderName(provider)).generateImage({ prompt, size });
@@ -246,7 +263,7 @@ async function produce(
       ...result,
       width: probed?.width,
       height: probed?.height,
-      extension: result.mimeType === 'image/svg+xml' ? 'svg' : 'png',
+      extension: IMAGE_EXTENSIONS[result.mimeType] ?? 'png',
     };
   }
   if (kind === 'IMAGE_EDIT') return editor.editImage({ prompt, ...requiredInput(image, kind) });
@@ -297,9 +314,15 @@ function requestedSize(metadata: unknown): ImageSize | undefined {
     : undefined;
 }
 
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  'image/svg+xml': 'svg',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+};
+
 /** A stored provider string, narrowed back to a name the factory understands. */
 function imageProviderName(provider: string): ImageProviderName | undefined {
-  return provider === 'openai' || provider === 'mock' || provider === 'image-use'
+  return provider === 'openai' || provider === 'mock' || provider === 'image-use' || provider === 'comfyui'
     ? provider
     : undefined;
 }

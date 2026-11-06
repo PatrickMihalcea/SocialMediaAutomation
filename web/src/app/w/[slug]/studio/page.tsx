@@ -3,6 +3,7 @@ import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { storage } from '@/lib/storage';
 import { env } from '@/lib/env';
+import { describeLocalWorker, localWorkerStatus } from '@/lib/queue/local-worker';
 
 export const metadata = { title: 'AI studio' };
 
@@ -88,6 +89,7 @@ export default async function StudioPage({
           startedAt: job.startedAt?.toISOString() ?? null,
         }))}
         initialSourceAssetId={validatedSource}
+        localWorker={describeLocalWorker(await localWorkerStatus())}
         simulated={env.AI_PROVIDER !== 'openai'}
       />
     </>

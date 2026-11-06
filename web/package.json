@@ -27,6 +27,7 @@
     "worker:bg": "node scripts/serve.mjs worker",
     "doctor": "node --env-file=.env scripts/doctor.mjs",
     "doctor:production": "node --env-file=.env scripts/doctor.mjs --production",
+    "worker:local": "NODE_OPTIONS=--conditions=react-server node --env-file-if-exists=.env --env-file-if-exists=.env.local-worker --import tsx src/worker/local.ts",
     "worker:once": "NODE_OPTIONS=--conditions=react-server node --env-file=.env --import tsx src/worker/run-once.ts",
     "migrate:storage": "node --env-file=.env scripts/migrate-storage.mjs",
     "worker:container": "NODE_OPTIONS=--conditions=react-server node --import tsx src/worker/index.ts"

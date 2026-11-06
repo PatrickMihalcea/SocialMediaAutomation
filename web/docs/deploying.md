@@ -8,6 +8,7 @@ One URL that never changes again. No tunnel, no laptop, no card.
 | Database | Neon | Free Postgres, no card |
 | Media | Cloudflare R2 | Already set up and working |
 | Worker (ffmpeg, librosa, all jobs) | GitHub Actions | Nothing stays running, so nothing accrues |
+| Local worker (ComfyUI jobs only, optional) | Your Mac | The GPU and the models live there; see `comfyui/README.md` |
 
 The web app **enqueues** jobs and never runs them: `QUEUE_IN_WEB_SERVER`
 defaults to false, so a serverless function never tries to render a video. The

@@ -71,15 +71,18 @@ function ActionLabel({ idle, busy, isBusy }: { idle: string; busy: string; isBus
 const IMAGE_SOURCES: Array<{ value: ImageProviderName; label: string }> = [
   { value: 'image-use', label: 'Codex — ChatGPT subscription, queued' },
   { value: 'openai', label: 'API — instant, billed per image' },
+  { value: 'comfyui', label: 'ComfyUI — your Mac, queued' },
   { value: 'mock', label: 'Mock — free placeholder, instant' },
 ];
 
-export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetId, simulated }: {
+export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetId, simulated, localWorker }: {
   slug: string;
   initialAssets: Asset[];
   initialJobs: Job[];
   initialSourceAssetId?: string;
   simulated: boolean;
+  /** Whether the Mac that runs ComfyUI is there; shown only once ComfyUI is picked. */
+  localWorker: { tone: 'success' | 'error'; text: string };
 }) {
   const router = useRouter();
   const [prompt, setPrompt] = useState('A clean editorial workspace for planning social content');
@@ -211,6 +214,9 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
         kind,
         prompt,
         inputAssetIds: needsInput && selected ? [selected] : [],
+        // ComfyUI has its own video and variation workflows, so picking it
+        // moves those too. The other sources have none and keep the default.
+        provider: source === 'comfyui' ? 'comfyui' : undefined,
       });
       localJobIds.current.add(job.id);
       setJobs((current) => [{
@@ -305,13 +311,18 @@ export function AiStudio({ slug, initialAssets, initialJobs, initialSourceAssetI
             onChange={(value) => {
               const chosen = value as ImageProviderName;
               setSource(chosen);
-              // 9:16 exists only on Codex, so leaving it selected while
+              // 9:16 exists only on Codex and ComfyUI, so leaving it selected while
               // switching to the API would send a shape it refuses.
               const nextSize = imageSizeAvailableFor(size, chosen) ? size : DEFAULT_IMAGE_SIZE;
               setSize(nextSize);
               writeStudioPrefs(slug, { source: chosen, size: nextSize });
             }}
           />
+          {source === 'comfyui' && (
+            <StatusMessage tone={localWorker.tone} className="mt-3">
+              {localWorker.text} Video and variations from here also run on ComfyUI.
+            </StatusMessage>
+          )}
           <Dropdown
             label="Image shape"
             containerClassName="mt-5"

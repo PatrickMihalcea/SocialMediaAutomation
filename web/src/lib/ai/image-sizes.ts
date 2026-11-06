@@ -9,7 +9,7 @@ import type { ImageProviderName } from '@/lib/ai/provider-selection';
  * backend honours a requested ratio instead — asking for 9:16 returned
  * 941x1672, measured — which is an exact vertical frame and no crop at all.
  *
- * `requires` names the provider a size needs; null means every provider has it.
+ * `requires` names the providers a size needs; null means every provider has it.
  * The pixel count is a request either way — the subscription backend normalises
  * it (1024x1024 came back 1254x1254) while keeping the ratio — so `cropsInto`
  * describes the shape, not the resolution.
@@ -45,8 +45,11 @@ export const IMAGE_SIZE_PRESETS = [
     label: 'Vertical 9:16 · 1024×1820',
     suits: 'vertical video (9:16)',
     cropsInto: 0,
-    /** Only the subscription backend renders a true 9:16; the API has no such size. */
-    requires: 'image-use',
+    /**
+     * The API has no such size. The subscription backend honours the ratio,
+     * and ComfyUI renders whatever dimensions its workflow is handed.
+     */
+    requires: ['image-use', 'comfyui'],
   },
 ] as const;
 
@@ -104,7 +107,7 @@ export function imageSizeAvailableFor(size: string, provider?: ImageProviderName
   // exists to exercise — a vertical video workflow could not be run at all
   // without switching to a provider that charges for it.
   if (provider === 'mock') return true;
-  return preset.requires === provider;
+  return (preset.requires as readonly string[]).includes(provider);
 }
 
 export function imageSizesFor(provider?: ImageProviderName): ImageSize[] {

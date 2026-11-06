@@ -223,7 +223,7 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
     size: {
       label: 'Image shape',
-      description: 'The OpenAI API offers 2:3, 3:2 and 1:1 only, so a vertical frame has to be cropped out of 2:3. Codex adds a true 9:16 that needs no crop at all — it appears here once this step is set to generate with Codex.',
+      description: 'The OpenAI API offers 2:3, 3:2 and 1:1 only, so a vertical frame has to be cropped out of 2:3. Codex and ComfyUI add a true 9:16 that needs no crop at all — it appears here once this step is set to generate with either.',
     },
     maxImages: {
       label: 'Maximum images',
@@ -231,10 +231,11 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
     provider: {
       label: 'Generate with',
-      description: 'Codex uses your ChatGPT subscription — no per-image bill, a minute or so, and the only one that renders a true 9:16. API bills your OpenAI key per image and returns in seconds. Mock costs nothing and returns instantly, for testing the workflow.',
+      description: 'Codex uses your ChatGPT subscription — no per-image bill, a minute or so. API bills your OpenAI key per image and returns in seconds. ComfyUI renders on your own Mac with whatever models its workflow files use; the step waits while the Mac or its local worker is off. Mock costs nothing and returns instantly, for testing the workflow. Codex and ComfyUI both render a true 9:16.',
       optionLabels: {
         'image-use': 'Codex — ChatGPT subscription',
         openai: 'API — billed per image',
+        comfyui: 'ComfyUI — your Mac, queued',
         mock: 'Mock — free placeholder',
       },
     },
@@ -253,6 +254,14 @@ export const WORKFLOW_FIELD_HELP: Partial<
     maxClips: {
       label: 'Maximum clips',
       description: 'A cost guard. Extra incoming images are ignored after this number.',
+    },
+    provider: {
+      label: 'Animate with',
+      description: 'ComfyUI renders each clip on your own Mac with its img2vid workflow — expect minutes per clip, and the step waits while the Mac or its local worker is off.',
+      optionLabels: {
+        default: 'Configured video provider',
+        comfyui: 'ComfyUI — your Mac, queued',
+      },
     },
     useMockGeneration: {
       label: 'Use mock generation',

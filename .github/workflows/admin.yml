@@ -25,6 +25,7 @@ on:
           - repost-facebook-reels
           - repost-now
           - repost-status
+          - cancel-reposts
       name:
         description: 'Existing workflow to read'
         required: false

@@ -398,9 +398,10 @@ export const NODE_DEFINITIONS = {
        * regardless of what the deployment is configured for: mock is free, the
        * API bills per image, and codex spends a ChatGPT subscription and is the
        * only one that renders a true 9:16. Codex is the default because it is
-       * the one that costs nothing per image.
+       * the one that costs nothing per image. ComfyUI renders on the
+       * operator's own Mac, so a step set to it waits for that machine.
        */
-      provider: z.enum(['mock', 'openai', 'image-use']).default('image-use'),
+      provider: z.enum(['mock', 'openai', 'image-use', 'comfyui']).default('image-use'),
       /** Superseded by `provider`; kept so steps saved before it keep mocking. */
       useMockGeneration: z.boolean().default(false),
     }),
@@ -418,6 +419,11 @@ export const NODE_DEFINITIONS = {
     configSchema: z.object({
       prompt: z.string().max(1000).default('Slow cinematic push in, subject stays centred.'),
       maxClips: z.number().int().min(1).max(12).default(8),
+      /**
+       * The deployment's video provider, or ComfyUI on the operator's Mac.
+       * Mock stays the flag below, which wins over this when set.
+       */
+      provider: z.enum(['default', 'comfyui']).default('default'),
       /** Produces deterministic local clips instead of calling a video model. */
       useMockGeneration: z.boolean().default(false),
     }),

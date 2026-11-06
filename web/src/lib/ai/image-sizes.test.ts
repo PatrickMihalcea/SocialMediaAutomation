@@ -25,6 +25,7 @@ describe('image size presets', () => {
    */
   it('offers a true vertical frame only where a provider can render one', () => {
     expect(imageSizesFor('image-use')).toContain('1024x1820');
+    expect(imageSizesFor('comfyui')).toContain('1024x1820');
     expect(imageSizesFor('openai')).not.toContain('1024x1820');
     expect(imageSizeAvailableFor('1024x1820', 'openai')).toBe(false);
     // Nothing chosen yet — the browser cannot know the deployment's provider,
