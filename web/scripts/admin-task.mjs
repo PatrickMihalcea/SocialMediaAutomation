@@ -312,7 +312,41 @@ async function runReport() {
   }
 }
 
-const tasks = { 'run-report': runReport, 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
+/**
+ * Every video already published to Facebook, and whether it went out as a
+ * Reel. Read-only: answers "how many would need reposting" before anyone
+ * decides to repost them.
+ */
+async function facebookVideos() {
+  const rows = await db.postPlatform.findMany({
+    where: { platform: 'FACEBOOK', status: 'PUBLISHED' },
+    orderBy: { publishedAt: 'asc' },
+    select: {
+      publishedAt: true,
+      platformPostId: true,
+      platformUrl: true,
+      socialAccount: { select: { accountName: true } },
+      media: { select: { mediaAsset: { select: { type: true, width: true, height: true, duration: true } } } },
+    },
+  });
+  const videos = rows.filter((r) => r.media.some((m) => m.mediaAsset?.type === 'VIDEO'));
+  const reels = videos.filter((r) => (r.platformUrl ?? '').includes('/reel/'));
+  console.log(`published to Facebook: ${rows.length}   with a video: ${videos.length}   already Reels: ${reels.length}\n`);
+  const byPage = {};
+  for (const r of videos) {
+    const page = r.socialAccount?.accountName ?? '?';
+    byPage[page] = (byPage[page] ?? 0) + 1;
+  }
+  for (const [page, n] of Object.entries(byPage)) console.log(`  ${page}: ${n}`);
+  console.log('');
+  for (const r of videos) {
+    const v = r.media.find((m) => m.mediaAsset?.type === 'VIDEO')?.mediaAsset;
+    const shape = v ? `${v.width ?? '?'}x${v.height ?? '?'} ${v.duration != null ? `${Math.round(v.duration)}s` : '?s'}` : '';
+    console.log(`  ${r.publishedAt?.toISOString().slice(0, 16) ?? '—'}  ${(r.platformUrl ?? '').includes('/reel/') ? 'REEL ' : 'VIDEO'}  ${shape.padEnd(16)} ${r.socialAccount?.accountName ?? ''}`);
+  }
+}
+
+const tasks = { 'facebook-videos': facebookVideos, 'run-report': runReport, 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
 
 const run = tasks[task];
 if (!run) {

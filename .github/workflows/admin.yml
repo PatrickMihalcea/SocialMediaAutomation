@@ -21,6 +21,7 @@ on:
           - create-story-workflow
           - model-report
           - run-report
+          - facebook-videos
       name:
         description: 'Existing workflow to read'
         required: false
