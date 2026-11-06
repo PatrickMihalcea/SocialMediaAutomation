@@ -499,14 +499,16 @@ async function repostFacebookReels() {
 
 /** The booked Reel reposts and the old rows they replace, for one Page or all. */
 async function bookedReposts(pageFilter) {
-  const olds = await db.postPlatform.findMany({
+  // Filtered here rather than with a JSON path query: "the key is present"
+  // is easy to get subtly wrong in Prisma's JSON filters, and this is a few
+  // hundred rows at most.
+  const olds = (await db.postPlatform.findMany({
     where: {
       platform: 'FACEBOOK',
-      responseMeta: { path: ['replacedBy'], not: null },
       ...(pageFilter ? { socialAccount: { accountName: { contains: pageFilter, mode: 'insensitive' } } } : {}),
     },
     select: { id: true, responseMeta: true, platformUrl: true, socialAccount: { select: { accountName: true } } },
-  });
+  })).filter((row) => typeof row.responseMeta?.replacedBy === 'string');
   const reels = new Map((await db.postPlatform.findMany({
     where: { id: { in: olds.map((o) => o.responseMeta.replacedBy) } },
     select: { id: true, status: true, platformUrl: true, errorMessage: true, post: { select: { id: true, status: true, scheduledAt: true } } },
