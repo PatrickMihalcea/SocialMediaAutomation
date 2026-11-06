@@ -3,6 +3,7 @@ import { env } from '@/lib/env';
 import { db } from '@/lib/db';
 import { runJob } from '@/lib/queue/runner';
 import { scanDueWorkflows } from '@/lib/workflows/schedule';
+import { scanDuePosts } from '@/lib/publishing/engine';
 import { isWakeConfigured, wakeWorkerIfIdle } from '@/lib/queue/wake-remote-worker';
 import { reclaimStaleJobs } from '@/lib/queue/store';
 import { sweepWorkflowRuns } from '@/lib/workflows/engine';
@@ -29,6 +30,11 @@ export async function GET(request: Request) {
   // run enqueues its first step, and enqueueing wakes the remote worker, so
   // the work begins on a machine built for it within seconds of this call.
   const started = await scanDueWorkflows();
+  // Posts scheduled for a time, as opposed to ones a workflow publishes on the
+  // spot. These were only ever picked up when a worker pass happened to start,
+  // or by a separate endpoint nothing was calling — so a post booked for 3pm
+  // went out whenever some unrelated workflow next woke a worker.
+  const posts = await scanDuePosts();
   const swept = await sweepWorkflowRuns();
   // A worker that died mid-job leaves its rows RUNNING with nobody behind
   // them. The worker reclaims these at the start of a pass — which is no help
@@ -68,7 +74,7 @@ export async function GET(request: Request) {
     ? await drainAFew()
     : 0;
 
-  return NextResponse.json({ ...started, ...swept, reclaimed, woke, drained });
+  return NextResponse.json({ ...started, postsQueued: posts.queued, ...swept, reclaimed, woke, drained });
 }
 
 /**
@@ -77,22 +83,27 @@ export async function GET(request: Request) {
  */
 const PREWARM_MS = 2 * 60 * 1000;
 
-/** Scheduled runs whose slot is about to arrive. */
+/** Scheduled runs and scheduled posts whose time is about to arrive. */
 async function dueSoonCount(): Promise<number> {
-  return db.workflow.count({
-    where: {
-      enabled: true,
-      archivedAt: null,
-      scheduleEnabled: true,
-      nextRunAt: { lte: new Date(Date.now() + PREWARM_MS) },
-    },
-  });
+  const soon = new Date(Date.now() + PREWARM_MS);
+  const [workflows, posts] = await Promise.all([
+    db.workflow.count({
+      where: { enabled: true, archivedAt: null, scheduleEnabled: true, nextRunAt: { lte: soon } },
+    }),
+    db.post.count({
+      where: { status: 'SCHEDULED', scheduledAt: { lte: soon }, workspace: { queuePaused: false } },
+    }),
+  ]);
+  return workflows + posts;
 }
 
-/** Work that is due and has nobody doing it. */
+/**
+ * Work that is due and has nobody doing it, on every queue. This counted only
+ * workflow jobs, so a publish job whose wake-up was lost was never recovered.
+ */
 async function queuedJobCount(): Promise<number> {
   return db.job.count({
-    where: { queue: 'WORKFLOW', status: 'QUEUED', runAt: { lte: new Date() } },
+    where: { status: 'QUEUED', runAt: { lte: new Date() } },
   });
 }
 
