@@ -52,6 +52,10 @@ on:
         description: 'repost-now: how many booked Reels to move to now (Page goes in name)'
         required: false
         default: '5'
+      intervalMin:
+        description: 'repost-facebook-reels: minutes between Reels, round the clock (0 = day slots)'
+        required: false
+        default: '0'
 
 jobs:
   admin:
@@ -83,5 +87,6 @@ jobs:
           REPOST_MODE: ${{ inputs.mode }}
           REPOST_PER_DAY: ${{ inputs.perDay }}
           REPOST_COUNT: ${{ inputs.count }}
+          REPOST_INTERVAL_MIN: ${{ inputs.intervalMin }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}

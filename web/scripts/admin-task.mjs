@@ -422,7 +422,12 @@ async function repostFacebookReels() {
   const perDay = perPagePerDay * Math.max(1, byPage.size);
   const gap = (12 * 60) / perDay;
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(new Date()).split('-').map(Number);
+  // A fixed gap from now, round the clock, when one is asked for: the day
+  // slots below exist for a rollout spread over weeks, not one over days.
+  const intervalMin = Number(process.env.REPOST_INTERVAL_MIN) || 0;
+  const startAt = Date.now() + 2 * 60 * 1000;
   const slotFor = (index) => {
+    if (intervalMin > 0) return new Date(startAt + index * intervalMin * 60 * 1000);
     const day = Math.floor(index / perDay) + 1;
     const minutes = 9 * 60 + 20 + Math.round((index % perDay) * gap);
     const date = new Date(Date.UTC(today[0], today[1] - 1, today[2] + day));
@@ -434,11 +439,16 @@ async function repostFacebookReels() {
   console.log(`zone: ${zone}`);
   console.log(`to repost: ${order.length}   left alone: ${skipped} (already Reels, already booked, or not Reel-shaped)`);
   for (const [, list] of byPage) console.log(`  ${list[0]?.socialAccount?.accountName ?? '?'}: ${list.length}`);
-  console.log(`pace: ${perPagePerDay} per Page per day = ${perDay} a day across ${byPage.size} Page(s)`);
+  console.log(intervalMin > 0
+    ? `pace: one every ${intervalMin} min, round the clock`
+    : `pace: ${perPagePerDay} per Page per day = ${perDay} a day across ${byPage.size} Page(s)`);
   if (order.length) {
-    console.log(`first: ${fmt(slotFor(0))}   last: ${fmt(slotFor(order.length - 1))}   (${Math.ceil(order.length / perDay)} days)`);
-    console.log('\nfirst day:');
-    for (let i = 0; i < Math.min(perDay, order.length); i++) {
+    const days = intervalMin > 0
+      ? ((order.length - 1) * intervalMin / 1440).toFixed(1)
+      : String(Math.ceil(order.length / perDay));
+    console.log(`first: ${fmt(slotFor(0))}   last: ${fmt(slotFor(order.length - 1))}   (${days} days)`);
+    console.log('\nfirst few:');
+    for (let i = 0; i < Math.min(intervalMin > 0 ? 6 : perDay, order.length); i++) {
       console.log(`  ${fmt(slotFor(i)).padEnd(18)} ${order[i].socialAccount?.accountName ?? ''}   (originally ${order[i].publishedAt?.toISOString().slice(0, 10)})`);
     }
   }
