@@ -593,7 +593,26 @@ async function cancelReposts() {
   console.log(`cancelled ${cancelled} booked Reel(s); their old videos are unlinked and will not be touched`);
 }
 
-const tasks = { 'cancel-reposts': cancelReposts, 'repost-now': repostNow, 'repost-status': repostStatus, 'repost-facebook-reels': repostFacebookReels, 'facebook-videos': facebookVideos, 'run-report': runReport, 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
+/**
+ * Every connected Facebook and Instagram account, and for Instagram the
+ * Facebook Page it is linked to. Meta only lets an Instagram professional
+ * account be reached through the Page it is linked to, so this is the record
+ * of which Page owns which Instagram account. Read-only; no tokens printed.
+ */
+async function accountsReport() {
+  const rows = await db.socialAccount.findMany({
+    where: { platform: { in: ['FACEBOOK', 'INSTAGRAM'] } },
+    orderBy: [{ platform: 'asc' }, { accountName: 'asc' }],
+    select: { platform: true, accountName: true, accountHandle: true, externalAccountId: true, status: true, metadata: true, createdAt: true },
+  });
+  for (const r of rows) {
+    const meta = r.metadata ?? {};
+    const linked = r.platform === 'INSTAGRAM' ? `   linked to Page: ${meta.pageName ?? '?'} (${meta.pageId ?? '?'})` : `   page id ${r.externalAccountId}`;
+    console.log(`${r.platform.padEnd(9)} ${String(r.accountName ?? '').padEnd(22)} ${String(r.accountHandle ?? '').padEnd(22)} ${String(r.status ?? '').padEnd(10)} connected ${r.createdAt.toISOString().slice(0, 10)}${linked}`);
+  }
+}
+
+const tasks = { 'accounts-report': accountsReport, 'cancel-reposts': cancelReposts, 'repost-now': repostNow, 'repost-status': repostStatus, 'repost-facebook-reels': repostFacebookReels, 'facebook-videos': facebookVideos, 'run-report': runReport, 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
 
 const run = tasks[task];
 if (!run) {
