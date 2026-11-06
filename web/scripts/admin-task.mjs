@@ -409,7 +409,7 @@ async function repostFacebookReels() {
     if (!byPage.has(r.socialAccountId)) byPage.set(r.socialAccountId, []);
     byPage.get(r.socialAccountId).push(r);
   }
-  const queues = [...byPage.values()];
+  const queues = [...byPage.values()].map((list) => [...list]);
   const order = [];
   while (queues.some((q) => q.length)) for (const q of queues) if (q.length) order.push(q.shift());
 
@@ -433,7 +433,7 @@ async function repostFacebookReels() {
   console.log(`mode: ${mode.toUpperCase()}${mode === 'plan' ? ' (nothing is written)' : ''}`);
   console.log(`zone: ${zone}`);
   console.log(`to repost: ${order.length}   left alone: ${skipped} (already Reels, already booked, or not Reel-shaped)`);
-  for (const [, list] of byPage) console.log(`  ${list[0]?.socialAccount?.accountName ?? '?'}: ${list.length + 0}`);
+  for (const [, list] of byPage) console.log(`  ${list[0]?.socialAccount?.accountName ?? '?'}: ${list.length}`);
   console.log(`pace: ${perPagePerDay} per Page per day = ${perDay} a day across ${byPage.size} Page(s)`);
   if (order.length) {
     console.log(`first: ${fmt(slotFor(0))}   last: ${fmt(slotFor(order.length - 1))}   (${Math.ceil(order.length / perDay)} days)`);
