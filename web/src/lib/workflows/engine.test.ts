@@ -66,7 +66,7 @@ vi.mock('@/lib/queue', () => ({ enqueue: mocks.enqueue }));
 vi.mock('@/lib/workflows/executors', () => ({ getExecutor: mocks.getExecutor }));
 vi.mock('@/lib/audit', () => ({ audit: mocks.audit }));
 
-import { cancelWorkflowRun, retryWorkflowNode, runWorkflowNode, startWorkflowRun, unsweptProgress } from '@/lib/workflows/engine';
+import { cancelWorkflowRun, retryWorkflowNode, runWorkflowNode, startWorkflowRun, unsweptProgress, withoutStrandedSteps } from '@/lib/workflows/engine';
 
 describe('startWorkflowRun', () => {
   it('blocks runs when a publish step has no channels selected', async () => {
@@ -496,5 +496,75 @@ describe('unsweptProgress', () => {
   it('refuses one to a step that has never produced anything', () => {
     expect(unsweptProgress({ _progress: { done: 0, total: 7 } })).toBe(0);
     expect(unsweptProgress({ _progress: { done: 0, total: 7 }, _swept: { done: 0 } })).toBeNull();
+  });
+});
+
+/**
+ * Unplugging a step but leaving it on the canvas is how a workflow gets tried
+ * without it. That refused the whole run, and the reason was hidden behind a
+ * generic production error, so all anyone saw was a crash.
+ */
+describe('withoutStrandedSteps', () => {
+  const node = (id: string, type: string) => ({ id, type, name: id, config: {}, version: 1, positionX: 0, positionY: 0 });
+  const edge = (source: string, sourcePort: string, target: string, targetPort: string) => ({
+    id: `${source}-${target}-${targetPort}`, sourceNodeId: source, sourcePort, targetNodeId: target, targetPort,
+  });
+  const snapshot = (nodes: ReturnType<typeof node>[], edges: ReturnType<typeof edge>[]) =>
+    ({ version: 1 as const, nodes, edges }) as unknown as Parameters<typeof withoutStrandedSteps>[0];
+
+  it('leaves out an overlay that was unplugged and parked', () => {
+    const graph = snapshot(
+      [node('combine', 'COMBINE_MEDIA'), node('overlay', 'TEXT_OVERLAY'), node('publish', 'PUBLISH')],
+      [edge('combine', 'media', 'publish', 'video')],
+    );
+
+    const result = withoutStrandedSteps(graph);
+
+    expect(result.nodes.map((n) => n.id)).toEqual(['combine', 'publish']);
+    expect(result.edges).toHaveLength(1);
+  });
+
+  /** Its output still feeds something, so the run cannot work without it. */
+  it('keeps a step missing its input when something downstream needs it', () => {
+    const graph = snapshot(
+      [node('overlay', 'TEXT_OVERLAY'), node('publish', 'PUBLISH')],
+      [edge('overlay', 'video', 'publish', 'video')],
+    );
+
+    expect(withoutStrandedSteps(graph).nodes.map((n) => n.id)).toEqual(['overlay', 'publish']);
+  });
+
+  /** Being last in the chain is normal; only a step that cannot run is left out. */
+  it('keeps a complete step that nothing comes after', () => {
+    const graph = snapshot(
+      [node('combine', 'COMBINE_MEDIA'), node('publish', 'PUBLISH')],
+      [edge('combine', 'media', 'publish', 'video')],
+    );
+
+    expect(withoutStrandedSteps(graph)).toBe(graph);
+  });
+
+  it('drops the parked step\'s remaining wires along with it', () => {
+    const graph = snapshot(
+      [node('ideas', 'IDEA_GENERATOR'), node('overlay', 'TEXT_OVERLAY')],
+      [edge('ideas', 'titles', 'overlay', 'titles')],
+    );
+
+    const result = withoutStrandedSteps(graph);
+
+    expect(result.nodes.map((n) => n.id)).toEqual(['ideas']);
+    expect(result.edges).toHaveLength(0);
+  });
+
+  /** A Publish that silently vanished would let a run succeed having posted nothing. */
+  it('never leaves out a step that publishes, even unplugged', () => {
+    const graph = snapshot(
+      [node('combine', 'COMBINE_MEDIA'), node('publish', 'PUBLISH'), node('draft', 'CREATE_DRAFT')],
+      [],
+    );
+
+    const kept = withoutStrandedSteps(graph).nodes.map((n) => n.id);
+    expect(kept).toContain('publish');
+    expect(kept).toContain('draft');
   });
 });

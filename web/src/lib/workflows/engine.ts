@@ -66,7 +66,10 @@ export async function startWorkflowRun(input: {
     throw invalid('This workflow has no steps yet. Add at least one before running it.');
   }
 
-  const snapshot = buildSnapshot(workflow.nodes, workflow.edges);
+  const snapshot = withoutStrandedSteps(buildSnapshot(workflow.nodes, workflow.edges));
+  if (snapshot.nodes.length === 0) {
+    throw invalid('Every step in this workflow is disconnected, so there is nothing to run.');
+  }
   const graph = toGraph(snapshot);
   assertAcyclic(graph);
   assertRunnable(snapshot);
@@ -125,6 +128,48 @@ export async function startWorkflowRun(input: {
   for (const root of roots) await claimAndEnqueue(root);
 
   return run.id;
+}
+
+/**
+ * The workflow minus steps that cannot run and that nothing needs.
+ *
+ * Unplugging a step but leaving it on the canvas is how people try a workflow
+ * without it — run a video once without its text overlay, keep the overlay to
+ * plug back in later. That used to refuse the whole run, because the parked
+ * step was missing its input. A step missing a required input with nothing
+ * downstream of it cannot affect anything the run produces, so it is simply
+ * not part of the run.
+ *
+ * Deliberately narrow. A step whose output still feeds something is left in,
+ * and the check below refuses the run with its reason, because then the run
+ * genuinely cannot work without it. A complete step with nothing downstream —
+ * a Publish at the end of a chain — is left in too: being last is normal. And
+ * a publish or draft step is never left out, however it is wired.
+ */
+export function withoutStrandedSteps(snapshot: WorkflowSnapshot): WorkflowSnapshot {
+  const connected = new Set(snapshot.edges.map((e) => `${e.targetNodeId}:${e.targetPort}`));
+  const feedsSomething = new Set(snapshot.edges.map((e) => e.sourceNodeId));
+
+  const stranded = new Set(snapshot.nodes
+    .filter((node) => {
+      if (feedsSomething.has(node.id)) return false;
+      const definition = getDefinition(node.type);
+      if (!definition) return false;
+      // Never a step that posts or saves. Its whole effect is outside the
+      // graph, so leaving it out would let a run "succeed" having published
+      // nothing — an accidentally unplugged Publish has to stop the run, with
+      // its reason, not quietly vanish from it.
+      if (definition.category === 'publish') return false;
+      return definition.inputs.some((port) => port.required && !connected.has(`${node.id}:${port.id}`));
+    })
+    .map((node) => node.id));
+  if (stranded.size === 0) return snapshot;
+
+  return {
+    ...snapshot,
+    nodes: snapshot.nodes.filter((node) => !stranded.has(node.id)),
+    edges: snapshot.edges.filter((e) => !stranded.has(e.sourceNodeId) && !stranded.has(e.targetNodeId)),
+  };
 }
 
 /** Every required input port must be connected before a run is worth starting. */

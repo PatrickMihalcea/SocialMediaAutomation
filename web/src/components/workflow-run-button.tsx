@@ -27,8 +27,12 @@ export function RunWorkflowButton({
           startTransition(async () => {
             setError('');
             try {
-              const { runId } = await runWorkflowAction(slug, workflowId);
-              router.push(`/w/${slug}/workflows/${workflowId}/runs/${runId}`);
+              const result = await runWorkflowAction(slug, workflowId);
+              if ('error' in result) {
+                setError(result.error);
+                return;
+              }
+              router.push(`/w/${slug}/workflows/${workflowId}/runs/${result.runId}`);
             } catch (cause) {
               setError(cause instanceof Error ? cause.message : 'That workflow could not start.');
             }

@@ -7,7 +7,7 @@ import { Prisma, WorkflowRunTrigger } from '@prisma/client';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
 import { audit } from '@/lib/audit';
-import { conflict, invalid, notFound } from '@/lib/errors';
+import { conflict, invalid, notFound, toAppError } from '@/lib/errors';
 import {
   getDefinition,
   getNodePorts,
@@ -695,16 +695,34 @@ export async function disconnectAction(slug: string, edgeId: string) {
 
 // ---------------------------------------------------------------- runs
 
-export async function runWorkflowAction(slug: string, workflowId: string) {
+/**
+ * Starts a run, or says why it cannot.
+ *
+ * The reason is returned rather than thrown. A production build replaces the
+ * message of any error thrown from a server action with a generic one, so a
+ * perfectly plain "this step needs something connected to its Video input"
+ * reached the person as "An error occurred in the Server Components render".
+ * Anything unexpected is still thrown, so its real stack lands in the logs.
+ */
+export async function runWorkflowAction(
+  slug: string,
+  workflowId: string,
+): Promise<{ runId: string } | { error: string }> {
   const ctx = await requireWorkspace(slug, 'workflow:run');
-  const runId = await startWorkflowRun({
-    workflowId,
-    workspaceId: ctx.workspace.id,
-    userId: ctx.user.id,
-    trigger: WorkflowRunTrigger.MANUAL,
-  });
-  refresh(slug, workflowId);
-  return { runId };
+  try {
+    const runId = await startWorkflowRun({
+      workflowId,
+      workspaceId: ctx.workspace.id,
+      userId: ctx.user.id,
+      trigger: WorkflowRunTrigger.MANUAL,
+    });
+    refresh(slug, workflowId);
+    return { runId };
+  } catch (error) {
+    const appError = toAppError(error);
+    if (appError.code === 'INTERNAL') throw error;
+    return { error: appError.message };
+  }
 }
 
 export async function cancelRunAction(slug: string, runId: string) {
