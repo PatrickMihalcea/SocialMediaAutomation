@@ -4,7 +4,7 @@ import { runCoarseUpkeep } from '@/lib/scheduling/coarse';
 import { scanDueWorkflows } from '@/lib/workflows/schedule';
 import { sweepWorkflowRuns } from '@/lib/workflows/engine';
 import { runJob } from '@/lib/queue/runner';
-import { reclaimStaleJobs } from '@/lib/queue/store';
+import { reclaimStaleJobs, SHARED_QUEUES } from '@/lib/queue/store';
 import { persistCodexAuth, restoreCodexAuth } from '@/lib/ai/codex-auth';
 import { writeFile } from 'node:fs/promises';
 import { JobStatus } from '@prisma/client';
@@ -127,7 +127,7 @@ async function main() {
     const capacity = takingWork ? CONCURRENCY - inFlight.size : 0;
     if (capacity > 0) {
       const due = await db.job.findMany({
-        where: { status: JobStatus.QUEUED, runAt: { lte: new Date() } },
+        where: { ...SHARED_QUEUES, status: JobStatus.QUEUED, runAt: { lte: new Date() } },
         orderBy: { runAt: 'asc' },
         take: capacity,
         select: { id: true },
@@ -157,7 +157,7 @@ async function main() {
       if (due.length === 0 && inFlight.size === 0) {
         const horizon = Math.min(Date.now() + RETRY_WAIT_MS, deadline);
         const waiting = await db.job.findFirst({
-          where: { status: JobStatus.QUEUED, runAt: { lte: new Date(horizon) } },
+          where: { ...SHARED_QUEUES, status: JobStatus.QUEUED, runAt: { lte: new Date(horizon) } },
           orderBy: { runAt: 'asc' },
           select: { runAt: true },
         });
@@ -230,13 +230,14 @@ async function signalRemainingWork(inFlight: number): Promise<void> {
     // reason to start one.
     const queued = await db.job.count({
       where: {
+        ...SHARED_QUEUES,
         status: JobStatus.QUEUED,
         // Anything already due, plus anything about to be: a retry a few
         // seconds out should not wait for the next cron tick.
         runAt: { lte: new Date(Date.now() + 2 * 60 * 1000) },
       },
     });
-    const abandoned = await db.job.count({ where: { status: JobStatus.RUNNING } });
+    const abandoned = await db.job.count({ where: { ...SHARED_QUEUES, status: JobStatus.RUNNING } });
     const remaining = queued + Math.max(inFlight, abandoned);
     if (remaining === 0) {
       console.log('[run-once] queue is empty and nothing was left running; nothing to chain');

@@ -1,7 +1,7 @@
 import 'server-only';
 import { JobStatus } from '@prisma/client';
 import { db } from '@/lib/db';
-import { reclaimStaleJobs } from '@/lib/queue/store';
+import { reclaimStaleJobs, SHARED_QUEUES } from '@/lib/queue/store';
 import { type EnqueueOptions, type JobPayloadMap, type JobType, type QueueDriver } from '@/lib/queue/types';
 import { runJob } from '@/lib/queue/runner';
 import { storeJob } from '@/lib/queue/store';
@@ -62,7 +62,7 @@ export class InProcessQueue implements QueueDriver {
 
     try {
       const due = await db.job.findMany({
-        where: { status: JobStatus.QUEUED, runAt: { lte: new Date() } },
+        where: { ...SHARED_QUEUES, status: JobStatus.QUEUED, runAt: { lte: new Date() } },
         orderBy: { runAt: 'asc' },
         // Over-fetch a little: a row picked here may be claimed by another
         // process before runJob reaches it, and that attempt costs nothing.

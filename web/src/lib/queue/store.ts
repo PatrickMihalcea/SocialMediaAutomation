@@ -1,7 +1,7 @@
 import 'server-only';
 import { JobStatus, Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
-import { JOB_QUEUE, type EnqueueOptions, type JobPayloadMap, type JobType } from '@/lib/queue/types';
+import { JOB_QUEUE, LOCAL_QUEUE, type EnqueueOptions, type JobPayloadMap, type JobType } from '@/lib/queue/types';
 
 export interface StoredJob {
   id: string;
@@ -18,7 +18,7 @@ export async function storeJob<T extends JobType>(
   payload: JobPayloadMap[T],
   options: EnqueueOptions,
 ): Promise<StoredJob> {
-  const queue = JOB_QUEUE[type];
+  const queue = options.queue ?? JOB_QUEUE[type];
   if (options.dedupeKey) {
     const active = await db.job.findFirst({
       where: {
@@ -89,9 +89,39 @@ const STALE_JOB_MS = 10 * 60 * 1000;
 export async function reclaimStaleJobs(): Promise<number> {
   const { count } = await db.job.updateMany({
     where: {
+      ...SHARED_QUEUES,
       status: JobStatus.RUNNING,
       startedAt: { lt: new Date(Date.now() - STALE_JOB_MS) },
     },
+    data: { status: JobStatus.QUEUED },
+  });
+  return count;
+}
+
+/**
+ * Every queue but the local one, as a `where` fragment.
+ *
+ * For anything that claims, counts or reclaims jobs on behalf of a shared
+ * worker. Counting local work there is as wrong as running it: the scheduled
+ * worker would chain pass after pass for jobs it can never take while the Mac
+ * is off.
+ */
+export const SHARED_QUEUES = { queue: { not: LOCAL_QUEUE } } as const;
+
+/** The local queue, as a `where` fragment. */
+export const LOCAL_QUEUES = { queue: LOCAL_QUEUE } as const;
+
+/**
+ * Returns every local job left RUNNING to the queue.
+ *
+ * Not on a timer like reclaimStaleJobs, because a local job has no ceiling a
+ * timer could be set against — a video on a laptop GPU can take half an hour.
+ * There is one local worker, so whatever is RUNNING when it starts was
+ * abandoned by its previous life, and it is the only one who can say so.
+ */
+export async function reclaimLocalJobs(): Promise<number> {
+  const { count } = await db.job.updateMany({
+    where: { ...LOCAL_QUEUES, status: JobStatus.RUNNING },
     data: { status: JobStatus.QUEUED },
   });
   return count;

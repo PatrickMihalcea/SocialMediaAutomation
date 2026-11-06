@@ -117,6 +117,9 @@ enum QueueName {
   NOTIFICATION
   AI_GENERATION
   RECURRENCE_EXPANSION
+  /// Work only a worker on the operator's own machine can do — ComfyUI runs
+  /// there and nowhere else. Every shared consumer skips this queue.
+  LOCAL_GENERATION
 }
 
 enum NotificationType {
@@ -1149,6 +1152,18 @@ model Job {
   @@index([status])
   @@index([createdAt])
   @@map("jobs")
+}
+
+/// When a named worker last checked in. Exists for the local worker, which is
+/// switched on and off with a laptop: queued work waits for it rather than
+/// failing, so the UI needs some way to say whether anything is coming.
+model WorkerHeartbeat {
+  id        String   @id
+  seenAt    DateTime @map("seen_at")
+  /// What the worker reported about itself, e.g. whether ComfyUI answered.
+  detail    Json     @default("{}")
+
+  @@map("worker_heartbeats")
 }
 
 model AuditLog {

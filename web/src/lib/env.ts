@@ -69,7 +69,27 @@ const schema = z.object({
   // Allows workflow QA to keep real text reasoning while replacing the slow,
   // paid image call with deterministic local placeholders. "inherit" preserves
   // the old one-provider behavior.
-  AI_IMAGE_PROVIDER: z.enum(['inherit', 'mock', 'openai', 'image-use']).default('inherit'),
+  AI_IMAGE_PROVIDER: z.enum(['inherit', 'mock', 'openai', 'image-use', 'comfyui']).default('inherit'),
+
+  /**
+   * A ComfyUI server, for generation on the operator's own machine.
+   *
+   * Set only where the local worker runs (`npm run worker:local`). Everywhere
+   * else it stays empty and ComfyUI work is queued for that worker instead —
+   * the cloud has no route to a laptop's localhost, and is not meant to.
+   */
+  COMFYUI_URL: z.string().default(''),
+  /**
+   * Where the API-format workflow files live, relative to web/ unless
+   * absolute. One file per operation; see comfyui/README.md.
+   */
+  COMFYUI_WORKFLOWS_DIR: z.string().default('comfyui/workflows'),
+  /**
+   * The ceiling for one render, queue wait included. Generous because a video
+   * on a laptop GPU genuinely takes tens of minutes; it is here to free the
+   * worker from a ComfyUI that has wedged, not to hurry one that is working.
+   */
+  COMFYUI_TIMEOUT_MS: z.coerce.number().int().positive().default(45 * 60 * 1000),
 
   /**
    * Image generation by running the `image-use` CLI, which renders against the

@@ -5,9 +5,11 @@ import { db } from '@/lib/db';
 import { getRedis } from '@/lib/queue/redis';
 import { type EnqueueOptions, type JobPayloadMap, type JobType, type QueueDriver } from '@/lib/queue/types';
 import { runJob } from '@/lib/queue/runner';
-import { storeJob } from '@/lib/queue/store';
+import { SHARED_QUEUES, storeJob } from '@/lib/queue/store';
+import { LOCAL_QUEUE } from '@/lib/queue/types';
 
-const QUEUE_NAMES = Object.values(QueueName);
+/** The local worker polls the table itself; no shared worker may take its jobs. */
+const QUEUE_NAMES = Object.values(QueueName).filter((name) => name !== LOCAL_QUEUE);
 
 /**
  * Redis-backed transport. The `jobs` table stays the record of what ran and why
@@ -82,7 +84,7 @@ export class BullQueue implements QueueDriver {
       async (job) => {
         if (!(job.data as { sweep?: boolean }).sweep) return;
         const due = await db.job.findMany({
-          where: { status: JobStatus.QUEUED, runAt: { lte: new Date() }, externalId: { not: null } },
+          where: { ...SHARED_QUEUES, status: JobStatus.QUEUED, runAt: { lte: new Date() }, externalId: { not: null } },
           take: 25,
           select: { id: true },
         });

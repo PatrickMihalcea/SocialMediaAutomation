@@ -49,6 +49,17 @@ export const JOB_QUEUE: Record<JobType, QueueName> = {
   'ai-media-job': 'AI_GENERATION',
 };
 
+/**
+ * The queue only the local worker consumes.
+ *
+ * A job type does not decide this on its own: an image step runs anywhere when
+ * it renders with Codex and only on the operator's Mac when it renders with
+ * ComfyUI. So the caller picks it per job (EnqueueOptions.queue), and every
+ * shared consumer — the scheduled worker, the daemon, the cron fallback —
+ * leaves it alone. Taking one would mean calling a localhost that is not there.
+ */
+export const LOCAL_QUEUE: QueueName = 'LOCAL_GENERATION';
+
 export interface EnqueueOptions {
   workspaceId?: string | null;
   /** Earliest run time. Used for retry backoff and for future-dated work. */
@@ -60,6 +71,8 @@ export interface EnqueueOptions {
    * post twice if it runs while the first job is still waiting.
    */
   dedupeKey?: string;
+  /** Overrides the type's usual queue; see LOCAL_QUEUE. */
+  queue?: QueueName;
 }
 
 export interface QueueDriver {

@@ -497,7 +497,68 @@ async function repostFacebookReels() {
   console.log(`\nbooked ${booked} Reel(s). Each shows on the calendar and can be cancelled there.`);
 }
 
-const tasks = { 'repost-facebook-reels': repostFacebookReels, 'facebook-videos': facebookVideos, 'run-report': runReport, 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
+/** The booked Reel reposts and the old rows they replace, for one Page or all. */
+async function bookedReposts(pageFilter) {
+  const olds = await db.postPlatform.findMany({
+    where: {
+      platform: 'FACEBOOK',
+      responseMeta: { path: ['replacedBy'], not: null },
+      ...(pageFilter ? { socialAccount: { accountName: { contains: pageFilter, mode: 'insensitive' } } } : {}),
+    },
+    select: { id: true, responseMeta: true, platformUrl: true, socialAccount: { select: { accountName: true } } },
+  });
+  const reels = new Map((await db.postPlatform.findMany({
+    where: { id: { in: olds.map((o) => o.responseMeta.replacedBy) } },
+    select: { id: true, status: true, platformUrl: true, errorMessage: true, post: { select: { id: true, status: true, scheduledAt: true } } },
+  })).map((r) => [r.id, r]));
+  return olds.map((old) => ({ old, reel: reels.get(old.responseMeta.replacedBy) }));
+}
+
+/**
+ * Moves the next few booked Reels for one Page to now, for a test run. The
+ * minute clock picks them up from there like any other due post.
+ */
+async function repostNow() {
+  const count = Math.max(1, Math.min(10, Number(process.env.REPOST_COUNT) || 5));
+  if (!name.trim()) throw new Error('name a Page to pull reposts forward for');
+  const pending = (await bookedReposts(name))
+    .filter(({ reel }) => reel?.post?.status === 'SCHEDULED')
+    .sort((a, b) => a.reel.post.scheduledAt - b.reel.post.scheduledAt)
+    .slice(0, count);
+  const now = new Date();
+  for (const { reel } of pending) {
+    await db.post.update({ where: { id: reel.post.id }, data: { scheduledAt: now } });
+  }
+  console.log(`moved ${pending.length} Reel(s) for "${name}" to ${now.toISOString()}; the clock publishes them within a minute or two`);
+}
+
+/** Where the Reel reposts have got to, Page by Page. */
+async function repostStatus() {
+  const rows = await bookedReposts(name.trim() && name !== 'dark fantasy' ? name : '');
+  const pages = {};
+  for (const { old, reel } of rows) {
+    const page = old.socialAccount?.accountName ?? '?';
+    const p = (pages[page] ??= { booked: 0, published: 0, failed: 0, waiting: 0, oldDeleted: 0, deleteErrors: [] , failures: [], live: [] });
+    p.booked += 1;
+    if (reel?.status === 'PUBLISHED') {
+      p.published += 1;
+      p.live.push(reel.platformUrl);
+    } else if (reel?.status === 'FAILED') {
+      p.failed += 1;
+      p.failures.push(reel.errorMessage);
+    } else p.waiting += 1;
+    if (old.responseMeta.retiredAt) p.oldDeleted += 1;
+    if (old.responseMeta.retireError) p.deleteErrors.push(old.responseMeta.retireError);
+  }
+  for (const [page, p] of Object.entries(pages)) {
+    console.log(`${page}: booked ${p.booked}  published ${p.published}  failed ${p.failed}  waiting ${p.waiting}  old videos deleted ${p.oldDeleted}`);
+    for (const url of p.live.slice(-5)) console.log(`   live: ${url}`);
+    for (const e of p.failures.slice(0, 5)) console.log(`   FAILED: ${e}`);
+    for (const e of p.deleteErrors.slice(0, 5)) console.log(`   DELETE ERROR: ${e}`);
+  }
+}
+
+const tasks = { 'repost-now': repostNow, 'repost-status': repostStatus, 'repost-facebook-reels': repostFacebookReels, 'facebook-videos': facebookVideos, 'run-report': runReport, 'schedule-report': scheduleReport, 'inspect-workflow': inspectWorkflow, 'create-story-workflow': createStoryWorkflow, 'model-report': modelReport };
 
 const run = tasks[task];
 if (!run) {

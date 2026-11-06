@@ -23,6 +23,8 @@ on:
           - run-report
           - facebook-videos
           - repost-facebook-reels
+          - repost-now
+          - repost-status
       name:
         description: 'Existing workflow to read'
         required: false
@@ -43,6 +45,10 @@ on:
           - schedule
       perDay:
         description: 'repost-facebook-reels: Reels per Page per day'
+        required: false
+        default: '5'
+      count:
+        description: 'repost-now: how many booked Reels to move to now (Page goes in name)'
         required: false
         default: '5'
 
@@ -75,5 +81,6 @@ jobs:
           NEW_WORKFLOW_NAME: ${{ inputs.newName }}
           REPOST_MODE: ${{ inputs.mode }}
           REPOST_PER_DAY: ${{ inputs.perDay }}
+          REPOST_COUNT: ${{ inputs.count }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}

@@ -3,7 +3,7 @@ import { env } from '@/lib/env';
 import { BullQueue } from '@/lib/queue/bullmq';
 import { InProcessQueue } from '@/lib/queue/in-process';
 import { wakeRemoteWorker } from '@/lib/queue/wake-remote-worker';
-import type { EnqueueOptions, JobPayloadMap, JobType, QueueDriver } from '@/lib/queue/types';
+import { LOCAL_QUEUE, type EnqueueOptions, type JobPayloadMap, type JobType, type QueueDriver } from '@/lib/queue/types';
 
 const globalForQueue = globalThis as unknown as { queue?: QueueDriver };
 
@@ -22,8 +22,9 @@ export async function enqueue<T extends JobType>(
   const id = await queue().enqueue(type, payload, options);
   // Not awaited: whoever called enqueue() is waiting on the row being
   // written, not on GitHub's response. See wake-remote-worker.ts for why this
-  // can never turn into a failure for the caller.
-  void wakeRemoteWorker();
+  // can never turn into a failure for the caller. Local work is not the
+  // remote worker's to do, so starting a VM for it would buy nothing.
+  if (options?.queue !== LOCAL_QUEUE) void wakeRemoteWorker();
   return id;
 }
 

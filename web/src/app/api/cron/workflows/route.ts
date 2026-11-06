@@ -5,7 +5,7 @@ import { runJob } from '@/lib/queue/runner';
 import { scanDueWorkflows } from '@/lib/workflows/schedule';
 import { scanDuePosts } from '@/lib/publishing/engine';
 import { isWakeConfigured, wakeWorkerIfIdle } from '@/lib/queue/wake-remote-worker';
-import { reclaimStaleJobs } from '@/lib/queue/store';
+import { reclaimStaleJobs, SHARED_QUEUES } from '@/lib/queue/store';
 import { sweepWorkflowRuns } from '@/lib/workflows/engine';
 
 /**
@@ -103,7 +103,7 @@ async function dueSoonCount(): Promise<number> {
  */
 async function queuedJobCount(): Promise<number> {
   return db.job.count({
-    where: { status: 'QUEUED', runAt: { lte: new Date() } },
+    where: { ...SHARED_QUEUES, status: 'QUEUED', runAt: { lte: new Date() } },
   });
 }
 
