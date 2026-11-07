@@ -77,11 +77,11 @@
   "20": {
     "class_type": "EmptyLTXVLatentVideo",
     "_meta": {
-      "title": "288x512 draft of {{frames}} frames at 24 fps; refined at 576x1024"
+      "title": "544x960 draft of {{frames}} frames at 24 fps; refined at 1088x1920. Needs custom_nodes/mps_attention_chunks"
     },
     "inputs": {
-      "width": 288,
-      "height": 512,
+      "width": 544,
+      "height": 960,
       "length": "{{frames}}",
       "batch_size": 1
     }

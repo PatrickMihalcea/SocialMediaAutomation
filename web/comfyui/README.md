@@ -100,8 +100,15 @@ Chosen by testing on an M4 Max with 128 GB of memory, November 2026.
 | File | Model | Time on the M4 Max | Licence |
 |---|---|---|---|
 | `txt2img.json` | FLUX.3 Klein (distilled), 1024×1824 | about 2 min an image | Free while revenue is under US$5M |
-| `img2vid.json` | LTX-2.5 22B distilled, 576×1024, 4 s with sound | see the showcase page | Free while revenue is under US$10M |
-| `txt2vid.json` | LTX-2.5 22B distilled, 576×1024, 4 s with sound | see the showcase page | Free while revenue is under US$10M |
+| `img2vid.json` | LTX-2.5 22B distilled, 1088×1920, length from the step, with sound | about 25 min for 4 s | Free while revenue is under US$10M |
+| `txt2vid.json` | LTX-2.5 22B distilled, 1088×1920, 4 s, with sound | about 25 min for 4 s | Free while revenue is under US$10M |
+
+The video workflows render at full post size, so nothing is upscaled
+afterwards, and **need the attention add-on below**: without it 1088×1920
+crashes ComfyUI. For speed over sharpness, set node 20 to 288×512 (576×1024
+clips, about 6 min for 4 s, no add-on needed). `candidates/img2vid-loop.json`
+makes a seamless loop: the same still pinned as the first and the last frame,
+which measured back to within 1.8/255 of where it started.
 
 `candidates/` also has Z-Image Turbo (about 85 s an image, Apache 2.0, a
 little less faithful to the prompt) and the original SDXL file.
