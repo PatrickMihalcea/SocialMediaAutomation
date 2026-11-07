@@ -24,6 +24,13 @@ export interface BeatPlanInput {
   startSeconds?: number | null;
   /** Pushes the audio later so cuts read slightly ahead of the transient. */
   visualLeadMs?: number;
+  /**
+   * How long each clip can play, in seconds; null for a still image, which can
+   * hold for as long as it is asked to. A video shorter than its beat slot cuts
+   * to the next clip when it runs out rather than starting over, because a clip
+   * that jumps back to its first frame looks broken.
+   */
+  clipSeconds?: Array<number | null>;
 }
 
 export interface BeatPlan {
@@ -117,11 +124,36 @@ export function buildBeatPlan(input: BeatPlanInput): BeatPlan {
   const audioStartSeconds = beats[startBeatIndex] + (input.visualLeadMs ?? 0) / 1000;
   const origin = beats[startBeatIndex];
 
-  const cutFrames: number[] = [];
-  for (let i = 0; i <= imageCount; i++) {
-    const beatIndex = startBeatIndex + i * beatsPerClip;
-    const time = beats[Math.min(beatIndex, beats.length - 1)];
-    cutFrames.push(Math.round((time - origin) * fps));
+  const cutFrames: number[] = [0];
+  // The beat each clip starts on, or the last one before it when a short clip
+  // has pushed the next cut off the grid.
+  let beatIndex = startBeatIndex;
+  let time = origin;
+  for (let i = 0; i < imageCount; i++) {
+    const slotEnd = Math.min(beatIndex + beatsPerClip, beats.length - 1);
+    let end = beats[slotEnd];
+    let endBeat = slotEnd;
+    const limit = input.clipSeconds?.[i] ?? null;
+    let frame = Math.round((end - origin) * fps);
+
+    if (limit != null && limit > 0 && end - time > limit) {
+      // Cut on the last beat the clip still covers, so the edit stays on the
+      // music. Only a clip shorter than one beat cuts where it ends.
+      endBeat = beatIndex;
+      while (endBeat < slotEnd && beats[endBeat + 1] - time <= limit) endBeat++;
+      if (beats[endBeat] > time) {
+        end = beats[endBeat];
+      } else {
+        end = time + limit;
+        while (endBeat + 1 < beats.length && beats[endBeat + 1] <= end) endBeat++;
+      }
+      const start = cutFrames[cutFrames.length - 1];
+      frame = Math.min(Math.round((end - origin) * fps), start + Math.floor(limit * fps));
+    }
+
+    cutFrames.push(frame);
+    beatIndex = endBeat;
+    time = end;
   }
 
   // A clip shorter than a frame cannot be rendered; nudge it and everything

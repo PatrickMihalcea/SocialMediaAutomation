@@ -171,6 +171,40 @@ async function probeVideo(bytes: Buffer, filename: string, thumbnailOffset = 1):
   }
 }
 
+/**
+ * How long a video's picture runs, in seconds.
+ *
+ * The video stream's own length, not the file's: a generated clip can carry a
+ * soundtrack a little longer than its frames, and timing a cut to that would
+ * run past the last frame. Null when ffprobe is absent or cannot tell.
+ */
+export async function probeVideoSeconds(bytes: Buffer, filename: string): Promise<number | null> {
+  if (!(await hasFfmpeg())) return null;
+
+  const dir = await mkdtemp(path.join(tmpdir(), 'b88-media-'));
+  const input = path.join(dir, filename.replace(/[^\w.-]/g, '_'));
+  try {
+    await writeFile(input, bytes);
+    const { stdout } = await run('ffprobe', [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=duration:format=duration',
+      '-of', 'json',
+      input,
+    ]);
+    const parsed = JSON.parse(stdout) as {
+      streams?: { duration?: string }[];
+      format?: { duration?: string };
+    };
+    const seconds = Number(parsed.streams?.[0]?.duration ?? parsed.format?.duration);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+  } catch {
+    return null;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 export interface FfmpegCapabilities {
   ffmpeg: boolean;
   /** Absent from any build without --enable-libfreetype, including Homebrew's. */

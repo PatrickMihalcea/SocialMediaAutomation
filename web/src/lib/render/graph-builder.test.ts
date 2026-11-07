@@ -159,13 +159,13 @@ describe('buildEncoderArgs', () => {
 });
 
 describe('buildClipInputArgs', () => {
-  it('loops video sources while leaving still-image inputs unchanged', () => {
+  it('never loops a video source', () => {
     expect(buildClipInputArgs([
       { file: '/tmp/image.png', kind: 'image' },
       { file: '/tmp/clip.mp4', kind: 'video' },
     ])).toEqual([
       '-i', '/tmp/image.png',
-      '-stream_loop', '-1', '-i', '/tmp/clip.mp4',
+      '-i', '/tmp/clip.mp4',
     ]);
   });
 });

@@ -59,9 +59,13 @@ function videoClipGraph(
   fit: 'cover' | 'blur-pad',
 ): string[] {
   const duration = frames / fps;
+  // A clip that runs out early holds its last frame rather than starting over;
+  // the plan already cuts short clips early, so this only covers a clip whose
+  // length could not be measured.
   const start =
-    `[${inputIndex}:v]trim=duration=${duration.toFixed(6)},setpts=PTS-STARTPTS,` +
-    `fps=${fps}`;
+    `[${inputIndex}:v]setpts=PTS-STARTPTS,fps=${fps},` +
+    `tpad=stop_mode=clone:stop_duration=${duration.toFixed(6)},` +
+    `trim=duration=${duration.toFixed(6)},setpts=PTS-STARTPTS`;
   if (fit === 'cover') {
     return [
       `${start},scale=${width}:${height}:force_original_aspect_ratio=increase:flags=lanczos,` +
