@@ -555,6 +555,11 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
       mimeType: MIME_TYPES[extension],
       extension: extension.slice(1),
       model: `comfyui:${template.name}`,
+      // Known from what was asked for, so it is stored with the clip and nothing
+      // downstream has to open the file to find it.
+      ...(input.want === 'video' && input.values?.frames
+        ? { durationSeconds: Number(input.values.frames) / CLIP_FPS }
+        : {}),
     };
   }
 

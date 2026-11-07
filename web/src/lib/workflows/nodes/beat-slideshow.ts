@@ -7,7 +7,6 @@ import { PermanentJobError } from '@/lib/queue/runner';
 import { resolveBeatGrid } from '@/lib/audio/analyse';
 import { buildBeatPlan } from '@/lib/render/plan';
 import { prepareImage } from '@/lib/render/layout';
-import { probeVideoSeconds } from '@/lib/media/process';
 import { renderer } from '@/lib/render';
 import type { BeatSegment, RenderPlan } from '@/lib/render/types';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
@@ -66,24 +65,10 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   });
   if (!audio) throw new PermanentJobError('That track is no longer in the media library.');
 
-  // Videos are fetched before planning, because the plan needs to know how long
-  // each one runs to avoid holding a clip past its last frame.
-  const videoBytes = new Map<number, Buffer>();
-  const clipSeconds: Array<number | null> = [];
-  for (const [index, asset] of ordered.entries()) {
-    if (asset.type !== MediaType.VIDEO) {
-      clipSeconds.push(null);
-      continue;
-    }
-    const bytes = await storage().get(asset.storageKey);
-    videoBytes.set(index, bytes);
-    clipSeconds.push((await probeVideoSeconds(bytes, asset.filename)) ?? asset.duration ?? null);
-    await ctx.heartbeat();
-  }
-
   const grid = await resolveBeatGrid(audio);
   const plan = buildBeatPlan({
-    clipSeconds,
+    // A video's stored length, so a short clip is cut rather than looped.
+    clipSeconds: ordered.map((asset) => (asset.type === MediaType.VIDEO ? asset.duration : null)),
     grid,
     imageCount: ordered.length,
     beatsPerClip: config.beatsPerClip,
@@ -102,8 +87,8 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
 
   const used = ordered.slice(0, plan.imageCount);
   const clips: RenderPlan['clips'] = [];
-  for (const [index, asset] of used.entries()) {
-    const bytes = videoBytes.get(index) ?? (await storage().get(asset.storageKey));
+  for (const asset of used) {
+    const bytes = await storage().get(asset.storageKey);
     if (asset.type === MediaType.IMAGE) {
       const prepared = await prepareImage(bytes, {
         width,
