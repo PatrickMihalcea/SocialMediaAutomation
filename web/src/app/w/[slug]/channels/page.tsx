@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Link2, RefreshCw, Unplug } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ExternalLink, Link2, RefreshCw, Unplug } from 'lucide-react';
 import { Avatar, Badge, Button, EmptyState } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
 import { db } from '@/lib/db';
@@ -86,6 +86,7 @@ export default async function ChannelsPage({
       status: { not: 'DISCONNECTED' },
     },
     include: {
+      snapshots: { orderBy: { capturedOn: 'desc' }, take: 1, select: { followers: true, following: true } },
       _count: {
         select: {
           postPlatforms: {
@@ -119,7 +120,11 @@ export default async function ChannelsPage({
         {accounts.map((account) => {
           const metadata = account.metadata as {
             mock?: boolean; accountType?: string; pageType?: string; privacyStatus?: unknown;
+            profileUrl?: string; verified?: boolean; followers?: number; following?: number;
           };
+          // The latest sync, or what the network reported when it was connected.
+          const followers = account.snapshots[0]?.followers ?? metadata.followers ?? null;
+          const following = account.snapshots[0]?.following ?? metadata.following ?? null;
           const demo = metadata?.mock;
           const accountType = accountTypeLabel(metadata.accountType ?? metadata.pageType);
           const scheduledTargets = account._count.postPlatforms;
@@ -152,7 +157,26 @@ export default async function ChannelsPage({
                     title={account.accountHandle ?? undefined}
                   >
                     {account.accountHandle ?? 'No public handle reported'}
+                    {metadata.verified ? ' · Verified' : ''}
                   </p>
+                  {(followers != null || following != null) && (
+                    <p className="b88-caption mt-2 tabular-nums">
+                      {[
+                        followers != null ? `${followers.toLocaleString()} followers` : null,
+                        following != null ? `${following.toLocaleString()} following` : null,
+                      ].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
+                  {metadata.profileUrl && (
+                    <a
+                      href={metadata.profileUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 text-sm underline underline-offset-4"
+                    >
+                      View profile <ExternalLink size={14} aria-hidden />
+                    </a>
+                  )}
                 </div>
               </div>
               {status.guidance && (

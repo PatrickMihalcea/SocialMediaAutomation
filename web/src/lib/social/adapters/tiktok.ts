@@ -104,7 +104,16 @@ export class TikTokAdapter extends BaseAdapter {
         refreshToken: token.refresh_token,
         expiresAt: new Date(Date.now() + token.expires_in * 1000),
         scopes: token.scope ? token.scope.split(',') : this.scopes,
-        metadata: { openId: token.open_id, username: profile.username },
+        // Shown on the channel card: the profile link and verified badge come
+        // from user.info.profile, the counts from user.info.stats.
+        metadata: {
+          openId: token.open_id,
+          username: profile.username,
+          profileUrl: profile.profile_web_link ?? (profile.username ? `https://www.tiktok.com/@${profile.username}` : undefined),
+          verified: profile.is_verified ?? false,
+          followers: profile.follower_count,
+          following: profile.following_count,
+        },
       },
     ];
   }
@@ -147,10 +156,20 @@ export class TikTokAdapter extends BaseAdapter {
 
   private async fetchProfile(token: string) {
     const res = await platformJson<{
-      data?: { user?: { display_name?: string; username?: string; avatar_url?: string; follower_count?: number; following_count?: number } };
+      data?: {
+        user?: {
+          display_name?: string;
+          username?: string;
+          avatar_url?: string;
+          profile_web_link?: string;
+          is_verified?: boolean;
+          follower_count?: number;
+          following_count?: number;
+        };
+      };
     }>({
       platform: this.platform,
-      url: `${API}/user/info/?fields=open_id,display_name,username,avatar_url,follower_count,following_count`,
+      url: `${API}/user/info/?fields=open_id,display_name,username,avatar_url,profile_web_link,is_verified,follower_count,following_count`,
       headers: { authorization: `Bearer ${token}` },
     });
     return res.data?.user ?? {};
@@ -364,11 +383,16 @@ export class TikTokAdapter extends BaseAdapter {
     }
 
     const status = await this.pollPublish(token, publishId);
+    const username = (ctx.account.metadata.username as string | undefined) ?? '';
     return {
       platformPostId: status.postId ?? publishId,
+      // TikTok gives a private video no public id, so the link goes to the
+      // profile it was posted to instead.
       url: status.postId
-        ? `https://www.tiktok.com/@${(ctx.account.metadata.username as string) ?? ''}/video/${status.postId}`
-        : undefined,
+        ? `https://www.tiktok.com/@${username}/video/${status.postId}`
+        : username
+          ? `https://www.tiktok.com/@${username}`
+          : undefined,
       publishedAt: new Date(),
       raw: { publishId },
     };

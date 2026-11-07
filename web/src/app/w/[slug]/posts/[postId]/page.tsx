@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ExternalLink } from 'lucide-react';
 import { Badge, Button, EmptyState, MediaFrame, StatCard, StatusMessage } from '@/bridge88/components';
 import { humanizeMachineValue } from '@/bridge88/humanize';
 import { ConfirmationButton, PendingButton } from '@/components/action-ui';
@@ -226,6 +227,16 @@ export default async function PostDetailPage({
                 <p className="b88-caption mt-2">
                   {channel.socialAccount.accountHandle ?? PLATFORM_LABELS[channel.platform]} · {POST_PLATFORM_STATUS_LABELS[channel.status]}
                 </p>
+                {channel.platformUrl && (
+                  <a
+                    href={channel.platformUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex items-center gap-1 text-sm underline underline-offset-4"
+                  >
+                    View on {PLATFORM_LABELS[channel.platform]} <ExternalLink size={14} aria-hidden />
+                  </a>
+                )}
               </div>
               <Badge tone="outline">{PLATFORM_LABELS[channel.platform]}</Badge>
             </div>
@@ -253,7 +264,7 @@ export default async function PostDetailPage({
                 ))}
               </div>
             )}
-            {channel.errorMessage && <StatusMessage tone="error" className="mt-5">This channel could not publish the post. Review the channel connection and post requirements, then try again.</StatusMessage>}
+            {channel.errorMessage && <StatusMessage tone="error" className="mt-5">{channel.errorMessage}</StatusMessage>}
           </section>
         ))}
       </div>
@@ -265,6 +276,11 @@ export default async function PostDetailPage({
           {channels.map((channel) => (
             <div key={channel.id} className="flex flex-wrap items-center gap-3 border-t border-hairline-soft py-4 first:border-0">
               <span className="min-w-0 flex-1">{PLATFORM_LABELS[channel.platform]} · {channel.socialAccount.accountName}</span>
+              {channel.platformUrl && (
+                <a href={channel.platformUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm underline underline-offset-4">
+                  Open post <ExternalLink size={14} aria-hidden />
+                </a>
+              )}
               <span className="b88-caption">{channel.attempts} {channel.attempts === 1 ? 'attempt' : 'attempts'}</span>
               <Badge tone={channel.status === 'FAILED' ? 'coral' : channel.status === 'PUBLISHED' ? 'mint' : 'outline'}>
                 {POST_PLATFORM_STATUS_LABELS[channel.status]}
