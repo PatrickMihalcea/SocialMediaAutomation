@@ -1,6 +1,7 @@
 import type { Platform, PostStatus } from '@prisma/client';
 import type { PostPlatformInput } from '@/lib/posts/schemas';
 import { parseTagList } from '@/lib/posts/tags';
+import { emptyTikTokOptions, type TikTokPostOptions } from '@/lib/social/tiktok-options';
 
 export type ComposerAccount = {
   id: string;
@@ -43,6 +44,11 @@ export type PlatformVersionState = {
   hashtags: string;
   mentions: string;
   link: string;
+  /**
+   * TikTok channels only. Kept per channel and never copied by "same post":
+   * TikTok wants each one chosen for the account it posts to.
+   */
+  tiktok?: TikTokPostOptions;
   media: Array<{
     mediaAssetId: string;
     altText: string;
@@ -84,6 +90,7 @@ export type ComposerInitial = {
     hashtags: string[];
     mentions: string[];
     link: string | null;
+    tiktok?: TikTokPostOptions | null;
     media: Array<{
       mediaAssetId: string;
       altText: string | null;
@@ -147,6 +154,7 @@ export function emptyVersion(account: ComposerAccount): PlatformVersionState {
     hashtags: '',
     mentions: '',
     link: '',
+    ...(account.platform === 'TIKTOK' ? { tiktok: emptyTikTokOptions() } : {}),
     media: [],
   };
 }
@@ -178,6 +186,7 @@ export function buildInitialDraft(
           hashtags: saved.hashtags.join(', '),
           mentions: saved.mentions.map((m) => (m.startsWith('@') ? m : `@${m}`)).join(', '),
           link: saved.link ?? '',
+          ...(account.platform === 'TIKTOK' ? { tiktok: saved.tiktok ?? emptyTikTokOptions() } : {}),
           media: saved.media.map((m) => ({
             mediaAssetId: m.mediaAssetId,
             altText: m.altText ?? '',
@@ -248,6 +257,7 @@ function mapVersion(version: PlatformVersionState): PostPlatformInput {
     hashtags: parseTagList(version.hashtags, '#'),
     mentions: parseTagList(version.mentions, '@'),
     link: version.link.trim() || null,
+    ...(version.platform === 'TIKTOK' ? { tiktok: version.tiktok ?? emptyTikTokOptions() } : {}),
     media: version.media.map((item) => ({
       mediaAssetId: item.mediaAssetId,
       altText: item.altText.trim() || null,

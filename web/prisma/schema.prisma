@@ -600,6 +600,8 @@ model PostPlatform {
   hashtags        String[]           @default([])
   mentions        String[]           @default([])
   link            String?
+  /// Settings only one network has, keyed by network: { tiktok: {...} }.
+  options         Json               @default("{}")
   status          PostPlatformStatus @default(PENDING)
   platformPostId  String?            @map("platform_post_id")
   platformUrl     String?            @map("platform_url")

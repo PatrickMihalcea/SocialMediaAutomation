@@ -1,5 +1,6 @@
 import { Platform, PostStatus } from '@prisma/client';
 import { z } from 'zod';
+import { tiktokPostOptionsSchema } from '@/lib/social/tiktok-options';
 
 export const postPlatformInputSchema = z.object({
   socialAccountId: z.string().uuid(),
@@ -9,6 +10,8 @@ export const postPlatformInputSchema = z.object({
   hashtags: z.array(z.string().max(100)).max(30).default([]),
   mentions: z.array(z.string().max(100)).max(30).default([]),
   link: z.string().url().nullable().optional().or(z.literal('')),
+  /** TikTok channels only: the per-post choices TikTok requires. */
+  tiktok: tiktokPostOptionsSchema.nullable().optional(),
   media: z
     .array(
       z.object({

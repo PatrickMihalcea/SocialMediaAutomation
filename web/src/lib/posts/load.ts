@@ -1,4 +1,5 @@
 import 'server-only';
+import type { TikTokPostOptions } from '@/lib/social/tiktok-options';
 import { notFound } from '@/lib/errors';
 import { db } from '@/lib/db';
 import { storage } from '@/lib/storage';
@@ -164,6 +165,7 @@ export async function loadComposerContext(
           hashtags: platform.hashtags,
           mentions: platform.mentions,
           link: platform.link,
+          tiktok: (platform.options as { tiktok?: TikTokPostOptions } | null)?.tiktok ?? null,
           media: platform.media.map((item) => ({
             mediaAssetId: item.mediaAssetId,
             altText: item.altText,

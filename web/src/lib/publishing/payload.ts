@@ -3,6 +3,7 @@ import type { MediaAsset, PostMedia, PostPlatform } from '@prisma/client';
 import { storage } from '@/lib/storage';
 import { renderSoundtrackedMedia } from '@/lib/media/audio-mux-derivative';
 import type { OutgoingMedia, OutgoingPost } from '@/lib/social/types';
+import { tiktokPostOptionsSchema } from '@/lib/social/tiktok-options';
 
 type MediaRow = PostMedia & { mediaAsset: MediaAsset };
 
@@ -26,7 +27,15 @@ export async function toOutgoingPost(
     hashtags: row.hashtags,
     mentions: row.mentions,
     title: title ?? null,
+    tiktok: savedTikTokOptions(row.options),
   };
+}
+
+/** Null when none were saved, so the adapter can say they need choosing. */
+function savedTikTokOptions(options: PostPlatform['options']) {
+  const saved = (options as { tiktok?: unknown } | null)?.tiktok;
+  const parsed = tiktokPostOptionsSchema.safeParse(saved);
+  return saved && parsed.success ? parsed.data : null;
 }
 
 export async function toOutgoingMedia(row: MediaRow): Promise<OutgoingMedia> {

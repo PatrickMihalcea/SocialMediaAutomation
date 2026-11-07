@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { Platform } from '@prisma/client';
 import { requireWorkspace } from '@/lib/auth/guard';
-import { createDemoAccount } from '@/lib/social/accounts';
+import { createDemoAccount, getUsableAccount } from '@/lib/social/accounts';
 import { decryptAccount } from '@/lib/social/accounts';
 import { db } from '@/lib/db';
 import { assertWithinLimit } from '@/lib/billing/limits';
@@ -16,6 +16,8 @@ import { reconcilePostStatus } from '@/lib/publishing/engine';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
 import { AppError, invalid, toAppError } from '@/lib/errors';
 import { isYoutubePrivacy } from '@/lib/social/adapters/youtube';
+import { TikTokAdapter } from '@/lib/social/adapters/tiktok';
+import type { TikTokCreatorInfo } from '@/lib/social/tiktok-options';
 
 export type ChannelActionState = ActionState & { billingHref?: string };
 
@@ -279,4 +281,31 @@ function channelActionError(error: unknown, slug: string): ChannelActionState {
       ? { billingHref: `/w/${slug}/settings/billing` }
       : {}),
   };
+}
+
+export type TikTokCreatorInfoResult =
+  | { ok: true; info: TikTokCreatorInfo }
+  | { ok: false; message: string };
+
+/**
+ * What a TikTok account can post right now, for the composer.
+ *
+ * TikTok requires this to be fetched each time someone composes a post, so it
+ * is asked for live rather than read from what was stored at connection.
+ */
+export async function getTikTokCreatorInfoAction(slug: string, accountId: string): Promise<TikTokCreatorInfoResult> {
+  try {
+    const ctx = await requireWorkspace(slug, 'post:create');
+    const owned = await db.socialAccount.findFirst({
+      where: { id: accountId, workspaceId: ctx.workspace.id, platform: 'TIKTOK' },
+      select: { id: true },
+    });
+    if (!owned) return { ok: false, message: 'That TikTok account is no longer connected.' };
+    const { row, account } = await getUsableAccount(owned.id);
+    const adapter = getAdapterForAccount(row);
+    if (!(adapter instanceof TikTokAdapter)) return { ok: false, message: 'That is not a TikTok account.' };
+    return { ok: true, info: await adapter.getCreatorInfo(account) };
+  } catch (error) {
+    return { ok: false, message: toAppError(error).message };
+  }
 }

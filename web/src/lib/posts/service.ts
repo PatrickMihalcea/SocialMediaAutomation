@@ -55,6 +55,7 @@ export async function validateDraft(
       mentions: version.mentions,
       link: version.link || null,
       title: input.title,
+      tiktok: version.tiktok ?? null,
       media: mediaAssets.map((asset) => ({
         id: asset.id,
         type: asset.type,
@@ -199,6 +200,7 @@ export async function savePost(
           hashtags: version.hashtags,
           mentions: version.mentions,
           link: version.link || null,
+          options: version.tiktok ? { tiktok: version.tiktok } : {},
           idempotencyKey: idempotencyKey(post.id, version.socialAccountId),
         },
       });
@@ -321,6 +323,7 @@ export async function duplicatePost(workspaceId: string, postId: string, authorI
           hashtags: version.hashtags,
           mentions: version.mentions,
           link: version.link,
+          options: version.options ?? {},
           idempotencyKey: idempotencyKey(copy.id, version.socialAccountId),
         },
       });

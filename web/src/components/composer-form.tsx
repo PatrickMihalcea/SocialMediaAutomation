@@ -23,6 +23,8 @@ import { PendingButton } from '@/components/action-ui';
 import { ComposerPreview } from '@/components/composer-preview';
 import { versionContent, versionsMatch } from '@/lib/posts/composer';
 import { PlatformGlyph } from '@/components/visuals';
+import { TikTokPostSettings } from '@/components/tiktok-post-settings';
+import { emptyTikTokOptions, type TikTokPostOptions } from '@/lib/social/tiktok-options';
 import { CAPABILITIES } from '@/lib/social/capabilities';
 import { PLATFORM_LABELS } from '@/lib/social/labels';
 import {
@@ -257,6 +259,18 @@ export function ComposerForm({
       }
       return { ...current, versions };
     });
+  }
+
+  /**
+   * TikTok settings bypass the shared post: TikTok wants them chosen for the
+   * account each post goes to, so they are never copied to another channel.
+   */
+  function updateTikTok(accountId: string, tiktok: TikTokPostOptions) {
+    setDraft((current) =>
+      current.versions[accountId]
+        ? { ...current, versions: { ...current.versions, [accountId]: { ...current.versions[accountId], tiktok } } }
+        : current,
+    );
   }
 
   function toggleMedia(accountId: string, assetId: string) {
@@ -786,6 +800,16 @@ export function ComposerForm({
               value={activeVersion.link}
               onChange={(event) => updateVersion(activeAccount.id, { link: event.target.value })}
               placeholder="https://"
+              disabled={readOnly}
+            />
+          )}
+
+          {activeAccount.platform === 'TIKTOK' && !activeAccount.isDemo && (
+            <TikTokPostSettings
+              slug={slug}
+              accountId={activeAccount.id}
+              options={activeVersion.tiktok ?? emptyTikTokOptions()}
+              onChange={(next) => updateTikTok(activeAccount.id, next)}
               disabled={readOnly}
             />
           )}

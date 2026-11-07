@@ -1,4 +1,5 @@
 import type { Platform, SocialAccount } from '@prisma/client';
+import type { TikTokPostOptions } from '@/lib/social/tiktok-options';
 
 /**
  * The contract every network implements. The publishing engine talks only to
@@ -125,6 +126,8 @@ export interface OutgoingPost {
   hashtags: string[];
   mentions: string[];
   title?: string | null;
+  /** The choices TikTok requires per post; absent for every other network. */
+  tiktok?: TikTokPostOptions | null;
 }
 
 export interface PublishContext {

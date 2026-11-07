@@ -3,7 +3,7 @@ import { Platform } from '@prisma/client';
 import { BaseAdapter, composeText } from '@/lib/social/base';
 import { CAPABILITIES } from '@/lib/social/capabilities';
 import { env } from '@/lib/env';
-import { platformJson } from '@/lib/social/http';
+import { platformFetch, platformJson } from '@/lib/social/http';
 import { notConfigured, PlatformError } from '@/lib/social/errors';
 import type {
   AccountMetrics,
@@ -15,20 +15,30 @@ import type {
   PostMetrics,
   PublishContext,
   PublishResult,
+  OutgoingPost,
   RefreshedToken,
+  ValidationIssue,
 } from '@/lib/social/types';
+import {
+  TIKTOK_PRIVACY_LEVELS,
+  tiktokOptionsProblem,
+  type TikTokCreatorInfo,
+  type TikTokPrivacyLevel,
+} from '@/lib/social/tiktok-options';
 
 const API = 'https://open.tiktokapis.com/v2';
 
 /**
  * TikTok Content Posting API.
  *
- * TikTok pulls the file from a URL we supply, then reports progress against a
- * publish id — so a "successful" API call only means the upload was accepted.
- * The publish is confirmed by polling before the post is marked published.
+ * The video is uploaded to TikTok rather than pulled from a URL: pulling needs
+ * the media domain verified with TikTok, and signed storage links live on a
+ * domain we do not own. TikTok then reports progress against a publish id, so
+ * a "successful" API call only means the upload was accepted; the publish is
+ * confirmed by polling before the post is marked published.
  *
- * INTEGRATION BOUNDARY — unaudited apps can only post to private accounts;
- * public posting requires TikTok's audit.
+ * INTEGRATION BOUNDARY — until TikTok audits the app, creator_info offers only
+ * "Only me", so every post is private.
  */
 export class TikTokAdapter extends BaseAdapter {
   readonly platform = Platform.TIKTOK;
@@ -158,6 +168,59 @@ export class TikTokAdapter extends BaseAdapter {
     };
   }
 
+  /**
+   * What this creator can post right now. TikTok requires the composer to show
+   * it before every post, and the answer changes: privacy options, disabled
+   * interactions and the longest video allowed are all per account.
+   */
+  async getCreatorInfo(account: DecryptedAccount): Promise<TikTokCreatorInfo> {
+    const res = await platformJson<{
+      data?: {
+        creator_nickname?: string;
+        creator_username?: string;
+        creator_avatar_url?: string;
+        privacy_level_options?: string[];
+        comment_disabled?: boolean;
+        duet_disabled?: boolean;
+        stitch_disabled?: boolean;
+        max_video_post_duration_sec?: number;
+      };
+      error?: { code?: string; message?: string };
+    }>({
+      platform: this.platform,
+      method: 'POST',
+      url: `${API}/post/publish/creator_info/query/`,
+      headers: { authorization: `Bearer ${this.requireToken(account)}`, 'content-type': 'application/json; charset=UTF-8' },
+    });
+    if (res.error?.code && res.error.code !== 'ok') {
+      throw new PlatformError({
+        platform: this.platform,
+        code: res.error.code,
+        message: creatorInfoMessage(res.error.code, res.error.message),
+      });
+    }
+    const data = res.data ?? {};
+    return {
+      nickname: data.creator_nickname ?? account.accountName,
+      username: data.creator_username ?? '',
+      avatarUrl: data.creator_avatar_url ?? null,
+      privacyLevels: (data.privacy_level_options ?? []).filter((level): level is TikTokPrivacyLevel =>
+        (TIKTOK_PRIVACY_LEVELS as readonly string[]).includes(level),
+      ),
+      commentDisabled: Boolean(data.comment_disabled),
+      duetDisabled: Boolean(data.duet_disabled),
+      stitchDisabled: Boolean(data.stitch_disabled),
+      maxVideoSeconds: data.max_video_post_duration_sec ?? null,
+    };
+  }
+
+  validatePost(post: OutgoingPost): ValidationIssue[] {
+    const issues = super.validatePost(post);
+    const problem = tiktokOptionsProblem(post.tiktok);
+    if (problem) issues.push({ severity: 'error', code: 'TIKTOK_SETTINGS', field: 'account', message: problem });
+    return issues;
+  }
+
   async publishTextPost(): Promise<PublishResult> {
     throw new PlatformError({
       platform: this.platform,
@@ -181,22 +244,56 @@ export class TikTokAdapter extends BaseAdapter {
       });
     }
 
-    const init = await platformJson<{ data?: { publish_id?: string }; error?: { code?: string; message?: string } }>({
+    const options = ctx.post.tiktok;
+    const problem = tiktokOptionsProblem(options);
+    if (problem || !options?.privacyLevel) {
+      throw new PlatformError({ platform: this.platform, code: 'TIKTOK_SETTINGS', message: problem ?? 'Choose who can see this TikTok post.' });
+    }
+
+    // Checked again at publish time: a scheduled post can go out days after it
+    // was composed, and the account may have changed in between.
+    const creator = await this.getCreatorInfo(ctx.account);
+    if (!creator.privacyLevels.includes(options.privacyLevel)) {
+      throw new PlatformError({
+        platform: this.platform,
+        code: 'TIKTOK_PRIVACY',
+        message: 'This TikTok account can no longer post with the visibility chosen. Pick another and try again.',
+      });
+    }
+    if (creator.maxVideoSeconds && video.durationSeconds && video.durationSeconds > creator.maxVideoSeconds) {
+      throw new PlatformError({
+        platform: this.platform,
+        code: 'VIDEO_TOO_LONG',
+        message: `This TikTok account can post videos up to ${creator.maxVideoSeconds} seconds long.`,
+      });
+    }
+
+    const bytes = await video.read();
+    const chunks = uploadChunks(bytes.byteLength);
+    const init = await platformJson<{
+      data?: { publish_id?: string; upload_url?: string };
+      error?: { code?: string; message?: string };
+    }>({
       platform: this.platform,
       method: 'POST',
       url: `${API}/post/publish/video/init/`,
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json; charset=UTF-8' },
       body: JSON.stringify({
         post_info: {
           title: composeText(ctx.post).slice(0, this.capabilities.maxTextLength),
-          privacy_level: 'PUBLIC_TO_EVERYONE',
-          disable_comment: false,
-          disable_duet: false,
-          disable_stitch: false,
+          privacy_level: options.privacyLevel,
+          disable_comment: creator.commentDisabled || !options.allowComment,
+          disable_duet: creator.duetDisabled || !options.allowDuet,
+          disable_stitch: creator.stitchDisabled || !options.allowStitch,
+          brand_organic_toggle: options.commercial && options.yourBrand,
+          brand_content_toggle: options.commercial && options.brandedContent,
         },
-        // PULL_FROM_URL avoids streaming the bytes through this server. The
-        // domain must be verified in the TikTok developer console.
-        source_info: { source: 'PULL_FROM_URL', video_url: video.url },
+        source_info: {
+          source: 'FILE_UPLOAD',
+          video_size: bytes.byteLength,
+          chunk_size: chunks.chunkSize,
+          total_chunk_count: chunks.count,
+        },
       }),
       timeoutMs: 60_000,
     });
@@ -208,6 +305,33 @@ export class TikTokAdapter extends BaseAdapter {
         code: init.error?.code ?? 'REJECTED',
         message: init.error?.message ?? 'TikTok did not accept the video. Check the file and try again.',
         detail: JSON.stringify(init),
+      });
+    }
+
+    const uploadUrl = init.data?.upload_url;
+    if (!uploadUrl) {
+      throw new PlatformError({
+        platform: this.platform,
+        code: 'REJECTED',
+        message: 'TikTok did not return an upload address for the video.',
+        detail: JSON.stringify(init),
+      });
+    }
+    for (let index = 0; index < chunks.count; index++) {
+      const start = index * chunks.chunkSize;
+      // The last chunk takes whatever is left, which TikTok allows to run over.
+      const end = index === chunks.count - 1 ? bytes.byteLength : start + chunks.chunkSize;
+      await platformFetch({
+        platform: this.platform,
+        method: 'PUT',
+        url: uploadUrl,
+        headers: {
+          'content-type': video.mimeType || 'video/mp4',
+          'content-length': String(end - start),
+          'content-range': `bytes ${start}-${end - 1}/${bytes.byteLength}`,
+        },
+        body: new Uint8Array(bytes.subarray(start, end)),
+        timeoutMs: 300_000,
       });
     }
 
@@ -302,5 +426,26 @@ export class TikTokAdapter extends BaseAdapter {
   async getAccountAnalytics(account: DecryptedAccount): Promise<AccountMetrics> {
     const profile = await this.getAccount(account);
     return { followers: profile.followers ?? null, following: profile.following ?? null };
+  }
+}
+
+/** TikTok takes one chunk up to 64 MB; anything larger goes in 10 MB pieces. */
+export function uploadChunks(size: number): { chunkSize: number; count: number } {
+  const single = 64 * 1024 * 1024;
+  if (size <= single) return { chunkSize: size, count: 1 };
+  const chunkSize = 10 * 1024 * 1024;
+  return { chunkSize, count: Math.floor(size / chunkSize) };
+}
+
+function creatorInfoMessage(code: string, fallback?: string): string {
+  switch (code) {
+    case 'spam_risk_too_many_posts':
+      return 'This TikTok account has reached its daily posting limit. Try again later.';
+    case 'spam_risk_user_banned_from_posting':
+      return 'TikTok is not letting this account post right now.';
+    case 'reached_active_user_cap':
+      return 'TikTok has limited how many accounts this app can post for today. Try again later.';
+    default:
+      return fallback || 'TikTok could not say whether this account can post right now.';
   }
 }
