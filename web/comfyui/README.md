@@ -55,6 +55,8 @@ connections: to Neon, to R2 and to ComfyUI on localhost.
    | `{{width}}`, `{{height}}` | The requested size, rounded to a multiple of 16 |
 | `{{base_width}}`, `{{base_height}}` | The same shape at about 1 megapixel (768×1344 for 9:16), which is what SDXL and FLUX were trained at. Render at this size, then upscale to `{{width}}`×`{{height}}` |
    | `{{seed}}` | A random seed per render |
+| `{{seconds}}`, `{{frames}}` | Video length from the step's Clip length; `{{frames}}` is seconds × 24 + 1, which LTX needs |
+| `{{motion_strength}}` | How firmly the first frame holds the still: 0.85 Subtle, 0.7 Natural, 0.5 Lively |
    | `{{image}}` | The source image (edit, variation, img2vid). Put it in a **Load Image** node's `image` |
    | `{{subject_image}}`, `{{style_image}}`, `{{composition_image}}` | Reference pictures from an Image generator step, each in its own **Load Image** node |
 
@@ -112,9 +114,21 @@ then download with a read token.
 Apple silicon unless ComfyUI starts with `--use-split-cross-attention`
 ([ComfyUI issue 15818](https://github.com/Comfy-Org/ComfyUI/issues/15818)). In
 ComfyUI Desktop that goes in the installation's launch arguments, next to
-`--enable-manager`. Even with it, full-resolution attention at 704×1280 over
-5 seconds crashes PyTorch on this Mac, which is why the clips are 576×1024
-for 4 seconds.
+`--enable-manager`.
+
+**And one add-on, for bigger or longer clips.** With split attention, ComfyUI
+only slices the attention matrix when it thinks memory is short, and on a
+128 GB Mac it never is, so it builds the whole matrix at once. MPS crashes
+outright (a segfault in `einsum`) once that matrix passes 2³² elements: 32
+heads × tokens². That is why 704×1280 for 5 seconds (14,080 tokens, 6.3 billion)
+crashed while 576×1024 for 4 seconds (7,488 tokens) did not.
+`custom_nodes/mps_attention_chunks` is ComfyUI's own split attention with one
+change: it always slices so no matrix passes 2²⁹ elements. The arithmetic is
+the same, so the picture is too; it just runs as more, smaller multiplies.
+Install it by copying the folder into ComfyUI's `custom_nodes` folder
+(`~/ComfyUI-Installs/ComfyUI/ComfyUI/custom_nodes/` for ComfyUI Desktop) and
+restarting. The log then says `[mps_attention_chunks] split attention now
+slices…`. With it, 704×1280 for 5 seconds renders in about 12 minutes.
 
 **Sound is saved separately.** ComfyUI's own video save fails when a clip has
 sound (it hands the whole soundtrack to the AAC encoder at once), so the video
