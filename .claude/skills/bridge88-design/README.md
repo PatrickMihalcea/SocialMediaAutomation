@@ -45,6 +45,7 @@ Never hand-roll a component that already exists there.
 | `surfaces/` | ColorBlockSection, PricingCard, TemplateCard, FeatureTile, PromoBanner |
 | `navigation/` | TopNav, SidebarNav, MarqueeStrip, Footer |
 | `data/` | FeatureRow, StatCard, CheckGlyph |
+| `charts` | ChartCard, MetricTile, TrendChart, BarChart, DonutChart, RankBars (in-app SVG charts; see COMPONENTS.md) |
 | `feedback/` | Dialog, Toast, Tooltip |
 | `core/` | Badge, Avatar, EmptyState |
 | `media/` | MediaFrame, VideoPlayer, MediaCarousel, MediaUploader, AssetTile |

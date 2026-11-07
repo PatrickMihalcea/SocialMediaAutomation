@@ -588,6 +588,99 @@ export interface StatCardProps extends React.HTMLAttributes<HTMLDivElement> {
 export function StatCard(props: StatCardProps): JSX.Element;
 ```
 
+## charts
+
+`import { ChartCard, MetricTile, TrendChart, BarChart, DonutChart, RankBars, CHART_COLOURS, short } from '@/bridge88/charts';`
+
+Data visualisation drawn as plain SVG on the server, with no charting library. Colour is the narrative layer: every mark is filled with a pastel block token and outlined in `--ink`, so it reads in both themes. Pass colours as block tokens, such as `'var(--block-lilac)'`. `CHART_COLOURS` is the order to cycle through for a series with no colour of its own.
+
+Rules:
+- A chart only labels values it draws. Axis maxima round up to 1, 2, 2.5 or 5 × 10ⁿ.
+- A missing metric is "Not reported", never zero. `MetricTile` takes `null` for this.
+- Flat fills only: no gradients, shadows or opacity ramps.
+- Mono type is for axis ticks and captions only.
+
+### ChartCard
+
+One-line: the stroked card that holds one chart, with a mono eyebrow and a title.
+
+```jsx
+<ChartCard eyebrow="Audience" title="Followers over time" aside={<Button variant="tertiary">Export</Button>}>
+  <TrendChart points={points} colour="var(--block-mint)" label="Followers" />
+</ChartCard>
+```
+
+```ts
+export function ChartCard(props: { eyebrow: string; title: string; aside?: ReactNode; children: ReactNode; className?: string }): JSX.Element;
+```
+
+### MetricTile
+
+One-line: one headline number on a pastel ground, for a row of key figures.
+
+```jsx
+<MetricTile label="Views" value={18240} colour="var(--block-lilac)" detail="+12.0%" />
+<MetricTile label="Reach" value={null} colour="var(--block-lime)" />  // "Not reported"
+```
+
+- 8px tile radius, so a row of tiles never reads as colour blocks. Use a different block colour for each tile in a row, or `var(--surface-soft)` for secondary figures.
+
+```ts
+export function MetricTile(props: { label: string; value: number | string | null; detail?: string; colour: string }): JSX.Element;
+```
+
+### TrendChart
+
+One-line: a value over time as an outlined area, such as followers per day.
+
+```jsx
+<TrendChart points={[{ label: '1 Nov', value: 24636 }, { label: '7 Nov', value: 24887 }]} colour="var(--block-mint)" label="Followers" />
+```
+
+- The axis starts near the lowest value, not zero, because slow-moving totals would otherwise draw a flat line. Use `BarChart` when zero matters.
+
+```ts
+export function TrendChart(props: { points: { label: string; value: number }[]; colour: string; label: string }): JSX.Element;
+```
+
+### BarChart
+
+One-line: counts on a zero baseline, such as views per day or per hour.
+
+```jsx
+<BarChart bars={days} colour="var(--block-lilac)" label="Views by publish day" every={5} />
+```
+
+- `every` labels one bar in N, so dense series stay legible.
+
+```ts
+export function BarChart(props: { bars: { label: string; value: number }[]; colour: string; label: string; every?: number }): JSX.Element;
+```
+
+### DonutChart
+
+One-line: shares of a whole, with a legend that carries the numbers and percentages.
+
+```jsx
+<DonutChart centre="1.2K" caption="engagements" slices={[{ label: 'Likes', value: 900, colour: 'var(--block-pink)' }]} />
+```
+
+```ts
+export function DonutChart(props: { slices: { label: string; value: number; colour: string }[]; centre: string; caption: string }): JSX.Element;
+```
+
+### RankBars
+
+One-line: a ranked list with a horizontal bar per row, such as views by platform or by campaign.
+
+```jsx
+<RankBars rows={[{ key: 'ig', label: 'Instagram', value: 18240, detail: '12 posts', colour: 'var(--block-pink)' }]} />
+```
+
+```ts
+export function RankBars(props: { rows: { key: string; label: string; value: number; detail?: string; colour: string }[] }): JSX.Element;
+```
+
 ## feedback
 
 ### Dialog
