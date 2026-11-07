@@ -620,6 +620,7 @@ model PostPlatform {
   socialAccount SocialAccount  @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
   media         PostMedia[]
   analytics     PostAnalytics?
+  dailyAnalytics PostAnalyticsDay[]
 
   @@unique([postId, socialAccountId])
   @@index([postId])
@@ -917,6 +918,31 @@ model PostAnalytics {
   @@index([platform])
   @@index([fetchedAt])
   @@map("post_analytics")
+}
+
+/// One post's running totals as they stood on a day, so views can be charted
+/// growing over time. PostAnalytics holds only the latest figures.
+model PostAnalyticsDay {
+  id              String   @id @default(uuid()) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  postPlatformId  String   @map("post_platform_id") @db.Uuid
+  socialAccountId String   @map("social_account_id") @db.Uuid
+  platform        Platform
+  capturedOn      DateTime @map("captured_on") @db.Date
+  views           Int?
+  likes           Int?
+  comments        Int?
+  shares          Int?
+  saves           Int?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  postPlatform PostPlatform @relation(fields: [postPlatformId], references: [id], onDelete: Cascade)
+
+  @@unique([postPlatformId, capturedOn])
+  @@index([workspaceId, capturedOn])
+  @@index([socialAccountId, capturedOn])
+  @@map("post_analytics_days")
 }
 
 // ---------------------------------------------------------------- collaboration

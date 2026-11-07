@@ -50,6 +50,30 @@ export async function syncPostAnalytics(postPlatformId: string): Promise<void> {
       fetchedAt: new Date(),
     },
   });
+
+  // The day's running totals, kept so views can be charted over time. A
+  // second sync on the same day replaces that day's figures.
+  const capturedOn = new Date();
+  capturedOn.setUTCHours(0, 0, 0, 0);
+  const day = {
+    views: metrics.videoViews ?? metrics.impressions ?? null,
+    likes: metrics.likes ?? null,
+    comments: metrics.comments ?? null,
+    shares: metrics.shares ?? null,
+    saves: metrics.saves ?? null,
+  };
+  await db.postAnalyticsDay.upsert({
+    where: { postPlatformId_capturedOn: { postPlatformId, capturedOn } },
+    create: {
+      workspaceId: row.workspaceId,
+      postPlatformId,
+      socialAccountId: row.socialAccountId,
+      platform: row.platform,
+      capturedOn,
+      ...day,
+    },
+    update: day,
+  });
 }
 
 export async function syncAccountAnalytics(socialAccountId: string): Promise<void> {
@@ -91,6 +115,12 @@ export async function syncAccountAnalytics(socialAccountId: string): Promise<voi
   await db.socialAccount.update({ where: { id: socialAccountId }, data: { lastSyncedAt: new Date() } });
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Posts younger than this are refreshed on every sync. */
+const RECENT_DAYS = 30;
+/** Older posts are refreshed once their figures are this old. */
+const OLDER_REFRESH_MS = 20 * 60 * 60 * 1000;
+
 /** Fans one workspace out into per-channel and per-post sync jobs. */
 export async function syncWorkspaceAnalytics(workspaceId: string): Promise<void> {
   const accounts = await db.socialAccount.findMany({
@@ -101,15 +131,23 @@ export async function syncWorkspaceAnalytics(workspaceId: string): Promise<void>
     await enqueue('sync-account-analytics', { socialAccountId: account.id }, { workspaceId });
   }
 
-  // Refresh recent posts; older ones stop changing and are not worth the quota.
+  // Recent posts every run, since that is when their numbers move. Older ones
+  // still gain views, so they are refreshed too, but at most once a day: this
+  // runs every six hours and the platforms' quotas are per hour.
+  const now = Date.now();
   const recent = await db.postPlatform.findMany({
     where: {
       workspaceId,
       status: PostPlatformStatus.PUBLISHED,
-      publishedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+      OR: [
+        { publishedAt: { gte: new Date(now - RECENT_DAYS * DAY_MS) } },
+        { analytics: null },
+        { analytics: { fetchedAt: { lt: new Date(now - OLDER_REFRESH_MS) } } },
+      ],
     },
     select: { id: true },
-    take: 200,
+    orderBy: { publishedAt: 'desc' },
+    take: 600,
   });
   for (const post of recent) {
     await enqueue('sync-post-analytics', { postPlatformId: post.id }, { workspaceId });

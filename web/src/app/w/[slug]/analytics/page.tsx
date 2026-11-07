@@ -86,7 +86,7 @@ async function AnalyticsData({
   const comparison = previousRange(range);
   const accountWhere = filters.account ? { socialAccountId: filters.account } : {};
   const platformWhere = filters.platform ? { platform: filters.platform as Platform } : {};
-  const [accounts, snapshots, previousSnapshots, postRows, previousPostRows] = await Promise.all([
+  const [accounts, snapshots, previousSnapshots, postRows, previousPostRows, viewDays] = await Promise.all([
     db.socialAccount.findMany({
       where: { workspaceId: ctx.workspace.id },
       orderBy: { accountName: 'asc' },
@@ -117,6 +117,11 @@ async function AnalyticsData({
         ...platformWhere,
         ...(filters.account ? { postPlatform: { socialAccountId: filters.account } } : {}),
       },
+    }),
+    db.postAnalyticsDay.findMany({
+      where: { workspaceId: ctx.workspace.id, capturedOn: { gte: range.from, lte: range.to }, ...accountWhere, ...platformWhere },
+      orderBy: { capturedOn: 'asc' },
+      select: { postPlatformId: true, capturedOn: true, views: true, postPlatform: { select: { publishedAt: true } } },
     }),
   ]);
   const topPosts = postRows.slice(0, 5);
@@ -254,6 +259,36 @@ async function AnalyticsData({
   const totalEngagements = engagementSlices.reduce((sum, slice) => sum + slice.value, 0);
   const selectedAccount = accounts.find((account) => account.id === filters.account);
 
+  // Views over time, from each post's daily running total. The total for a day
+  // carries every post's last known count forward, so a post not synced that
+  // day does not read as a drop. The gain is how much those counts rose; a
+  // post first seen mid-range only counts from then, unless it was published
+  // inside the range, when all its views are new.
+  const viewTotals: { label: string; value: number }[] = [];
+  const viewGains: { label: string; value: number }[] = [];
+  {
+    const latestViews = new Map<string, number>();
+    const byDay = new Map<string, typeof viewDays>();
+    for (const row of viewDays) {
+      const key = row.capturedOn.toISOString().slice(0, 10);
+      byDay.set(key, [...(byDay.get(key) ?? []), row]);
+    }
+    for (const [key, rows] of byDay) {
+      let gained = 0;
+      for (const row of rows) {
+        if (row.views === null) continue;
+        const before = latestViews.get(row.postPlatformId);
+        const publishedInRange = row.postPlatform.publishedAt != null && row.postPlatform.publishedAt >= range.from;
+        if (before !== undefined) gained += Math.max(0, row.views - before);
+        else if (publishedInRange) gained += row.views;
+        latestViews.set(row.postPlatformId, row.views);
+      }
+      const label = formatInZone(new Date(`${key}T12:00:00Z`), 'UTC', 'd LLL');
+      viewTotals.push({ label, value: [...latestViews.values()].reduce((sum, value) => sum + value, 0) });
+      viewGains.push({ label, value: gained });
+    }
+  }
+
   return (
     <div className="mt-6 min-h-[760px]">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -317,6 +352,16 @@ async function AnalyticsData({
           </div>
 
           <div className="mt-6 grid gap-6 xl:grid-cols-2">
+            <ChartCard eyebrow="Growth" title="Total views over time">
+              {viewTotals.length > 1
+                ? <TrendChart points={viewTotals} colour="var(--block-lilac)" label="Total views" />
+                : <p>The trend builds from daily counts, recorded from 8 Nov 2026 on. It appears after the second day.</p>}
+            </ChartCard>
+            <ChartCard eyebrow="Growth" title="Views gained per day">
+              {viewGains.length > 1
+                ? <BarChart bars={viewGains} colour="var(--block-pink)" label="Views gained per day" every={Math.max(1, Math.ceil(viewGains.length / 6))} />
+                : <p>Daily gains appear after the second day of counts.</p>}
+            </ChartCard>
             <ChartCard eyebrow="Audience" title="Followers over time">
               {followerTrend.length > 1
                 ? <TrendChart points={followerTrend} colour="var(--block-mint)" label="Followers" />

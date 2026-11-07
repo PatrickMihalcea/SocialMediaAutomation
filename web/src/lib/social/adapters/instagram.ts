@@ -29,10 +29,9 @@ import type {
  * currently-granted status ("Ready for testing") — that page is authoritative.
  * The dashboard's own "Customize use case" summary page disagrees with it,
  * displaying this one as instagram_content_publishing; that page's wording
- * is wrong. instagram_manage_insights is not in the app's granted set at all —
- * insights live behind a separate optional permission neither page listed as
- * required, so both analytics methods below degrade to nulls rather than
- * assume it was granted.
+ * is wrong. instagram_manage_insights was added later for post insights; an
+ * account connected without it still gets likes and comments, and the
+ * insights it lacks stay unreported rather than failing the sync.
  */
 export class InstagramAdapter extends MetaAdapter {
   readonly platform = Platform.INSTAGRAM;
@@ -43,6 +42,9 @@ export class InstagramAdapter extends MetaAdapter {
     'pages_show_list',
     'pages_read_engagement',
     'business_management',
+    // Views, reach, saves and shares on each post. Granted in the app
+    // dashboard on 8 Nov 2026; accounts connected before then reconnect once.
+    'instagram_manage_insights',
   ];
 
   async exchangeCode(input: { code: string; redirectUri: string }): Promise<ConnectionResult[]> {
