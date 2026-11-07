@@ -195,6 +195,11 @@ export async function runAiMediaJob(aiMediaJobId: string): Promise<void> {
         metadata: { mimeType: result.mimeType, model: result.model },
       },
     });
+    // A video has no poster frame yet, and providers do not all report its
+    // size; the media job measures both, as it does for an upload.
+    if (asset.type === 'VIDEO') {
+      await enqueue('process-media', { mediaAssetId: asset.id }, { workspaceId: job.workspaceId, dedupeKey: `process-media:${asset.id}` });
+    }
     await incrementUsage(job.workspaceId, 'ai_generations');
     if (job.userId) {
       await notify({

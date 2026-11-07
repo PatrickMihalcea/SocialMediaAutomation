@@ -166,7 +166,9 @@ async function signPreviews(
   for (const node of nodeRuns) {
     for (const { mediaAsset: asset } of node.producedAssets) {
       keys.set(asset.id, {
-        still: asset.type === 'AUDIO' ? null : asset.thumbnailKey ?? asset.storageKey,
+        // A video file is not a picture: without a poster it has no still, and
+        // the player and strip use the file itself.
+        still: asset.type === 'AUDIO' ? null : asset.type === 'VIDEO' ? asset.thumbnailKey : asset.thumbnailKey ?? asset.storageKey,
         file: asset.storageKey,
       });
     }

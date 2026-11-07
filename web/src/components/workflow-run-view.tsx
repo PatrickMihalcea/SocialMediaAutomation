@@ -499,10 +499,13 @@ export function WorkflowRunView({
                                 tone="mint"
                                 type={MEDIA_FRAME_TYPE[asset.type] ?? 'image'}
                                 label={humanizeMachineValue(asset.filename)}
-                                src={asset.url ?? undefined}
+                                // A video plays its file and wears the still as
+                                // its poster; a picture shows the still.
+                                src={(asset.type === 'VIDEO' ? asset.fullUrl : asset.url) ?? undefined}
+                                poster={asset.type === 'VIDEO' ? asset.url ?? undefined : undefined}
                                 // Some assets record a thumbnail that was never
                                 // written; the file itself still shows.
-                                fallbackSrc={asset.fullUrl ?? undefined}
+                                fallbackSrc={asset.type === 'VIDEO' ? undefined : asset.fullUrl ?? undefined}
                                 alt={humanizeMachineValue(asset.filename)}
                                 overlay={asset.type === 'VIDEO'
                                   ? <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -667,6 +670,9 @@ export function WorkflowRunView({
               >
                 {asset.url ? (
                   <img src={asset.url} alt="" className="size-full object-cover" />
+                ) : asset.type === 'VIDEO' && asset.fullUrl ? (
+                  // No poster yet: the clip's own first frame stands in.
+                  <video src={asset.fullUrl} muted playsInline preload="metadata" className="size-full object-cover" />
                 ) : asset.type === 'AUDIO' ? (
                   // A row of blank squares says nothing about which track is
                   // which, and a track is the one thing that is only a name.
@@ -799,7 +805,8 @@ function mediaFit(viewportHeight: number, hasStrip: boolean, ratio?: string) {
     // resolved to nothing and the dialog opened on an empty space. The ratio
     // is what turns the fixed height into a width. Images need none: the
     // picture inside carries its own.
-    ...(ratio ? { aspectRatio: ratio } : {}),
+    // CSS reads "9 / 16"; "9:16" is silently ignored and the player collapses.
+    ...(ratio ? { aspectRatio: ratio.replace(':', ' / ') } : {}),
   } as const;
 }
 

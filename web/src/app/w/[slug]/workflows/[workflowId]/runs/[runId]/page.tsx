@@ -203,7 +203,9 @@ async function previewUrls(
       assets.set(asset.id, {
         // Audio has no still worth showing, and a signed URL for one is wasted
         // work — but the file itself is still wanted, so it can be played.
-        still: asset.type === 'AUDIO' ? null : asset.thumbnailKey ?? asset.storageKey,
+        // A video file is not a picture: without a poster it has no still, and
+        // the player and strip use the file itself.
+        still: asset.type === 'AUDIO' ? null : asset.type === 'VIDEO' ? asset.thumbnailKey : asset.thumbnailKey ?? asset.storageKey,
         file: asset.storageKey,
       });
     }

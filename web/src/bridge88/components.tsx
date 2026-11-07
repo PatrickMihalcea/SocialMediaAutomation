@@ -1326,8 +1326,11 @@ export function Dialog({
     };
   }, [open]);
 
-  if (!open) return null;
-  return (
+  // Rendered on <body>, not where the Dialog sits in the tree: an ancestor
+  // with a transform or containment would otherwise become the scrim's frame,
+  // and the sidebar and top bar stayed bright and clickable above it.
+  if (!open || typeof document === 'undefined') return null;
+  return createPortal(
     <div
       role="presentation"
       onClick={onClose}
@@ -1370,7 +1373,8 @@ export function Dialog({
         {children}
         {actions && <div className="flex flex-wrap justify-end gap-2">{actions}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
