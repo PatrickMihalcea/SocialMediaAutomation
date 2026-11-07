@@ -145,12 +145,12 @@ export default async function ChannelsPage({
                 <span className="shrink-0"><Badge tone={status.tone}>{status.label}</Badge></span>
               </div>
               <div className="mt-4 grid min-w-0 grid-cols-[44px_minmax(0,1fr)] items-start gap-3">
-                <Link href={`/w/${slug}/channels/${account.id}`} aria-label={`Open the ${account.accountName} dashboard`}>
+                <Link href={`/w/${slug}/analytics?account=${account.id}`} aria-label={`Open analytics for ${account.accountName}`}>
                   <Avatar name={account.accountName} src={account.avatarUrl} size={44} />
                 </Link>
                 <div className="min-w-0">
                   <Link
-                    href={`/w/${slug}/channels/${account.id}`}
+                    href={`/w/${slug}/analytics?account=${account.id}`}
                     className="line-clamp-2 min-h-12 break-normal font-[540] hover:underline [overflow-wrap:normal]"
                     title={account.accountName}
                   >
@@ -221,8 +221,8 @@ export default async function ChannelsPage({
                 </div>
               )}
               <div className="mt-auto flex flex-wrap gap-2 pt-5">
-                <Button variant="secondary" className="shrink-0" href={`/w/${slug}/channels/${account.id}`}>
-                  Dashboard <ArrowRight size={16} aria-hidden />
+                <Button variant="secondary" className="shrink-0" href={`/w/${slug}/analytics?account=${account.id}`}>
+                  Analytics <ArrowRight size={16} aria-hidden />
                 </Button>
                 {ctx.can('channel:connect') && account.status !== 'ACTIVE' && (demo ? (
                   <form action={reconnectDemoChannelAction.bind(null, slug, account.id)} className="shrink-0">
