@@ -174,7 +174,7 @@ export class TikTokAdapter extends BaseAdapter {
    * interactions and the longest video allowed are all per account.
    */
   async getCreatorInfo(account: DecryptedAccount): Promise<TikTokCreatorInfo> {
-    const res = await platformJson<{
+    const res = await this.tiktokJson<{
       data?: {
         creator_nickname?: string;
         creator_username?: string;
@@ -196,7 +196,7 @@ export class TikTokAdapter extends BaseAdapter {
       throw new PlatformError({
         platform: this.platform,
         code: res.error.code,
-        message: creatorInfoMessage(res.error.code, res.error.message),
+        message: tiktokMessage(res.error.code, res.error.message),
       });
     }
     const data = res.data ?? {};
@@ -212,6 +212,34 @@ export class TikTokAdapter extends BaseAdapter {
       stitchDisabled: Boolean(data.stitch_disabled),
       maxVideoSeconds: data.max_video_post_duration_sec ?? null,
     };
+  }
+
+  /**
+   * platformJson, but with TikTok's own reason kept.
+   *
+   * TikTok answers many refusals with a 403 that has nothing to do with the
+   * token: an unapproved app posting to a public account, a daily limit. Read
+   * as a plain 403, those said "authorization expired" and flagged a working
+   * channel for reconnection. The error code in the body says what happened.
+   */
+  private async tiktokJson<T>(req: Parameters<typeof platformJson>[0]): Promise<T> {
+    try {
+      return await platformJson<T>(req);
+    } catch (error) {
+      const code = error instanceof PlatformError ? tiktokErrorCode(error.detail) : null;
+      if (!code || !(error instanceof PlatformError)) throw error;
+      throw new PlatformError({
+        platform: this.platform,
+        code,
+        status: error.status,
+        detail: error.detail,
+        needsReconnect: TIKTOK_RECONNECT_CODES.has(code),
+        retryable: error.retryable,
+        retryAfterSeconds: error.retryAfterSeconds,
+        message: tiktokMessage(code, undefined),
+        cause: error,
+      });
+    }
   }
 
   validatePost(post: OutgoingPost): ValidationIssue[] {
@@ -270,7 +298,7 @@ export class TikTokAdapter extends BaseAdapter {
 
     const bytes = await video.read();
     const chunks = uploadChunks(bytes.byteLength);
-    const init = await platformJson<{
+    const init = await this.tiktokJson<{
       data?: { publish_id?: string; upload_url?: string };
       error?: { code?: string; message?: string };
     }>({
@@ -348,7 +376,7 @@ export class TikTokAdapter extends BaseAdapter {
 
   private async pollPublish(token: string, publishId: string): Promise<{ postId?: string }> {
     for (let i = 0; i < 40; i++) {
-      const res = await platformJson<{
+      const res = await this.tiktokJson<{
         data?: { status?: string; publicaly_available_post_id?: string[]; fail_reason?: string };
       }>({
         platform: this.platform,
@@ -437,15 +465,37 @@ export function uploadChunks(size: number): { chunkSize: number; count: number }
   return { chunkSize, count: Math.floor(size / chunkSize) };
 }
 
-function creatorInfoMessage(code: string, fallback?: string): string {
+/** TikTok error codes that mean the connection itself has to be redone. */
+const TIKTOK_RECONNECT_CODES = new Set(['access_token_invalid', 'scope_not_authorized']);
+
+function tiktokErrorCode(detail: string | undefined): string | null {
+  try {
+    const code = (JSON.parse(detail ?? '') as { error?: { code?: string } }).error?.code;
+    return code && code !== 'ok' ? code : null;
+  } catch {
+    return null;
+  }
+}
+
+function tiktokMessage(code: string, fallback?: string): string {
   switch (code) {
+    case 'unaudited_client_can_only_post_to_private_accounts':
+      return 'Until TikTok approves this app, it can only post to TikTok accounts set to Private. Make the account private in TikTok, or wait for approval.';
+    case 'access_token_invalid':
+      return 'TikTok authorization expired. Reconnect TikTok to continue publishing.';
+    case 'scope_not_authorized':
+      return 'This TikTok connection is missing a permission. Reconnect TikTok and allow everything it asks for.';
+    case 'privacy_level_option_mismatch':
+      return 'This TikTok account cannot post with the visibility chosen. Pick another and try again.';
     case 'spam_risk_too_many_posts':
       return 'This TikTok account has reached its daily posting limit. Try again later.';
+    case 'spam_risk_too_many_pending_share':
+      return 'This TikTok account has too many posts still processing. Try again once they finish.';
     case 'spam_risk_user_banned_from_posting':
       return 'TikTok is not letting this account post right now.';
     case 'reached_active_user_cap':
       return 'TikTok has limited how many accounts this app can post for today. Try again later.';
     default:
-      return fallback || 'TikTok could not say whether this account can post right now.';
+      return fallback || `TikTok refused the request (${code}).`;
   }
 }

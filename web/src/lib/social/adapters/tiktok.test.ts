@@ -9,6 +9,7 @@ vi.mock('@/lib/social/http', () => ({ platformJson, platformFetch }));
 import { TikTokAdapter, uploadChunks } from '@/lib/social/adapters/tiktok';
 import { emptyTikTokOptions, tiktokOptionsProblem, type TikTokPostOptions } from '@/lib/social/tiktok-options';
 import type { OutgoingMedia, PublishContext } from '@/lib/social/types';
+import { PlatformError } from '@/lib/social/errors';
 
 const bytes = Buffer.alloc(2_000, 1);
 
@@ -127,6 +128,27 @@ describe('posting a video to TikTok', () => {
     await new TikTokAdapter().publishVideoPost(context(options({ allowComment: true })));
 
     expect(JSON.parse(jsonCalls()[1].body!).post_info.disable_comment).toBe(true);
+  });
+
+  it("reports TikTok's own reason for a 403 instead of an expired login", async () => {
+    platformJson.mockResolvedValueOnce(creatorInfo()).mockRejectedValueOnce(
+      new PlatformError({
+        platform: 'TIKTOK',
+        code: 'AUTH',
+        status: 403,
+        needsReconnect: true,
+        message: 'TikTok authorization expired. Reconnect TikTok to continue publishing.',
+        detail: JSON.stringify({ error: { code: 'unaudited_client_can_only_post_to_private_accounts' } }),
+      }),
+    );
+
+    const failure = await new TikTokAdapter().publishVideoPost(context(options())).catch((error) => error);
+
+    expect(failure).toBeInstanceOf(PlatformError);
+    expect(failure.code).toBe('unaudited_client_can_only_post_to_private_accounts');
+    expect(failure.message).toMatch(/accounts set to Private/);
+    // The login works; the channel must not be flagged for reconnection.
+    expect(failure.needsReconnect).toBe(false);
   });
 
   it('refuses a video longer than the account may post', async () => {
