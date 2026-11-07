@@ -68,15 +68,50 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     ...(style ? [{ ...style, role: 'style' as const }] : []),
   ];
 
-  // Resume: anything a previous attempt already produced stays produced.
-  const done = asStringArray(ctx.previousOutput?.images);
-  const images: string[] = [...done];
+  const provider = resolveStepProvider(config);
+  const parallel = PARALLEL_IMAGES[provider];
   const [width, height] = config.size.split('x').map(Number);
 
-  for (let index = images.length; index < prompts.length; index++) {
-    await ctx.assertNotCancelled();
-    await ctx.heartbeat();
+  // Resume: anything a previous attempt already produced stays produced. Kept
+  // by prompt, not as a list, because pictures made side by side finish out of
+  // order and a failure can leave a gap in the middle.
+  const slots = restoreSlots(ctx.previousOutput, prompts.length);
+  const missing = prompts.map((_, index) => index).filter((index) => !slots[index]);
 
+  // What each picture in hand is doing, written down as the provider says it.
+  //
+  // One call can legitimately take minutes, and without this the step shows
+  // the same number for the whole of it — so a picture being made and a
+  // picture wedged look identical from the outside.
+  const inFlight = new Map<number, number>();
+  let stage = 'starting';
+  const snapshot = () => {
+    const images = slots.filter((id): id is string => Boolean(id));
+    const since = inFlight.size ? Math.min(...inFlight.values()) : undefined;
+    return {
+      images,
+      _slots: slots,
+      _progress: {
+        done: images.length,
+        total: prompts.length,
+        ...(inFlight.size ? { stage: inFlight.size > 1 ? `${inFlight.size} at once, ${stage}` : stage, since } : {}),
+      },
+    };
+  };
+  // Taken when asked for and written in that order. Pictures finishing
+  // together would otherwise race their saves, and an older snapshot landing
+  // last would forget one; taken at write time instead, a stage reported and
+  // replaced within one write would never be recorded at all.
+  let writing: Promise<void> = Promise.resolve();
+  const record = () => {
+    const state = snapshot();
+    // One failed write must not swallow every write after it.
+    const write = writing.catch(() => {}).then(() => ctx.saveProgress(state));
+    writing = write;
+    return write;
+  };
+
+  const renderOne = async (index: number): Promise<string> => {
     const prompt = composePrompt({
       prompt: prompts[index],
       style: config.style,
@@ -84,39 +119,20 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       referenceUse: config.referenceUse,
       hasStyleReference: Boolean(style),
     });
-    // What this picture is doing, written down as the provider says it.
-    //
-    // One call can legitimately take minutes, and without this the step shows
-    // the same number for the whole of it — so a picture being made and a
-    // picture wedged look identical from the outside.
-    let stage = 'starting';
-    const record = async () => {
-      await ctx.saveProgress({
-        images,
-        _progress: { done: images.length, total: prompts.length, stage, since: startedThisImage },
-      });
-    };
-    const startedThisImage = Date.now();
-    await record();
-
-    // Stage changes write a heartbeat, but a provider can sit on one stage for
-    // longer than the sweeper waits — a large ComfyUI render on a laptop with
-    // no step progress to report. Alive is alive, whatever it is saying.
-    const beat = setInterval(() => void ctx.heartbeat(), 60_000);
     const result = await generateImage({
       workspaceId: ctx.workspaceId,
-      userId: ctx.userId,
+      userId: ctx.userId!,
       prompt,
       size: config.size,
       references,
-      provider: resolveStepProvider(config),
+      provider,
       onStage: (next) => {
         if (next === stage) return;
         stage = next;
         // Not awaited: the generation must not wait on a status write.
         void record().catch(() => {});
       },
-    }).finally(() => clearInterval(beat));
+    });
 
     const extension = result.mimeType === 'image/svg+xml' ? 'svg' : 'png';
     const title = titles[index];
@@ -143,14 +159,85 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       },
       select: { id: true },
     });
+    return asset.id;
+  };
 
-    images.push(asset.id);
-    await ctx.emitAssets('images', [asset.id]);
-    // Persisted per item, so the work survives a crash on the next one.
-    await ctx.saveProgress({ images, _progress: { done: images.length, total: prompts.length } });
+  // Stage changes write a heartbeat, but a provider can sit on one stage for
+  // longer than the sweeper waits — a large ComfyUI render on a laptop with
+  // no step progress to report. Alive is alive, whatever it is saying.
+  const beat = setInterval(() => void ctx.heartbeat(), 60_000);
+  let failure: unknown = null;
+  let next = 0;
+  // Each lane takes the next missing picture until none are left. A failure
+  // stops new pictures starting but lets the ones already running finish and
+  // be saved: they are paid for, and the retry then asks only for the gaps.
+  const lane = async () => {
+    while (failure === null && next < missing.length) {
+      const index = missing[next++];
+      try {
+        await ctx.assertNotCancelled();
+        await ctx.heartbeat();
+        if (inFlight.size === 0) stage = 'starting';
+        inFlight.set(index, Date.now());
+        await record();
+        slots[index] = await renderOne(index);
+        await ctx.emitAssets('images', [slots[index]!]);
+      } catch (error) {
+        failure ??= error;
+      } finally {
+        inFlight.delete(index);
+      }
+      // Persisted per item, so the work survives a crash on the next one.
+      await record();
+    }
+  };
+  try {
+    await Promise.all(Array.from({ length: Math.min(parallel, missing.length) }, lane));
+  } finally {
+    clearInterval(beat);
   }
+  if (failure !== null) throw failure;
 
+  const images = slots as string[];
   return { images, titles: titles.slice(0, images.length) };
+}
+
+/**
+ * How many pictures a provider makes at once.
+ *
+ * Codex requests are independent HTTP calls, and the image CLI allows four at
+ * a time per machine — its authors measured that on a Plus account with no
+ * rate limiting — so a set of eight takes about a quarter of the time. The API
+ * is the same. ComfyUI is one GPU that each render already fills: two at once
+ * take twice as long each, with twice the memory, so it stays at one. The
+ * mock is instant, and one at a time keeps it deterministic.
+ */
+const PARALLEL_IMAGES: Record<ImageProviderName, number> = {
+  'image-use': 4,
+  openai: 4,
+  comfyui: 1,
+  mock: 1,
+};
+
+/**
+ * Which prompts already have their picture, from a previous attempt.
+ *
+ * `_slots` records it by prompt. An output written before pictures were made
+ * side by side has only `images`, which was always the first N in order.
+ */
+function restoreSlots(previous: Record<string, unknown> | null, total: number): Array<string | null> {
+  const slots = Array<string | null>(total).fill(null);
+  const saved = previous?._slots;
+  if (Array.isArray(saved)) {
+    saved.slice(0, total).forEach((id, index) => {
+      if (typeof id === 'string') slots[index] = id;
+    });
+    return slots;
+  }
+  asStringArray(previous?.images).slice(0, total).forEach((id, index) => {
+    slots[index] = id;
+  });
+  return slots;
 }
 
 function asStringArray(value: unknown): string[] {

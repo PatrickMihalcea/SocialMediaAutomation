@@ -163,3 +163,113 @@ describe('saying what it is doing', () => {
     expect(output.images).toHaveLength(4);
   });
 });
+
+/**
+ * Codex and the API take a minute an image and do not mind company, so a set
+ * of eight was eight minutes of waiting on one call at a time. ComfyUI is one
+ * GPU that a render already fills, so it stays one at a time.
+ */
+describe('making pictures side by side', () => {
+  function withProvider(provider: string, previousOutput: Record<string, unknown> | null = null, prompts = PROMPTS) {
+    const ctx = context(previousOutput);
+    (ctx as unknown as { config: Record<string, unknown> }).config = { ...(ctx.config as Record<string, unknown>), provider };
+    (ctx as unknown as { inputs: Record<string, unknown> }).inputs = { prompts };
+    return ctx;
+  }
+
+  /** A provider whose calls finish only when told to, in any order. */
+  function heldProvider() {
+    const waiting: Array<{ prompt: string; finish: () => void; fail: (error: Error) => void }> = [];
+    let peak = 0;
+    let running = 0;
+    mocks.generateImage.mockImplementation(({ prompt }: { prompt: string }) => {
+      running += 1;
+      peak = Math.max(peak, running);
+      return new Promise((resolve, reject) => {
+        waiting.push({
+          prompt,
+          finish: () => { running -= 1; resolve({ data: Buffer.from(prompt), mimeType: 'image/png', generationId: `gen-${prompt}` }); },
+          fail: (error) => { running -= 1; reject(error); },
+        });
+      });
+    });
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    return { waiting, peak: () => peak, settle };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.mediaAssetCreate.mockImplementation(async ({ data }: { data: { altText: string } }) => ({ id: `asset-${data.altText.split('\n')[0]}` }));
+  });
+
+  it('runs up to four Codex pictures at once', async () => {
+    const held = heldProvider();
+    const prompts = ['a', 'b', 'c', 'd', 'e', 'f'];
+    const done = run(withProvider('image-use', null, prompts));
+
+    await held.settle();
+    expect(held.waiting).toHaveLength(4);
+    for (let index = 0; index < prompts.length; index++) {
+      held.waiting.shift()!.finish();
+      await held.settle();
+    }
+    const output = await done;
+
+    expect(held.peak()).toBe(4);
+    expect(output.images).toEqual(prompts.map((prompt) => `asset-${prompt}`));
+  });
+
+  it('keeps the prompt order when pictures finish out of order', async () => {
+    const held = heldProvider();
+    const done = run(withProvider('image-use'));
+
+    await held.settle();
+    for (const call of [...held.waiting].reverse()) {
+      call.finish();
+      await held.settle();
+    }
+    const output = await done;
+
+    expect(output.images).toEqual(['asset-one', 'asset-two', 'asset-three', 'asset-four']);
+  });
+
+  it('saves the pictures that finished beside a failure, and leaves the gap for the retry', async () => {
+    const held = heldProvider();
+    const ctx = withProvider('image-use');
+    const done = run(ctx);
+
+    await held.settle();
+    const [one, two, three, four] = held.waiting;
+    two.fail(new Error('image-use exited with 1: no image returned'));
+    one.finish();
+    three.finish();
+    four.finish();
+
+    await expect(done).rejects.toThrow(/no image returned/);
+    const saved = (ctx.saveProgress as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
+    expect(saved._slots).toEqual(['asset-one', null, 'asset-three', 'asset-four']);
+    expect(saved._progress).toMatchObject({ done: 3, total: 4 });
+
+    // The retry asks for the one missing picture and slots it back in place.
+    mocks.generateImage.mockReset();
+    mocks.generateImage.mockResolvedValue({ data: Buffer.from('two'), mimeType: 'image/png', generationId: 'g' });
+    const output = await run(withProvider('image-use', saved));
+    expect(mocks.generateImage).toHaveBeenCalledTimes(1);
+    expect(mocks.generateImage).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'two' }));
+    expect(output.images).toEqual(['asset-one', 'asset-two', 'asset-three', 'asset-four']);
+  });
+
+  it('keeps ComfyUI to one picture at a time', async () => {
+    const held = heldProvider();
+    const done = run(withProvider('comfyui'));
+
+    for (let index = 0; index < PROMPTS.length; index++) {
+      await held.settle();
+      expect(held.waiting).toHaveLength(1);
+      held.waiting.shift()!.finish();
+    }
+    await done;
+
+    expect(held.peak()).toBe(1);
+  });
+});
