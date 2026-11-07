@@ -5,6 +5,8 @@ import type { NodeRunContext } from '@/lib/workflows/node-context';
 interface Config {
   prompt: string;
   maxClips: number;
+  seconds: number;
+  motion: 'subtle' | 'natural' | 'lively';
   provider: 'default' | 'comfyui';
   useMockGeneration: boolean;
 }
@@ -43,9 +45,11 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       workspaceId: ctx.workspaceId,
       userId: ctx.userId,
       kind: 'VIDEO_ANIMATE',
-      prompt: config.prompt,
+      prompt: withMotion(config.prompt, config.motion),
       inputAssetIds: [images[index]],
       provider: animationProvider(config),
+      seconds: config.seconds,
+      motion: config.motion,
       inline: true,
     });
     // A clip on a laptop GPU can take longer than the sweeper waits for a
@@ -78,4 +82,24 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
 export function animationProvider(config: Pick<Config, 'provider' | 'useMockGeneration'>) {
   if (config.useMockGeneration) return 'mock' as const;
   return config.provider === 'comfyui' ? 'comfyui' as const : undefined;
+}
+
+/**
+ * The amount of motion, said in the prompt.
+ *
+ * Measured on LTX-2.5: how firmly the first frame holds the still made no
+ * visible difference between the two extremes, because the model takes its
+ * motion from the words. So the setting is words, appended last where they
+ * carry most weight, and Natural adds none, leaving the camera movement as
+ * written.
+ */
+const MOTION_NOTES: Record<Config['motion'], string | null> = {
+  subtle: 'Keep the motion very subtle and slow, almost still: only the faintest movement, and the camera barely moves.',
+  natural: null,
+  lively: 'Make the motion lively and pronounced: clear, energetic movement in the scene and a confident camera move.',
+};
+
+export function withMotion(prompt: string, motion: Config['motion'] = 'natural'): string {
+  const note = MOTION_NOTES[motion];
+  return note ? `${prompt.trim()} ${note}` : prompt;
 }

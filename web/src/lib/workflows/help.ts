@@ -255,6 +255,19 @@ export const WORKFLOW_FIELD_HELP: Partial<
       label: 'Maximum clips',
       description: 'A cost guard. Extra incoming images are ignored after this number.',
     },
+    seconds: {
+      label: 'Clip length (seconds)',
+      description: 'How long each clip runs. Cut to the beat loops a clip that is shorter than its slot, which shows as a jump, so match it to the song: at 6 beats a clip, 120 BPM needs 3 s and 70 BPM needs 5 s. Longer clips take longer to render, about 6 minutes for 4 s on your Mac.',
+    },
+    motion: {
+      label: 'Amount of motion',
+      description: 'How much moves in each clip, added to the camera movement above. Subtle is close to still; Lively moves more and can drift further from the picture.',
+      optionLabels: {
+        subtle: 'Subtle — almost still',
+        natural: 'Natural — as the camera movement says',
+        lively: 'Lively — more movement, may drift',
+      },
+    },
     provider: {
       label: 'Animate with',
       description: 'ComfyUI renders each clip on your own Mac with its img2vid workflow — expect minutes per clip, and the step waits while the Mac or its local worker is off.',

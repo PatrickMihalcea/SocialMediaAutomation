@@ -19,7 +19,7 @@ import {
   OpenAiVideoGenerationProvider,
 } from '@/lib/ai/providers/external-media';
 import { env } from '@/lib/env';
-import { AiCredentialError, type AiMediaResult } from '@/lib/ai/types';
+import { AiCredentialError, type AiMediaResult, type AnimationMotion, type VideoClipOptions } from '@/lib/ai/types';
 import { IMAGE_SIZE_VALUES, type ImageSize } from '@/lib/ai/image-sizes';
 import { assertWithinLimit, currentMonthUsage, incrementUsage } from '@/lib/billing/limits';
 import { notify } from '@/lib/notifications/service';
@@ -83,6 +83,9 @@ export async function createAiMediaJob(input: {
    * time — on a laptop GPU, half the speed for both.
    */
   inline?: boolean;
+  /** Video only. Rides in metadata for the same reason size does. */
+  seconds?: number;
+  motion?: AnimationMotion;
 }): Promise<{ id: string; kind: AiMediaJobKind; status: JobStatus; provider: string }> {
   const used = await currentMonthUsage(input.workspaceId, 'ai_generations');
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);
@@ -98,7 +101,11 @@ export async function createAiMediaJob(input: {
       model: descriptor.model,
       prompt: input.prompt,
       inputAssetIds: input.inputAssetIds ?? [],
-      metadata: input.size ? { size: input.size } : {},
+      metadata: {
+        ...(input.size ? { size: input.size } : {}),
+        ...(input.seconds ? { seconds: input.seconds } : {}),
+        ...(input.motion ? { motion: input.motion } : {}),
+      },
     },
     // provider comes back so the caller can say which source is running this
     // before the worker has touched it — a demo fixture should be labelled the
@@ -126,7 +133,7 @@ export async function runAiMediaJob(aiMediaJobId: string): Promise<void> {
   let generationRecorded = false;
   try {
     const inputs = await loadInputs(job.workspaceId, job.inputAssetIds);
-    const result = await produce(job.kind, job.prompt, inputs, job.provider, requestedSize(job.metadata));
+    const result = await produce(job.kind, job.prompt, inputs, job.provider, requestedSize(job.metadata), requestedClip(job.metadata));
     const latest = await db.aiMediaJob.findUnique({ where: { id: job.id }, select: { status: true } });
     // Cancellation is durable and server-side. A provider request that was already
     // in flight may finish, but its bytes must not become a new library asset.
@@ -246,6 +253,7 @@ async function produce(
   inputs: Awaited<ReturnType<typeof loadInputs>>,
   provider: string,
   size?: ImageSize,
+  clip: VideoClipOptions = {},
 ): Promise<AiMediaResult> {
   const external = provider === 'openai';
   const image = inputs[0];
@@ -268,8 +276,8 @@ async function produce(
   }
   if (kind === 'IMAGE_EDIT') return editor.editImage({ prompt, ...requiredInput(image, kind) });
   if (kind === 'IMAGE_VARIATION') return editor.createVariation({ prompt, ...requiredInput(image, kind) });
-  if (kind === 'VIDEO_GENERATE') return video.generateVideo({ prompt });
-  if (kind === 'VIDEO_ANIMATE') return video.animateImage({ prompt, image: requiredInput(image, kind).image });
+  if (kind === 'VIDEO_GENERATE') return video.generateVideo({ prompt, ...clip });
+  if (kind === 'VIDEO_ANIMATE') return video.animateImage({ prompt, image: requiredInput(image, kind).image, ...clip });
   if (kind === 'AUDIO_TTS') return audio.textToSpeech({ text: prompt });
   throw new PermanentJobError(`${kind} produces text, not a MediaAsset, and is not a studio generation job.`);
 }
@@ -319,6 +327,15 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
 };
+
+/** Clip length and motion, each ignored unless it is one the app offers. */
+function requestedClip(metadata: unknown): VideoClipOptions {
+  const { seconds, motion } = (metadata ?? {}) as { seconds?: unknown; motion?: unknown };
+  return {
+    ...(typeof seconds === 'number' && Number.isInteger(seconds) && seconds > 0 ? { seconds } : {}),
+    ...(motion === 'subtle' || motion === 'natural' || motion === 'lively' ? { motion } : {}),
+  };
+}
 
 /** A stored provider string, narrowed back to a name the factory understands. */
 function imageProviderName(provider: string): ImageProviderName | undefined {

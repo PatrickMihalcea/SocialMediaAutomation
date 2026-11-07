@@ -77,19 +77,19 @@
   "20": {
     "class_type": "EmptyLTXVLatentVideo",
     "_meta": {
-      "title": "288x512, 97 frames (4s); refined at 576x1024"
+      "title": "288x512 draft of {{frames}} frames at 24 fps; refined at 576x1024"
     },
     "inputs": {
       "width": 288,
       "height": 512,
-      "length": 97,
+      "length": "{{frames}}",
       "batch_size": 1
     }
   },
   "21": {
     "class_type": "LTXVEmptyLatentAudio",
     "inputs": {
-      "frames_number": 97,
+      "frames_number": "{{frames}}",
       "frame_rate": 24,
       "batch_size": 1,
       "audio_vae": [
@@ -381,7 +381,7 @@
         "20",
         0
       ],
-      "strength": 0.7,
+      "strength": "{{motion_strength}}",
       "bypass": false
     }
   },

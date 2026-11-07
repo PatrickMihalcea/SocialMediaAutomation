@@ -45,6 +45,11 @@ describe('ComfyUI media jobs', () => {
     expect(enqueue.mock.calls[0][2]).not.toHaveProperty('queue');
   });
 
+  it('records the clip length and motion with the job, so the worker renders what was asked', async () => {
+    await createAiMediaJob({ ...base, kind: 'VIDEO_ANIMATE', provider: 'comfyui', seconds: 6, motion: 'subtle' });
+    expect(dbMock.aiMediaJob.create.mock.calls[0][0].data.metadata).toEqual({ seconds: 6, motion: 'subtle' });
+  });
+
   /** Queued as well as run inline, the same clip rendered twice at once. */
   it('queues nothing for a job its caller runs itself', async () => {
     await createAiMediaJob({ ...base, kind: 'VIDEO_ANIMATE', provider: 'comfyui', inline: true });

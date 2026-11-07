@@ -51,12 +51,25 @@ export interface ImageEditingProvider {
   createVariation(input: { image: Buffer; mimeType: string; prompt?: string }): Promise<AiMediaResult>;
 }
 
+/**
+ * How far an animation may move away from its still. Named rather than a
+ * number because the number means something different to every model.
+ */
+export type AnimationMotion = 'subtle' | 'natural' | 'lively';
+
+export interface VideoClipOptions {
+  /** Clip length. Providers that render a fixed length ignore it. */
+  seconds?: number;
+  /** Image to video only. Providers without such a control ignore it. */
+  motion?: AnimationMotion;
+}
+
 export interface VideoGenerationProvider {
   readonly name: string;
   readonly model: string;
   isConfigured(): boolean;
-  generateVideo(input: { prompt: string; image?: Buffer }): Promise<AiMediaResult>;
-  animateImage(input: { prompt: string; image: Buffer }): Promise<AiMediaResult>;
+  generateVideo(input: { prompt: string; image?: Buffer } & VideoClipOptions): Promise<AiMediaResult>;
+  animateImage(input: { prompt: string; image: Buffer } & VideoClipOptions): Promise<AiMediaResult>;
 }
 
 export interface AudioProvider {

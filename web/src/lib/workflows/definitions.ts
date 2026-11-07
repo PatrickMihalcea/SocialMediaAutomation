@@ -420,6 +420,14 @@ export const NODE_DEFINITIONS = {
       prompt: z.string().max(1000).default('Slow cinematic push in, subject stays centred.'),
       maxClips: z.number().int().min(1).max(12).default(8),
       /**
+       * Length of each clip. Matters beyond taste: Beat slideshow loops a clip
+       * that is shorter than its slot, which shows as a jump. The ceiling is
+       * what LTX-2.5 renders without crashing on the M4 Max at 576x1024.
+       */
+      seconds: z.number().int().min(2).max(6).default(4),
+      /** How much moves. Said in the prompt; see withMotion in nodes/animate-image. */
+      motion: z.enum(['subtle', 'natural', 'lively']).default('natural'),
+      /**
        * The deployment's video provider, or ComfyUI on the operator's Mac.
        * Mock stays the flag below, which wins over this when set.
        */

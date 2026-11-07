@@ -12,6 +12,7 @@ vi.mock('@/lib/env', () => ({
 
 import {
   baseSize,
+  clipValues,
   ComfyClient,
   ComfyUiProvider,
   fillTemplate,
@@ -80,6 +81,26 @@ describe('the base size a model was trained at', () => {
   });
 });
 
+describe('clip length and motion', () => {
+  it('turns seconds into a frame count LTX accepts, one more than a multiple of eight', () => {
+    for (const seconds of [2, 3, 4, 5, 6]) {
+      const { frames } = clipValues({ seconds });
+      expect(frames).toBe(seconds * 24 + 1);
+      expect((frames - 1) % 8).toBe(0);
+    }
+  });
+
+  it('defaults to four seconds of natural motion, what the workflows rendered before either was a setting', () => {
+    expect(clipValues({})).toEqual({ seconds: 4, frames: 97, motion_strength: 0.7 });
+  });
+
+  it('holds the still more firmly the subtler the motion', () => {
+    const strength = (motion: 'subtle' | 'natural' | 'lively') => clipValues({ motion }).motion_strength;
+    expect(strength('subtle')).toBeGreaterThan(strength('natural'));
+    expect(strength('natural')).toBeGreaterThan(strength('lively'));
+  });
+});
+
 describe('loading workflow files', () => {
   const directory = mkdtempSync(join(tmpdir(), 'comfy-templates-'));
   afterAll(() => rmSync(directory, { recursive: true, force: true }));
@@ -136,6 +157,8 @@ describe('ComfyUiProvider against a ComfyUI server', () => {
     writeFileSync(join(directory, 'img2vid.json'), JSON.stringify({
       '1': { class_type: 'LoadImage', inputs: { image: '{{image}}' } },
       '2': { class_type: 'CLIPTextEncode', inputs: { text: '{{prompt}}' } },
+      '3': { class_type: 'EmptyLTXVLatentVideo', inputs: { length: '{{frames}}' } },
+      '4': { class_type: 'LTXVImgToVideoInplace', inputs: { strength: '{{motion_strength}}' } },
     }));
     server = createServer(async (request, response) => {
       const url = new URL(request.url ?? '/', 'http://x');
@@ -223,10 +246,12 @@ describe('ComfyUiProvider against a ComfyUI server', () => {
    */
   it('uploads the still and returns the clip for an animation, silent if the sound cannot be joined', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = await new ComfyUiProvider().animateImage({ prompt: 'slow push in', image: PNG });
+    const result = await new ComfyUiProvider().animateImage({ prompt: 'slow push in', image: PNG, seconds: 6, motion: 'lively' });
     const graph = posted?.prompt as Record<string, { inputs: Record<string, unknown> }>;
     expect(uploads).toBe(1);
     expect(graph['1'].inputs.image).toBe('bridge88/still.png');
+    expect(graph['3'].inputs.length).toBe(145);
+    expect(graph['4'].inputs.strength).toBe(0.5);
     expect(result).toMatchObject({ data: MP4, mimeType: 'video/mp4', extension: 'mp4', model: 'comfyui:img2vid' });
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/could not join the soundtrack/), expect.anything());
     warn.mockRestore();

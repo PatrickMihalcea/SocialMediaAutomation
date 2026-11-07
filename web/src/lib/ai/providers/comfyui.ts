@@ -17,7 +17,9 @@ import {
   type AiObjectResult,
   type AiProvider,
   type AiTextResult,
+  type AnimationMotion,
   type ImageEditingProvider,
+  type VideoClipOptions,
   type VideoGenerationProvider,
 } from '@/lib/ai/types';
 import type { ImageSize } from '@/lib/ai/image-sizes';
@@ -481,15 +483,15 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     }));
   }
 
-  async generateVideo(input: { prompt: string; image?: Buffer }): Promise<AiMediaResult> {
-    if (input.image) return this.animateImage({ prompt: input.prompt, image: input.image });
-    return this.render({ operation: 'txt2vid', want: 'video', prompt: input.prompt, references: [], values: {} });
+  async generateVideo(input: { prompt: string; image?: Buffer } & VideoClipOptions): Promise<AiMediaResult> {
+    if (input.image) return this.animateImage({ ...input, image: input.image });
+    return this.render({ operation: 'txt2vid', want: 'video', prompt: input.prompt, references: [], values: clipValues(input) });
   }
 
-  async animateImage(input: { prompt: string; image: Buffer }): Promise<AiMediaResult> {
+  async animateImage(input: { prompt: string; image: Buffer } & VideoClipOptions): Promise<AiMediaResult> {
     const mimeType = (await sharp(input.image).metadata().catch(() => null))?.format === 'jpeg' ? 'image/jpeg' : 'image/png';
     return this.render({
-      operation: 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: {},
+      operation: 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input),
     });
   }
 
@@ -561,6 +563,38 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     const probed = await sharp(result.data).metadata().catch(() => null);
     return { ...result, width: probed?.width, height: probed?.height };
   }
+}
+
+/** Frames per second the shipped video workflows render at; {{frames}} assumes it. */
+const CLIP_FPS = 24;
+const DEFAULT_CLIP_SECONDS = 4;
+
+/**
+ * How firmly the first frame holds the still in LTX's draft pass. A minor
+ * lever: measured between the two extremes it changed almost nothing, since
+ * LTX takes its motion from the prompt, which is where the Animate image
+ * step says the amount (withMotion). Kept so a subtle clip also drifts less.
+ */
+const MOTION_STRENGTH: Record<AnimationMotion, number> = {
+  subtle: 0.85,
+  natural: 0.7,
+  lively: 0.5,
+};
+
+/**
+ * Length and motion as workflow values.
+ *
+ * `{{frames}}` is one more than a multiple of eight, which is what LTX's
+ * latent wants, and whole seconds at 24 fps always are. A workflow that does
+ * not use these simply ignores them.
+ */
+export function clipValues(options: VideoClipOptions): Record<string, number> {
+  const seconds = Math.max(1, Math.round(options.seconds ?? DEFAULT_CLIP_SECONDS));
+  return {
+    seconds,
+    frames: seconds * CLIP_FPS + 1,
+    motion_strength: MOTION_STRENGTH[options.motion ?? 'natural'],
+  };
 }
 
 /**
