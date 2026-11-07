@@ -8,6 +8,7 @@ interface Config {
   seconds: number;
   motion: 'subtle' | 'natural' | 'lively';
   sound: boolean;
+  soundPrompt?: string;
   provider: 'default' | 'comfyui';
   useMockGeneration: boolean;
 }
@@ -46,7 +47,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       workspaceId: ctx.workspaceId,
       userId: ctx.userId,
       kind: 'VIDEO_ANIMATE',
-      prompt: withMotion(config.prompt, config.motion),
+      prompt: withSound(withMotion(config.prompt, config.motion), config),
       inputAssetIds: [images[index]],
       provider: animationProvider(config),
       seconds: config.seconds,
@@ -104,4 +105,14 @@ const MOTION_NOTES: Record<Config['motion'], string | null> = {
 export function withMotion(prompt: string, motion: Config['motion'] = 'natural'): string {
   const note = MOTION_NOTES[motion];
   return note ? `${prompt.trim()} ${note}` : prompt;
+}
+
+/**
+ * What the clip should sound like, said in the prompt. LTX makes picture and
+ * sound from one prompt, so there is no separate input: a sentence about the
+ * sound is how it is steered. Left out when sound is off.
+ */
+export function withSound(prompt: string, config: Pick<Config, 'sound' | 'soundPrompt'>): string {
+  const sound = config.soundPrompt?.trim();
+  return config.sound && sound ? `${prompt} Sound: ${sound.replace(/[.\s]+$/, '')}.` : prompt;
 }

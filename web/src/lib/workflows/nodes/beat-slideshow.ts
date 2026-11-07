@@ -22,6 +22,8 @@ interface Config {
   kenBurns: boolean;
   visualLeadMs: number;
   fadeOutSeconds: number;
+  /** The clips' own sound under the music, 0 to 100. */
+  clipVolume?: number;
 }
 
 const SUPERSAMPLE = 2;
@@ -111,6 +113,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     supersample: SUPERSAMPLE,
     clips,
     deterministic: false,
+    clipVolume: (config.clipVolume ?? 0) / 100,
     segments: plan.cutFrames.slice(0, -1).map((startFrame, index) => ({
       clipIndex: index,
       startFrame,

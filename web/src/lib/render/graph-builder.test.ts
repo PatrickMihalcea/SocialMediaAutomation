@@ -169,3 +169,22 @@ describe('buildClipInputArgs', () => {
     ]);
   });
 });
+
+describe('clip sound under the music', () => {
+  const video = (hasAudio: boolean) => ({ kind: 'video' as const, bytes: Buffer.alloc(0), mimeType: 'video/mp4', fit: 'cover' as const, hasAudio });
+  const clips = [video(true), video(false), { kind: 'image' as const, bytes: Buffer.alloc(0), mimeType: 'image/png', fit: 'cover' as const }];
+
+  it('leaves the clips out at volume 0', () => {
+    const graph = buildFilterGraph(plan({ clips, clipVolume: 0 }));
+    expect(graph).not.toContain('amix');
+    expect(graph).not.toContain('[0:a]');
+  });
+
+  it('mixes only clips that have sound, placed where each one plays', () => {
+    const graph = buildFilterGraph(plan({ clips, clipVolume: 0.4 }));
+    // Clip 0 has sound and starts at 0; clip 1 is silent; clip 2 is a still.
+    expect(graph).toContain('[0:a]atrim=duration=2.000000,asetpts=PTS-STARTPTS,aresample=48000,adelay=0:all=1,volume=0.40[clip0]');
+    expect(graph).not.toContain('[1:a]');
+    expect(graph).toContain('[music][clip0]amix=inputs=2:duration=first:normalize=0,atrim=0:7.500000,asetpts=PTS-STARTPTS[a]');
+  });
+});

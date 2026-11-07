@@ -263,6 +263,11 @@ export const WORKFLOW_FIELD_HELP: Partial<
       label: 'Generate sound',
       description: 'Keep the sound the video model makes for each clip. Off by default: clips are saved silent, which suits a video that gets its own music later.',
     },
+    soundPrompt: {
+      label: 'Sound prompt',
+      description: 'What each clip should sound like, for example "wind through ruins, distant thunder, no music". Added to the prompt; used only while Generate sound is on.',
+      multiline: true,
+    },
     motion: {
       label: 'Amount of motion',
       description: 'How much moves in each clip, added to the camera movement above. Subtle is close to still; Lively moves more and can drift further from the picture.',
@@ -379,6 +384,10 @@ export const WORKFLOW_FIELD_HELP: Partial<
     fadeOutSeconds: {
       label: 'Audio fade out',
       description: 'Seconds used to fade the track at the end.',
+    },
+    clipVolume: {
+      label: 'Clip sound volume',
+      description: 'How loud each video clip\'s own sound plays under the music, from 0 to 100. 0 leaves it out; 100 is the clip at full volume. Clips made without sound add nothing.',
     },
   },
   COMBINE_MEDIA: {

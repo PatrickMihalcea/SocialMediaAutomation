@@ -133,6 +133,8 @@ const beatSlideshowConfigSchema = z
     /** Visual lead in ms: a cut exactly on the transient can read a hair late. */
     visualLeadMs: z.number().int().min(0).max(200).default(0),
     fadeOutSeconds: z.number().min(0).max(5).default(1.2),
+    /** The clips' own sound under the music, in percent. 0 leaves it out. */
+    clipVolume: z.number().int().min(0).max(100).default(0),
   })
   .superRefine((config, ctx) => {
     if ((config.width == null) !== (config.height == null)) {
@@ -429,6 +431,8 @@ export const NODE_DEFINITIONS = {
       motion: z.enum(['subtle', 'natural', 'lively']).default('natural'),
       /** Keep the sound the video model generates. Off saves each clip silent. */
       sound: z.boolean().default(false),
+      /** What the clips should sound like; used only while sound is on. */
+      soundPrompt: z.string().max(500).default(''),
       /**
        * The deployment's video provider, or ComfyUI on the operator's Mac.
        * Mock stays the flag below, which wins over this when set.

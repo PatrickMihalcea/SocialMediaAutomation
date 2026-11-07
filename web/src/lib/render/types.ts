@@ -16,6 +16,8 @@ export interface RenderClip extends RenderImage {
   kind: 'image' | 'video';
   /** Images are already laid out PNGs; videos are original encoded bytes. */
   fit: 'cover' | 'blur-pad';
+  /** Set by the driver: whether a video carries sound to mix in. */
+  hasAudio?: boolean;
 }
 
 export interface KenBurns {
@@ -86,6 +88,8 @@ export interface RenderPlan {
   clips: RenderClip[];
   segments: RenderSegment[];
   audio: RenderAudio | null;
+  /** Volume of the clips' own sound under the music, 0 to 1. 0 leaves it out. */
+  clipVolume?: number;
   /** Trades throughput for byte-reproducible output. */
   deterministic: boolean;
 }

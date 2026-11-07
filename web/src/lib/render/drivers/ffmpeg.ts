@@ -38,11 +38,19 @@ export class FfmpegRenderer implements VideoRenderer {
         await writeFile(file, clip.bytes);
         clipPaths.push({ file, kind: clip.kind });
       }
+      // Only asked when the clips' sound is wanted: mixing in a stream a
+      // silent clip does not have would fail the whole render.
+      const clips = (plan.clipVolume ?? 0) > 0
+        ? await Promise.all(plan.clips.map(async (clip, index) => (
+            clip.kind === 'video' ? { ...clip, hasAudio: await hasAudioStream(clipPaths[index].file) } : clip
+          )))
+        : plan.clips;
 
       // Overlay text goes to files, which shrinks drawtext's double-escaping
       // surface down to a path we control.
       const resolved: ResolvedRenderPlan = {
         ...plan,
+        clips,
         segments: await Promise.all(
           plan.segments.map(async (segment, index) => ({
             ...segment,
@@ -107,4 +115,13 @@ function videoExtension(mimeType: string): string {
   if (mimeType.includes('webm')) return 'webm';
   if (mimeType.includes('quicktime')) return 'mov';
   return 'mp4';
+}
+
+async function hasAudioStream(file: string): Promise<boolean> {
+  try {
+    const { stdout } = await run('ffprobe', ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', file]);
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
 }

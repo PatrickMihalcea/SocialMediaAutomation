@@ -151,15 +151,35 @@ function audioChain(plan: ResolvedRenderPlan, inputIndex: number): string {
   const audio = plan.audio!;
   const total = plan.totalFrames / plan.fps;
   const fadeOutStart = Math.max(0, total - audio.fadeOutSeconds);
-  return (
+  const music =
     `[${inputIndex}:a]atrim=start=${audio.startSeconds.toFixed(6)},asetpts=PTS-STARTPTS,` +
     // The short fade-in is not decoration: cutting mid-waveform clicks.
     `afade=t=in:st=0:d=${audio.fadeInSeconds.toFixed(3)},` +
     `afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${audio.fadeOutSeconds.toFixed(3)},` +
-    `aresample=48000:first_pts=0,` +
-    // Guarantees audio never outruns video, so -shortest is not needed.
-    `atrim=0:${total.toFixed(6)},asetpts=PTS-STARTPTS[a]`
-  );
+    `aresample=48000:first_pts=0`;
+  // Guarantees audio never outruns video, so -shortest is not needed.
+  const end = `atrim=0:${total.toFixed(6)},asetpts=PTS-STARTPTS[a]`;
+
+  // Each clip's own sound, cut to the part of the clip that is used and placed
+  // where that clip appears, under the music at the chosen volume.
+  const volume = plan.clipVolume ?? 0;
+  const voiced = volume > 0
+    ? plan.segments.filter((segment) => plan.clips[segment.clipIndex]?.hasAudio)
+    : [];
+  if (!voiced.length) return `${music},${end}`;
+  const lines = [`${music}[music]`];
+  voiced.forEach((segment, index) => {
+    const start = Math.round((segment.startFrame / plan.fps) * 1000);
+    const length = (segment.endFrame - segment.startFrame) / plan.fps;
+    lines.push(
+      `[${segment.clipIndex}:a]atrim=duration=${length.toFixed(6)},asetpts=PTS-STARTPTS,` +
+        `aresample=48000,adelay=${start}:all=1,volume=${volume.toFixed(2)}[clip${index}]`,
+    );
+  });
+  const mixed = voiced.map((_, index) => `[clip${index}]`).join('');
+  // normalize=0 keeps the music at its own level instead of dividing it down.
+  lines.push(`[music]${mixed}amix=inputs=${voiced.length + 1}:duration=first:normalize=0,${end}`);
+  return lines.join(';\n');
 }
 
 /** Colons and backslashes are filtergraph separators and must be escaped. */
