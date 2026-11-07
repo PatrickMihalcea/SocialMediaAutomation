@@ -1,7 +1,10 @@
 import 'server-only';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { extname, isAbsolute, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import sharp from 'sharp';
 import { env } from '@/lib/env';
 import {
@@ -62,6 +65,8 @@ const MIME_TYPES: Record<string, string> = {
   '.mov': 'video/quicktime',
 };
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.gif']);
+const AUDIO_EXTENSIONS = new Set(['.flac', '.wav', '.mp3']);
+const run = promisify(execFile);
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 const POLL_MS = 1_000;
@@ -458,7 +463,7 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
       // Diffusion models work in latent tiles, and a size off the grid is
       // either refused or quietly cropped. 1820 is what 9:16 at 1024 wide
       // comes to, and 1824 is the nearest a model can actually make.
-      values: { width: toGrid(width), height: toGrid(height) },
+      values: { width: toGrid(width), height: toGrid(height), ...baseSize(width, height) },
       onStage: input.onStage,
     });
     return { data: result.data, mimeType: result.mimeType, model: result.model, usage: {} };
@@ -538,8 +543,13 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     }
     input.onStage?.('downloading result');
     const extension = extname(file.filename).toLowerCase();
+    let data = await this.client.download(file);
+    const sound = input.want === 'video'
+      ? files.find((candidate) => AUDIO_EXTENSIONS.has(extname(candidate.filename).toLowerCase()))
+      : undefined;
+    if (sound && extension === '.mp4') data = await withSoundtrack(data, await this.client.download(sound), extname(sound.filename));
     return {
-      data: await this.client.download(file),
+      data,
       mimeType: MIME_TYPES[extension],
       extension: extension.slice(1),
       model: `comfyui:${template.name}`,
@@ -550,6 +560,44 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
   private async withDimensions(result: AiMediaResult): Promise<AiMediaResult> {
     const probed = await sharp(result.data).metadata().catch(() => null);
     return { ...result, width: probed?.width, height: probed?.height };
+  }
+}
+
+/**
+ * The same shape at about one megapixel, on a 64-pixel grid.
+ *
+ * What SDXL- and FLUX-class models were trained at. Asked for 1024x1820
+ * directly they tend to repeat the subject down the frame; a workflow that
+ * renders at this size and then upscales to {{width}}x{{height}} does not.
+ */
+export function baseSize(width: number, height: number): { base_width: number; base_height: number } {
+  const scale = Math.sqrt((1024 * 1024) / (width * height));
+  const snap = (value: number) => Math.max(512, Math.round((value * scale) / 64) * 64);
+  return { base_width: snap(width), base_height: snap(height) };
+}
+
+/**
+ * The clip with its soundtrack joined on.
+ *
+ * A workflow that makes sound saves it as its own file, because ComfyUI's own
+ * muxer hands the whole soundtrack to the AAC encoder as one frame and the
+ * encoder refuses it — the render finishes and then the save fails. ffmpeg does
+ * the same join properly. Without ffmpeg the clip still arrives, silent, rather
+ * than throwing away a render that took a quarter of an hour.
+ */
+async function withSoundtrack(video: Buffer, audio: Buffer, audioExtension: string): Promise<Buffer> {
+  const directory = await mkdtemp(join(tmpdir(), 'comfyui-mux-'));
+  try {
+    const [videoPath, audioPath, outPath] = ['video.mp4', `audio${audioExtension}`, 'out.mp4'].map((name) => join(directory, name));
+    await writeFile(videoPath, video);
+    await writeFile(audioPath, audio);
+    await run('ffmpeg', ['-v', 'error', '-y', '-i', videoPath, '-i', audioPath, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', outPath]);
+    return await readFile(outPath);
+  } catch (error) {
+    console.warn('[comfyui] could not join the soundtrack; keeping the silent clip', error);
+    return video;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 }
 

@@ -11,6 +11,7 @@ vi.mock('@/lib/env', () => ({
 }));
 
 import {
+  baseSize,
   ComfyClient,
   ComfyUiProvider,
   fillTemplate,
@@ -68,6 +69,14 @@ describe('filling a workflow in', () => {
   it('refuses a file asking for something the operation does not supply', () => {
     expect(() => fillTemplate(template('txt2img', { '1': { inputs: { x: '{{frames}}' } } }), {}))
       .toThrow(/\{\{frames\}\}/);
+  });
+});
+
+describe('the base size a model was trained at', () => {
+  it('keeps the shape at about a megapixel', () => {
+    expect(baseSize(1024, 1820)).toEqual({ base_width: 768, base_height: 1344 });
+    expect(baseSize(1024, 1024)).toEqual({ base_width: 1024, base_height: 1024 });
+    expect(baseSize(1536, 1024)).toEqual({ base_width: 1280, base_height: 832 });
   });
 });
 
@@ -157,7 +166,9 @@ describe('ComfyUiProvider against a ComfyUI server', () => {
         const video = (posted?.prompt as Record<string, unknown>)?.['1'] !== undefined;
         return send(200, {
           p1: {
-            outputs: { '9': video ? { gifs: [{ filename: 'clip.mp4', subfolder: '', type: 'output' }] } : { images: [{ filename: 'out.png', subfolder: '', type: 'output' }] } },
+            outputs: video
+              ? { '9': { gifs: [{ filename: 'clip.mp4', subfolder: '', type: 'output' }] }, '10': { audio: [{ filename: 'sound.flac', subfolder: '', type: 'output' }] } }
+              : { '9': { images: [{ filename: 'out.png', subfolder: '', type: 'output' }] } },
             status: { status_str: 'success', completed: true, messages: [] },
           },
         });
@@ -204,12 +215,21 @@ describe('ComfyUiProvider against a ComfyUI server', () => {
     expect(stages).toContain('rendering');
   });
 
-  it('uploads the still and returns the clip for an animation', async () => {
+  /**
+   * The soundtrack comes back as its own file and is joined with ffmpeg. These
+   * bytes are not a real clip, so the join fails, and what this pins down is
+   * the fallback: a render that took a quarter of an hour arrives silent rather
+   * than not at all.
+   */
+  it('uploads the still and returns the clip for an animation, silent if the sound cannot be joined', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const result = await new ComfyUiProvider().animateImage({ prompt: 'slow push in', image: PNG });
     const graph = posted?.prompt as Record<string, { inputs: Record<string, unknown> }>;
     expect(uploads).toBe(1);
     expect(graph['1'].inputs.image).toBe('bridge88/still.png');
     expect(result).toMatchObject({ data: MP4, mimeType: 'video/mp4', extension: 'mp4', model: 'comfyui:img2vid' });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/could not join the soundtrack/), expect.anything());
+    warn.mockRestore();
   });
 
   it('passes on what ComfyUI said when it refuses the graph, and does not retry it', async () => {

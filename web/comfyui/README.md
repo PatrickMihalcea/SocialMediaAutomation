@@ -41,8 +41,9 @@ connections: to Neon, to R2 and to ComfyUI on localhost.
    | `variation.json` | Studio variations |
 
    You only need the files for the operations you use. A missing one fails
-   that job with a message naming the file. `examples/txt2img.json` is a
-   starting point for plain SDXL.
+   that job with a message naming the file. The files already in
+   `workflows/` are the ones in use (see **Models in use** below), and
+   `candidates/` holds the alternatives that were tested against them.
 
 3. **Replace the inputs with placeholders.** Edit the exported JSON and put a
    placeholder wherever this app should fill something in:
@@ -52,6 +53,7 @@ connections: to Neon, to R2 and to ComfyUI on localhost.
    | `{{prompt}}` | The prompt (style and reference notes included) |
    | `{{negative_prompt}}` | Empty for now |
    | `{{width}}`, `{{height}}` | The requested size, rounded to a multiple of 16 |
+| `{{base_width}}`, `{{base_height}}` | The same shape at about 1 megapixel (768×1344 for 9:16), which is what SDXL and FLUX were trained at. Render at this size, then upscale to `{{width}}`×`{{height}}` |
    | `{{seed}}` | A random seed per render |
    | `{{image}}` | The source image (edit, variation, img2vid). Put it in a **Load Image** node's `image` |
    | `{{subject_image}}`, `{{style_image}}`, `{{composition_image}}` | Reference pictures from an Image generator step, each in its own **Load Image** node |
@@ -88,6 +90,36 @@ connections: to Neon, to R2 and to ComfyUI on localhost.
    # edit the two /PATH/TO placeholders in the copy, then:
    launchctl load ~/Library/LaunchAgents/com.bridge88.local-worker.plist
    ```
+
+## Models in use
+
+Chosen by testing on an M4 Max with 128 GB of memory, November 2026.
+
+| File | Model | Time on the M4 Max | Licence |
+|---|---|---|---|
+| `txt2img.json` | FLUX.3 Klein (distilled), 1024×1824 | about 2 min an image | Free while revenue is under US$5M |
+| `img2vid.json` | LTX-2.5 22B distilled, 576×1024, 4 s with sound | see the showcase page | Free while revenue is under US$10M |
+| `txt2vid.json` | LTX-2.5 22B distilled, 576×1024, 4 s with sound | see the showcase page | Free while revenue is under US$10M |
+
+`candidates/` also has Z-Image Turbo (about 85 s an image, Apache 2.0, a
+little less faithful to the prompt) and the original SDXL file.
+
+The model files live in ComfyUI's own models folder, not in this repo. FLUX.3
+and LTX-2.5 are gated on Hugging Face: accept their terms while signed in,
+then download with a read token.
+
+**Video needs one ComfyUI setting.** LTX-2.5 renders all-black frames on
+Apple silicon unless ComfyUI starts with `--use-split-cross-attention`
+([ComfyUI issue 15818](https://github.com/Comfy-Org/ComfyUI/issues/15818)). In
+ComfyUI Desktop that goes in the installation's launch arguments, next to
+`--enable-manager`. Even with it, full-resolution attention at 704×1280 over
+5 seconds crashes PyTorch on this Mac, which is why the clips are 576×1024
+for 4 seconds.
+
+**Sound is saved separately.** ComfyUI's own video save fails when a clip has
+sound (it hands the whole soundtrack to the AAC encoder at once), so the video
+workflows save the picture and the soundtrack as two files and the app joins
+them with ffmpeg. Without ffmpeg the clip still arrives, silent.
 
 ## Using it
 
