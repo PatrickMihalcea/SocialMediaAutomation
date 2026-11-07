@@ -485,13 +485,13 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
 
   async generateVideo(input: { prompt: string; image?: Buffer } & VideoClipOptions): Promise<AiMediaResult> {
     if (input.image) return this.animateImage({ ...input, image: input.image });
-    return this.render({ operation: 'txt2vid', want: 'video', prompt: input.prompt, references: [], values: clipValues(input) });
+    return this.render({ operation: 'txt2vid', want: 'video', prompt: input.prompt, references: [], values: clipValues(input), sound: input.sound });
   }
 
   async animateImage(input: { prompt: string; image: Buffer } & VideoClipOptions): Promise<AiMediaResult> {
     const mimeType = (await sharp(input.image).metadata().catch(() => null))?.format === 'jpeg' ? 'image/jpeg' : 'image/png';
     return this.render({
-      operation: 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input),
+      operation: 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input), sound: input.sound,
     });
   }
 
@@ -502,6 +502,8 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     image?: { image: Buffer; mimeType: string };
     references: AiImageReference[];
     values: Record<string, string | number>;
+    /** False leaves the generated soundtrack out; the saved video is silent. */
+    sound?: boolean;
     onStage?: (stage: string) => void;
   }): Promise<AiMediaResult> {
     if (!this.isConfigured()) {
@@ -546,7 +548,7 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     input.onStage?.('downloading result');
     const extension = extname(file.filename).toLowerCase();
     let data = await this.client.download(file);
-    const sound = input.want === 'video'
+    const sound = input.want === 'video' && input.sound !== false
       ? files.find((candidate) => AUDIO_EXTENSIONS.has(extname(candidate.filename).toLowerCase()))
       : undefined;
     if (sound && extension === '.mp4') data = await withSoundtrack(data, await this.client.download(sound), extname(sound.filename));

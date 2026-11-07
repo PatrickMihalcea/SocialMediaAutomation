@@ -62,6 +62,11 @@ export interface VideoClipOptions {
   seconds?: number;
   /** Image to video only. Providers without such a control ignore it. */
   motion?: AnimationMotion;
+  /**
+   * Whether to keep the soundtrack a model generates with the clip. False
+   * saves it silent; left unset, the clip keeps whatever sound it came with.
+   */
+  sound?: boolean;
 }
 
 export interface VideoGenerationProvider {

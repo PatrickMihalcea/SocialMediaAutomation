@@ -7,6 +7,7 @@ interface Config {
   maxClips: number;
   seconds: number;
   motion: 'subtle' | 'natural' | 'lively';
+  sound: boolean;
   provider: 'default' | 'comfyui';
   useMockGeneration: boolean;
 }
@@ -50,6 +51,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       provider: animationProvider(config),
       seconds: config.seconds,
       motion: config.motion,
+      sound: config.sound ?? false,
       inline: true,
     });
     // A clip on a laptop GPU can take longer than the sweeper waits for a

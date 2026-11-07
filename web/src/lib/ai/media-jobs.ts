@@ -1,4 +1,5 @@
 import 'server-only';
+import { withoutAudio } from '@/lib/media/strip-audio';
 import sharp from 'sharp';
 import { AiMediaJobKind, JobStatus, MediaType } from '@prisma/client';
 import { db } from '@/lib/db';
@@ -86,6 +87,7 @@ export async function createAiMediaJob(input: {
   /** Video only. Rides in metadata for the same reason size does. */
   seconds?: number;
   motion?: AnimationMotion;
+  sound?: boolean;
 }): Promise<{ id: string; kind: AiMediaJobKind; status: JobStatus; provider: string }> {
   const used = await currentMonthUsage(input.workspaceId, 'ai_generations');
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);
@@ -105,6 +107,7 @@ export async function createAiMediaJob(input: {
         ...(input.size ? { size: input.size } : {}),
         ...(input.seconds ? { seconds: input.seconds } : {}),
         ...(input.motion ? { motion: input.motion } : {}),
+        ...(typeof input.sound === 'boolean' ? { sound: input.sound } : {}),
       },
     },
     // provider comes back so the caller can say which source is running this
@@ -276,8 +279,12 @@ async function produce(
   }
   if (kind === 'IMAGE_EDIT') return editor.editImage({ prompt, ...requiredInput(image, kind) });
   if (kind === 'IMAGE_VARIATION') return editor.createVariation({ prompt, ...requiredInput(image, kind) });
-  if (kind === 'VIDEO_GENERATE') return video.generateVideo({ prompt, ...clip });
-  if (kind === 'VIDEO_ANIMATE') return video.animateImage({ prompt, image: requiredInput(image, kind).image, ...clip });
+  // A provider that cannot leave the sound out has it removed afterwards, so
+  // the setting means the same whichever model made the clip.
+  if (kind === 'VIDEO_GENERATE') return withoutSoundIf(clip, await video.generateVideo({ prompt, ...clip }));
+  if (kind === 'VIDEO_ANIMATE') {
+    return withoutSoundIf(clip, await video.animateImage({ prompt, image: requiredInput(image, kind).image, ...clip }));
+  }
   if (kind === 'AUDIO_TTS') return audio.textToSpeech({ text: prompt });
   throw new PermanentJobError(`${kind} produces text, not a MediaAsset, and is not a studio generation job.`);
 }
@@ -330,11 +337,16 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
 
 /** Clip length and motion, each ignored unless it is one the app offers. */
 function requestedClip(metadata: unknown): VideoClipOptions {
-  const { seconds, motion } = (metadata ?? {}) as { seconds?: unknown; motion?: unknown };
+  const { seconds, motion, sound } = (metadata ?? {}) as { seconds?: unknown; motion?: unknown; sound?: unknown };
   return {
     ...(typeof seconds === 'number' && Number.isInteger(seconds) && seconds > 0 ? { seconds } : {}),
     ...(motion === 'subtle' || motion === 'natural' || motion === 'lively' ? { motion } : {}),
+    ...(typeof sound === 'boolean' ? { sound } : {}),
   };
+}
+
+async function withoutSoundIf(clip: VideoClipOptions, result: AiMediaResult): Promise<AiMediaResult> {
+  return clip.sound === false ? { ...result, data: await withoutAudio(result.data, result.extension ?? 'mp4') } : result;
 }
 
 /** A stored provider string, narrowed back to a name the factory understands. */

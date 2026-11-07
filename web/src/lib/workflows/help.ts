@@ -257,7 +257,11 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
     seconds: {
       label: 'Clip length (seconds)',
-      description: 'How long each clip runs. Cut to the beat loops a clip that is shorter than its slot, which shows as a jump, so match it to the song: at 6 beats a clip, 120 BPM needs 3 s and 70 BPM needs 5 s. Longer clips take longer to render, about 6 minutes for 4 s on your Mac.',
+      description: 'How long each clip runs. Cut to the beat plays a clip that is shorter than its slot once and moves on to the next, so a short clip makes a shorter video. Longer clips take longer to render, about 6 minutes for 4 s on your Mac.',
+    },
+    sound: {
+      label: 'Generate sound',
+      description: 'Keep the sound the video model makes for each clip. Off by default: clips are saved silent, which suits a video that gets its own music later.',
     },
     motion: {
       label: 'Amount of motion',
