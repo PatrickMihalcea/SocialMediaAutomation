@@ -125,35 +125,23 @@ export function buildBeatPlan(input: BeatPlanInput): BeatPlan {
   const origin = beats[startBeatIndex];
 
   const cutFrames: number[] = [0];
-  // The beat each clip starts on, or the last one before it when a short clip
-  // has pushed the next cut off the grid.
   let beatIndex = startBeatIndex;
-  let time = origin;
   for (let i = 0; i < imageCount; i++) {
+    const start = cutFrames[cutFrames.length - 1];
     const slotEnd = Math.min(beatIndex + beatsPerClip, beats.length - 1);
-    let end = beats[slotEnd];
-    let endBeat = slotEnd;
+    const slotFrame = Math.round((beats[slotEnd] - origin) * fps);
     const limit = input.clipSeconds?.[i] ?? null;
-    let frame = Math.round((end - origin) * fps);
-
-    if (limit != null && limit > 0 && end - time > limit) {
-      // Cut on the last beat the clip still covers, so the edit stays on the
-      // music. Only a clip shorter than one beat cuts where it ends.
-      endBeat = beatIndex;
-      while (endBeat < slotEnd && beats[endBeat + 1] - time <= limit) endBeat++;
-      if (beats[endBeat] > time) {
-        end = beats[endBeat];
-      } else {
-        end = time + limit;
-        while (endBeat + 1 < beats.length && beats[endBeat + 1] <= end) endBeat++;
-      }
-      const start = cutFrames[cutFrames.length - 1];
-      frame = Math.min(Math.round((end - origin) * fps), start + Math.floor(limit * fps));
+    const clipFrames = limit != null && limit > 0 ? Math.floor(limit * fps) : Infinity;
+    // A clip shorter than its slot plays once, start to finish, and the next
+    // one follows straight on; the beats pick up again from there.
+    if (start + clipFrames < slotFrame) {
+      const end = start + clipFrames;
+      cutFrames.push(end);
+      while (beatIndex + 1 < beats.length && (beats[beatIndex + 1] - origin) * fps <= end) beatIndex++;
+    } else {
+      cutFrames.push(slotFrame);
+      beatIndex = slotEnd;
     }
-
-    cutFrames.push(frame);
-    beatIndex = endBeat;
-    time = end;
   }
 
   // A clip shorter than a frame cannot be rendered; nudge it and everything

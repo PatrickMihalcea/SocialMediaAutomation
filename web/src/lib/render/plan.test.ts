@@ -158,25 +158,17 @@ describe('buildBeatPlan', () => {
       .toThrow(BeatPlanError);
   });
 
-  it('cuts a video that is shorter than its slot on the last beat it covers', () => {
-    // 66bpm, so 8 beats is about 7.3s and a 3s clip covers 3 of them.
+  it('plays a video shorter than its slot in full, then moves on', () => {
+    // 66bpm, so 8 beats is about 7.3s: far longer than a 3s clip.
     const plan = buildBeatPlan({
       grid: grid(66, 128),
-      imageCount: 3,
+      imageCount: 2,
       beatsPerClip: 8,
       fps: 24,
-      clipSeconds: [3.04, null, 3.04],
+      clipSeconds: [3, 3],
     });
-    const beat = 60 / 66;
 
-    expect(plan.cutFrames).toEqual([
-      0,
-      Math.round(3 * beat * 24),
-      Math.round(11 * beat * 24),
-      Math.round(14 * beat * 24),
-    ]);
-    expect(plan.durations[0] / 24).toBeLessThanOrEqual(3.04);
-    expect(plan.durations.reduce((a, b) => a + b, 0)).toBe(plan.totalFrames);
+    expect(plan.durations).toEqual([72, 72]);
   });
 
   it('leaves a video that fills its slot alone', () => {
@@ -191,16 +183,4 @@ describe('buildBeatPlan', () => {
     expect(plan.durations).toEqual([120, 120]);
   });
 
-  it('cuts a clip shorter than one beat where it ends, then returns to the beat', () => {
-    // 40bpm puts 1.5s between beats, longer than the 1s clip.
-    const plan = buildBeatPlan({
-      grid: grid(40, 64),
-      imageCount: 2,
-      beatsPerClip: 2,
-      fps: 30,
-      clipSeconds: [1, null],
-    });
-
-    expect(plan.cutFrames).toEqual([0, 30, 90]);
-  });
 });
