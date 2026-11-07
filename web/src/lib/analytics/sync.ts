@@ -115,3 +115,14 @@ export async function syncWorkspaceAnalytics(workspaceId: string): Promise<void>
     await enqueue('sync-post-analytics', { postPlatformId: post.id }, { workspaceId });
   }
 }
+
+/** Queues a channel's first follower counts as soon as it is connected. */
+export async function fetchFirstStats(workspaceId: string, accounts: { id: string }[]): Promise<void> {
+  for (const account of accounts) {
+    await enqueue(
+      'sync-account-analytics',
+      { socialAccountId: account.id },
+      { workspaceId, dedupeKey: `account-analytics:${account.id}:connected:${Date.now()}` },
+    );
+  }
+}

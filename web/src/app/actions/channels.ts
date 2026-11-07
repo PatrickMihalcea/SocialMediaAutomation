@@ -13,6 +13,7 @@ import { consumeOAuthSelection, persistConnections, readOAuthSelection } from '@
 import { encryptToken } from '@/lib/crypto/tokens';
 import { rateLimit, LIMITS } from '@/lib/rate-limit';
 import { reconcilePostStatus } from '@/lib/publishing/engine';
+import { fetchFirstStats } from '@/lib/analytics/sync';
 import { actionError, actionSuccess, type ActionState } from '@/lib/actions/state';
 import { AppError, invalid, toAppError } from '@/lib/errors';
 import { isYoutubePrivacy } from '@/lib/social/adapters/youtube';
@@ -238,6 +239,8 @@ export async function completeOAuthSelectionAction(
       results: consumed.results,
       reconnectAccountId: consumed.row.reconnectAccountId,
     });
+    // Counts now, so the channel does not show empty until the daily sync.
+    await fetchFirstStats(ctx.workspace.id, saved);
     await Promise.all(saved.map((account) => audit({
       workspaceId: ctx.workspace.id,
       userId: ctx.user.id,

@@ -14,6 +14,7 @@ import { PlatformError } from '@/lib/social/errors';
 import { db } from '@/lib/db';
 import { assertWithinLimit } from '@/lib/billing/limits';
 import { toAppError } from '@/lib/errors';
+import { fetchFirstStats } from '@/lib/analytics/sync';
 import { billingLimitRedirect } from '@/app/api/oauth/limit-redirect';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ platform: string }> }) {
@@ -99,6 +100,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         results,
         reconnectAccountId: attempt.reconnectAccountId,
       });
+      // Counts now, so the channel does not show empty until the daily sync.
+      await fetchFirstStats(ctx.workspace.id, saved);
       await audit({
         workspaceId: ctx.workspace.id,
         userId: ctx.user.id,
