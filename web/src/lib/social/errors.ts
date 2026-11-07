@@ -85,6 +85,30 @@ export function classifyHttp(
       message: `${name} is rate limiting this account. Bridge88 will try again shortly.`,
     });
   }
+  // Meta answers throttling and missing objects with a plain 400; the error
+  // code in the body says which. Read as a rejection, a refresh of a few
+  // hundred posts failed outright instead of waiting its turn.
+  const metaCode = (platform === 'FACEBOOK' || platform === 'INSTAGRAM') ? metaErrorCode(body) : null;
+  if (metaCode !== null && META_THROTTLE_CODES.has(metaCode)) {
+    return new PlatformError({
+      platform,
+      code: 'RATE_LIMIT',
+      status,
+      detail: body,
+      retryable: true,
+      retryAfterSeconds: retryAfterSeconds ?? 900,
+      message: `${name} is rate limiting this account. Bridge88 will try again shortly.`,
+    });
+  }
+  if (metaCode === 100 && /does not exist/i.test(body)) {
+    return new PlatformError({
+      platform,
+      code: 'NOT_FOUND',
+      status,
+      detail: body,
+      message: `${name} could not find the account or post this was aimed at.`,
+    });
+  }
   if (status === 404) {
     return new PlatformError({
       platform,
@@ -111,6 +135,18 @@ export function classifyHttp(
     detail: body,
     message: `${name} rejected this post. Check the content against the channel's rules and try again.`,
   });
+}
+
+/** Meta's throttling codes: app, user, page and business-use-case limits. */
+const META_THROTTLE_CODES = new Set([4, 17, 32, 613, 80001, 80002, 80004, 80005, 80006, 80008, 80014]);
+
+function metaErrorCode(body: string): number | null {
+  try {
+    const code = (JSON.parse(body) as { error?: { code?: unknown } }).error?.code;
+    return typeof code === 'number' ? code : null;
+  } catch {
+    return null;
+  }
 }
 
 export function networkError(platform: Platform, cause: unknown): PlatformError {

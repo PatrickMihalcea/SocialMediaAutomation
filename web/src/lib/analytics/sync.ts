@@ -139,6 +139,9 @@ export async function syncWorkspaceAnalytics(workspaceId: string): Promise<void>
     where: {
       workspaceId,
       status: PostPlatformStatus.PUBLISHED,
+      // A channel that needs reconnecting would only fail; it catches up once
+      // it is connected again.
+      socialAccount: { status: 'ACTIVE' },
       OR: [
         { publishedAt: { gte: new Date(now - RECENT_DAYS * DAY_MS) } },
         { analytics: null },
