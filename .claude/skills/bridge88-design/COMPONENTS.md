@@ -191,6 +191,22 @@ export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElemen
 export function Select(props: SelectProps): JSX.Element;
 ```
 
+### Slider
+`import { Slider } from '@/bridge88/components';`
+
+One-line: a number within a fixed range, set by dragging: volumes, counts, lengths.
+
+```jsx
+<Slider label="Clip sound volume" min={0} max={100} step={1} defaultValue={30} minLabel="0" maxLabel="100" />
+```
+
+- Shows the current value beside the label, with the step's decimals.
+- Use for a bounded number where the range itself is meaningful. Keep a typed field for open-ended numbers or a handful of standard values, such as frame rate.
+
+```ts
+export function Slider(props: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string; error?: string; minLabel?: string; maxLabel?: string; containerClassName?: string }): JSX.Element;
+```
+
 ### Switch
 `import { Switch } from './components/forms/Switch.js';`
 

@@ -255,6 +255,47 @@ export function Field({
  * Uncontrolled like Field: `defaultValue` seeds it and the form reads the
  * input, so the value shown is display only and never fights the form.
  */
+/**
+ * Pill toggle for settings that apply at once, with no save step. Use Checkbox
+ * where the change waits for a Save. Selected is the primary (black) surface.
+ */
+export function Switch({
+  label,
+  description,
+  checked,
+  disabled = false,
+  onChange,
+  className = '',
+}: {
+  label: string;
+  description?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange?: (next: boolean) => void;
+  className?: string;
+}) {
+  return (
+    <label className={`flex min-h-11 items-center gap-3 ${disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${className}`}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => onChange?.(!checked)}
+        className={`flex h-[26px] w-11 shrink-0 items-center rounded-full border p-[3px] transition-colors duration-[120ms] ${
+          checked ? 'justify-end border-[var(--ink)] bg-[var(--primary)]' : 'justify-start border-hairline bg-surface-soft'
+        }`}
+      >
+        <span className={`h-[18px] w-[18px] rounded-full ${checked ? 'bg-[var(--on-primary)]' : 'border border-hairline bg-canvas'}`} />
+      </button>
+      <span className="grid gap-0.5">
+        <span className="text-sm font-[480]">{label}</span>
+        {description && <span className="b88-caption">{description}</span>}
+      </span>
+    </label>
+  );
+}
+
 export function Slider({
   label,
   hint,

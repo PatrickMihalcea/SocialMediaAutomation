@@ -12,6 +12,7 @@ import {
   Field,
   IconButton,
   Slider,
+  Switch,
   StatusMessage,
   TextArea,
   type DropdownOption,
@@ -312,7 +313,11 @@ function ConnectedSetting({
 interface FieldSpec {
   key: string;
   label: string;
-  kind: 'text' | 'number' | 'boolean' | 'enum' | 'namedOutputs' | 'lines';
+  kind: 'text' | 'number' | 'range' | 'boolean' | 'enum' | 'namedOutputs' | 'lines';
+  /** Range fields only: the schema's own bounds, so the slider cannot offer a value it rejects. */
+  min?: number;
+  max?: number;
+  step?: number;
   options?: string[];
   optionLabels?: Record<string, string>;
   description?: string;
@@ -767,16 +772,17 @@ export function NodeConfigPanel({
       );
     }
     if (field.kind === 'boolean') {
+      // A Switch, not a Checkbox: settings here save as they change.
       return (
         <div key={field.key}>
-          <Checkbox
+          <Switch
             label={field.label}
             checked={Boolean(value)}
             disabled={!canEdit}
-            onChange={(event) => setConfig((c) => ({ ...c, [field.key]: event.target.checked }))}
+            onChange={(next) => setConfig((c) => ({ ...c, [field.key]: next }))}
           />
           {showHelp && field.description && (
-            <p className="ml-8 mt-1 text-sm">{field.description}</p>
+            <p className="ml-14 mt-1 text-sm">{field.description}</p>
           )}
         </div>
       );
@@ -919,6 +925,25 @@ export function NodeConfigPanel({
           value={Array.isArray(value) ? (value as unknown[]).filter((line): line is string => typeof line === 'string') : []}
           disabled={!canEdit}
           onChange={(lines) => setConfig((c) => ({ ...c, [field.key]: lines }))}
+        />
+      );
+    }
+    if (field.kind === 'range') {
+      return (
+        <Slider
+          // Keyed by node as well: the slider holds its own position, and a
+          // different step's value must not inherit it.
+          key={`${node.id}:${field.key}`}
+          label={field.label}
+          hint={showHelp ? field.description : undefined}
+          min={field.min}
+          max={field.max}
+          step={field.step}
+          defaultValue={typeof value === 'number' ? value : field.min}
+          minLabel={String(field.min)}
+          maxLabel={String(field.max)}
+          disabled={!canEdit}
+          onChange={(event) => setConfig((c) => ({ ...c, [field.key]: Number(event.target.value) }))}
         />
       );
     }
@@ -1097,7 +1122,7 @@ function describeSchema(schema: z.ZodTypeAny): FieldSpec[] {
     const label = humanise(key);
 
     if (inner instanceof z.ZodBoolean) return [{ key, label, kind: 'boolean' }];
-    if (inner instanceof z.ZodNumber) return [{ key, label, kind: 'number' }];
+    if (inner instanceof z.ZodNumber) return [numberField(key, label, inner)];
     if (inner instanceof z.ZodEnum) {
       return [{ key, label, kind: 'enum', options: inner.options as string[] }];
     }
@@ -1183,4 +1208,22 @@ function nextOutputId(outputs: { id: string }[]): string {
 function snapshotOf(name: string, config: Record<string, unknown>): string {
   const entries = Object.keys(config).sort().map((key) => [key, config[key]]);
   return JSON.stringify([name, entries]);
+}
+
+/**
+ * Numbers typed into a box only where a slider would mislead: frame rate takes
+ * a handful of standard values, and a pick position counts back from the end
+ * when negative.
+ */
+const TYPED_NUMBERS = new Set(['fps', 'index']);
+
+/** A bounded number becomes a slider over the schema's own range. */
+function numberField(key: string, label: string, schema: z.ZodNumber): FieldSpec {
+  const { minValue: min, maxValue: max } = schema;
+  if (TYPED_NUMBERS.has(key) || min == null || max == null || !Number.isFinite(min) || !Number.isFinite(max)) {
+    return { key, label, kind: 'number' };
+  }
+  // Whole numbers step by one; a decimal range gets about fifty stops.
+  const step = schema.isInt ? 1 : Number(((max - min) / 50).toPrecision(1));
+  return { key, label, kind: 'range', min, max, step };
 }
