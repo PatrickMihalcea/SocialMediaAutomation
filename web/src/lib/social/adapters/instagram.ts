@@ -261,26 +261,32 @@ export class InstagramAdapter extends MetaAdapter {
 
   async getPostAnalytics(account: DecryptedAccount, platformPostId: string): Promise<PostMetrics> {
     const token = this.requireToken(account);
-    const metrics = 'impressions,reach,likes,comments,saved,shares';
-    // Insights is an optional permission this app does not request by
-    // default (see the scopes comment above) — a connected account that never
-    // granted it gets nulls here, matching getAccountAnalytics below, rather
-    // than a thrown error surfacing as a broken-looking analytics tab.
-    const data = await platformJson<{ data?: { name: string; values?: { value?: number }[] }[] }>({
+    // Likes and comments are fields on the post itself, readable with
+    // instagram_basic, so they never depend on the insights permission.
+    const counts = await platformJson<{ like_count?: number; comments_count?: number }>({
       platform: this.platform,
-      url: `${GRAPH}/${platformPostId}/insights?metric=${metrics}&access_token=${encodeURIComponent(token)}`,
+      url: `${GRAPH}/${platformPostId}?fields=like_count,comments_count&access_token=${encodeURIComponent(token)}`,
+    });
+    // Views, reach, saves and shares need instagram_manage_insights. Without
+    // it Instagram refuses the whole request, so those stay unreported rather
+    // than failing the sync. "views" replaced "impressions", which Instagram
+    // no longer reports for current posts.
+    const insights = await platformJson<{ data?: { name: string; values?: { value?: number }[] }[] }>({
+      platform: this.platform,
+      url: `${GRAPH}/${platformPostId}/insights?metric=views,reach,saved,shares&access_token=${encodeURIComponent(token)}`,
     }).catch(() => ({ data: [] }));
-    const value = (name: string) => data.data?.find((d) => d.name === name)?.values?.[0]?.value ?? null;
+    const value = (name: string) => insights.data?.find((d) => d.name === name)?.values?.[0]?.value ?? null;
     return {
-      impressions: value('impressions'),
+      impressions: value('views'),
+      videoViews: value('views'),
       reach: value('reach'),
-      likes: value('likes'),
-      comments: value('comments'),
+      likes: counts.like_count ?? null,
+      comments: counts.comments_count ?? null,
       saves: value('saved'),
       shares: value('shares'),
       // Instagram does not report link clicks on organic feed posts.
       clicks: null,
-      raw: data as Record<string, unknown>,
+      raw: { counts, insights } as Record<string, unknown>,
     };
   }
 

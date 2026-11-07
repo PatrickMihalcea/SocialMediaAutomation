@@ -295,6 +295,10 @@ export class FacebookAdapter extends MetaAdapter {
 
   async getPostAnalytics(account: DecryptedAccount, platformPostId: string): Promise<PostMetrics> {
     const token = this.requireToken(account);
+    // A Page post id is "pageid_postid"; a Reel is a bare video id, and a
+    // video has no /insights edge at all. Asking for it failed every Reel's
+    // sync, so Reels read the video's own insights instead.
+    if (!platformPostId.includes('_')) return this.getReelAnalytics(token, platformPostId);
     const metrics = [
       'post_impressions',
       'post_impressions_unique',
@@ -338,6 +342,36 @@ export class FacebookAdapter extends MetaAdapter {
       shares: counts.shares?.count ?? null,
       // Facebook does not report saves for Page posts.
       saves: null,
+      raw: data as Record<string, unknown>,
+    };
+  }
+
+  private async getReelAnalytics(token: string, videoId: string): Promise<PostMetrics> {
+    const data = await platformJson<{ data?: { name: string; values?: { value?: number | Record<string, number> }[] }[] }>({
+      platform: this.platform,
+      url: `${GRAPH}/${videoId}/video_insights?access_token=${encodeURIComponent(token)}`,
+    });
+    const raw = (name: string) => data.data?.find((d) => d.name === name)?.values?.[0]?.value;
+    const num = (name: string) => {
+      const v = raw(name);
+      return typeof v === 'number' ? v : null;
+    };
+    const tally = (name: string, key?: string) => {
+      const v = raw(name);
+      if (!v || typeof v !== 'object') return null;
+      return key ? v[key] ?? 0 : Object.values(v).reduce((a, b) => a + (b ?? 0), 0);
+    };
+    const plays = num('fb_reels_total_plays');
+    return {
+      // A Reel's plays are its views; Facebook reports no separate impressions.
+      impressions: plays,
+      videoViews: plays,
+      reach: null,
+      likes: tally('post_video_likes_by_reaction_type'),
+      comments: tally('post_video_social_actions', 'COMMENT'),
+      shares: tally('post_video_social_actions', 'SHARE'),
+      saves: null,
+      clicks: null,
       raw: data as Record<string, unknown>,
     };
   }
