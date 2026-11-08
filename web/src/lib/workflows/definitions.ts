@@ -540,6 +540,28 @@ export const NODE_DEFINITIONS = {
     longRunning: true,
   },
 
+  VIDEO_SPEED: {
+    type: 'VIDEO_SPEED',
+    label: 'Change speed',
+    description: 'Plays each video slower or faster, with its sound stretched to match at the same pitch.',
+    category: 'assemble',
+    icon: 'gauge',
+    inputs: [
+      { id: 'videos', label: 'Videos', type: media([...VIDEOS], true, { acceptsSingle: true }), required: true },
+    ],
+    outputs: [
+      { id: 'videos', label: 'Videos', type: media([...VIDEOS], true) },
+      { id: 'video', label: 'First video', type: media([...VIDEOS]) },
+    ],
+    configSchema: z.object({
+      /** Playback speed in percent: 50 is half speed, 75 three-quarter, 100 unchanged. */
+      speed: z.number().int().min(25).max(200).default(75),
+      /** Interpolates the missing frames of a slowed clip; much slower to render. */
+      smooth: z.boolean().default(false),
+    }),
+    longRunning: true,
+  },
+
   COMBINE_MEDIA: {
     type: 'COMBINE_MEDIA',
     label: 'Combine media',

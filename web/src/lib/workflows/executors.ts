@@ -19,6 +19,7 @@ const EXECUTORS: Record<NodeType, () => Promise<NodeExecutor>> = {
   AUDIO_TRIMMER: async () => (await import('@/lib/workflows/nodes/audio-trimmer')).run,
   BEAT_SLIDESHOW: async () => (await import('@/lib/workflows/nodes/beat-slideshow')).run,
   COMBINE_MEDIA: async () => (await import('@/lib/workflows/nodes/combine-media')).run,
+  VIDEO_SPEED: async () => (await import('@/lib/workflows/nodes/video-speed')).run,
   TEXT_OVERLAY: async () => (await import('@/lib/workflows/nodes/text-overlay')).run,
   PICK: async () => (await import('@/lib/workflows/nodes/pick')).run,
   CREATE_DRAFT: async () => (await import('@/lib/workflows/nodes/create-draft')).run,

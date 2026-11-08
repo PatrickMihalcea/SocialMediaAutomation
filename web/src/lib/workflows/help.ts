@@ -412,6 +412,16 @@ export const WORKFLOW_FIELD_HELP: Partial<
       description: 'How loud each video clip\'s own sound plays under the music, from 0 to 100. 0 leaves it out; 100 is the clip at full volume. Clips made without sound add nothing.',
     },
   },
+  VIDEO_SPEED: {
+    speed: {
+      label: 'Speed (%)',
+      description: '100 plays at normal speed. 75 is three-quarter speed, 50 is half speed, and above 100 is faster. The video gets longer or shorter to match, and its sound is stretched without changing pitch.',
+    },
+    smooth: {
+      label: 'Smooth motion',
+      description: 'When slowing down, creates in-between frames so the motion stays fluid instead of stepping. Takes several times longer to render.',
+    },
+  },
   COMBINE_MEDIA: {
     sourceOrder: {
       label: 'Source order',
