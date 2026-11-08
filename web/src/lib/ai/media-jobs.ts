@@ -89,6 +89,7 @@ export async function createAiMediaJob(input: {
   motion?: AnimationMotion;
   sound?: boolean;
   stillCamera?: boolean;
+  loop?: boolean;
 }): Promise<{ id: string; kind: AiMediaJobKind; status: JobStatus; provider: string }> {
   const used = await currentMonthUsage(input.workspaceId, 'ai_generations');
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);
@@ -110,6 +111,7 @@ export async function createAiMediaJob(input: {
         ...(input.motion ? { motion: input.motion } : {}),
         ...(typeof input.sound === 'boolean' ? { sound: input.sound } : {}),
         ...(input.stillCamera ? { stillCamera: true } : {}),
+        ...(input.loop ? { loop: true } : {}),
       },
     },
     // provider comes back so the caller can say which source is running this
@@ -348,12 +350,13 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
 
 /** Clip length and motion, each ignored unless it is one the app offers. */
 function requestedClip(metadata: unknown): VideoClipOptions {
-  const { seconds, motion, sound, stillCamera } = (metadata ?? {}) as { seconds?: unknown; motion?: unknown; sound?: unknown; stillCamera?: unknown };
+  const { seconds, motion, sound, stillCamera, loop } = (metadata ?? {}) as { seconds?: unknown; motion?: unknown; sound?: unknown; stillCamera?: unknown; loop?: unknown };
   return {
     ...(typeof seconds === 'number' && Number.isInteger(seconds) && seconds > 0 ? { seconds } : {}),
     ...(motion === 'subtle' || motion === 'natural' || motion === 'lively' ? { motion } : {}),
     ...(typeof sound === 'boolean' ? { sound } : {}),
     ...(stillCamera === true ? { stillCamera: true } : {}),
+    ...(loop === true ? { loop: true } : {}),
   };
 }
 

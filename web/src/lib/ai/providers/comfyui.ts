@@ -39,7 +39,7 @@ import type { ImageSize } from '@/lib/ai/image-sizes';
  * LOCAL_QUEUE), because the cloud has no route to the laptop's localhost.
  */
 
-export type ComfyOperation = 'txt2img' | 'edit' | 'variation' | 'txt2vid' | 'img2vid';
+export type ComfyOperation = 'txt2img' | 'edit' | 'variation' | 'txt2vid' | 'img2vid' | 'img2vid_loop';
 
 /** What the operation's files are called, and what each is for. Also the README's table. */
 export const COMFY_OPERATIONS: Record<ComfyOperation, string> = {
@@ -48,6 +48,7 @@ export const COMFY_OPERATIONS: Record<ComfyOperation, string> = {
   variation: 'Studio variations',
   txt2vid: 'Studio video from a prompt',
   img2vid: 'Animate image steps and studio animations',
+  img2vid_loop: 'Animate image steps set to loop: the still is the first and the last frame',
 };
 
 const ROLE_PLACEHOLDERS: Record<AiImageRole, string> = {
@@ -492,7 +493,9 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
   async animateImage(input: { prompt: string; image: Buffer; onStage?: (stage: string) => void } & VideoClipOptions): Promise<AiMediaResult> {
     const mimeType = (await sharp(input.image).metadata().catch(() => null))?.format === 'jpeg' ? 'image/jpeg' : 'image/png';
     return this.render({
-      operation: 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage,
+      // A loop ends on the frame it starts on, which also keeps the framing
+      // from drifting into a zoom.
+      operation: input.loop ? 'img2vid_loop' : 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage,
     });
   }
 

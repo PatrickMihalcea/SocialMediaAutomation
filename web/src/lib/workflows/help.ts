@@ -260,6 +260,10 @@ export const WORKFLOW_FIELD_HELP: Partial<
         none: 'No preference',
       },
     },
+    loop: {
+      label: 'Seamless loop',
+      description: 'Each clip ends on exactly the frame it starts on, so it loops cleanly. The picture has to come back to its starting framing, which also stops a slow zoom building up.',
+    },
     cameraPrompt: {
       label: 'Camera movement',
       description: 'How the camera moves, for example "slow push in toward the window" or "gentle pan to the right".',

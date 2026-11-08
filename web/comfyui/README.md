@@ -36,6 +36,7 @@ connections: to Neon, to R2 and to ComfyUI on localhost.
    |---|---|
    | `txt2img.json` | Image generator steps and studio images |
    | `img2vid.json` | Animate image steps and "Animate selected image" in the studio |
+   | `img2vid_loop.json` | Animate image steps with Seamless loop on: the still is the first and last frame |
    | `txt2vid.json` | "Generate video" in the studio |
    | `edit.json` | Studio image edits |
    | `variation.json` | Studio variations |
@@ -101,6 +102,7 @@ Chosen by testing on an M4 Max with 128 GB of memory, November 2026.
 |---|---|---|---|
 | `txt2img.json` | FLUX.3 Klein (distilled), 1024×1824 | about 2 min an image | Free while revenue is under US$5M |
 | `img2vid.json` | LTX-2.5 22B distilled, 1088×1920, length from the step, with sound | about 25 min for 4 s | Free while revenue is under US$10M |
+| `img2vid_loop.json` | The same two passes, with the still guiding the first and last frame in both | about the same | As above |
 | `txt2vid.json` | LTX-2.5 22B distilled, 1088×1920, 4 s, with sound | about 25 min for 4 s | Free while revenue is under US$10M |
 
 The video workflows render at full post size, so nothing is upscaled

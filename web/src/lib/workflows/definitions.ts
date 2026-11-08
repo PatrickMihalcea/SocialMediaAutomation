@@ -437,6 +437,8 @@ export const NODE_DEFINITIONS = {
        */
       camera: z.enum(['locked', 'custom', 'none']).catch('locked').default('locked'),
       cameraPrompt: z.string().max(500).default(''),
+      /** End each clip on its starting frame: it loops, and the framing cannot drift. */
+      loop: z.boolean().default(false),
       maxClips: z.number().int().min(1).max(12).default(8),
       /**
        * Length of each clip. Beat slideshow plays a clip shorter than its slot
