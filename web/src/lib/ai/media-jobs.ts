@@ -124,7 +124,10 @@ export async function createAiMediaJob(input: {
   return job;
 }
 
-export async function runAiMediaJob(aiMediaJobId: string): Promise<void> {
+export async function runAiMediaJob(
+  aiMediaJobId: string,
+  options: { onStage?: (stage: string) => void } = {},
+): Promise<void> {
   const job = await db.aiMediaJob.findUnique({
     where: { id: aiMediaJobId },
     include: { workspace: { select: { slug: true } } },
@@ -136,7 +139,7 @@ export async function runAiMediaJob(aiMediaJobId: string): Promise<void> {
   let generationRecorded = false;
   try {
     const inputs = await loadInputs(job.workspaceId, job.inputAssetIds);
-    const result = await produce(job.kind, job.prompt, inputs, job.provider, requestedSize(job.metadata), requestedClip(job.metadata));
+    const result = await produce(job.kind, job.prompt, inputs, job.provider, requestedSize(job.metadata), requestedClip(job.metadata), options.onStage);
     const latest = await db.aiMediaJob.findUnique({ where: { id: job.id }, select: { status: true } });
     // Cancellation is durable and server-side. A provider request that was already
     // in flight may finish, but its bytes must not become a new library asset.
@@ -262,6 +265,7 @@ async function produce(
   provider: string,
   size?: ImageSize,
   clip: VideoClipOptions = {},
+  onStage?: (stage: string) => void,
 ): Promise<AiMediaResult> {
   const external = provider === 'openai';
   const image = inputs[0];
@@ -286,9 +290,9 @@ async function produce(
   if (kind === 'IMAGE_VARIATION') return editor.createVariation({ prompt, ...requiredInput(image, kind) });
   // A provider that cannot leave the sound out has it removed afterwards, so
   // the setting means the same whichever model made the clip.
-  if (kind === 'VIDEO_GENERATE') return withoutSoundIf(clip, await video.generateVideo({ prompt, ...clip }));
+  if (kind === 'VIDEO_GENERATE') return withoutSoundIf(clip, await video.generateVideo({ prompt, ...clip, onStage }));
   if (kind === 'VIDEO_ANIMATE') {
-    return withoutSoundIf(clip, await video.animateImage({ prompt, image: requiredInput(image, kind).image, ...clip }));
+    return withoutSoundIf(clip, await video.animateImage({ prompt, image: requiredInput(image, kind).image, ...clip, onStage }));
   }
   if (kind === 'AUDIO_TTS') return audio.textToSpeech({ text: prompt });
   throw new PermanentJobError(`${kind} produces text, not a MediaAsset, and is not a studio generation job.`);

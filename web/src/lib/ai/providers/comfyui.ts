@@ -270,10 +270,10 @@ export class ComfyClient {
   async wait(
     promptId: string,
     clientId: string,
-    options: { timeoutMs: number; onStage?: (stage: string) => void },
+    options: { timeoutMs: number; onStage?: (stage: string) => void; graph?: Record<string, unknown> },
   ): Promise<ComfyFile[]> {
     const deadline = Date.now() + options.timeoutMs;
-    const socket = this.watchProgress(promptId, clientId, options.onStage);
+    const socket = this.watchProgress(promptId, clientId, options.onStage, options.graph);
     let lastStage = '';
     const report = (stage: string) => {
       if (stage === lastStage) return;
@@ -328,31 +328,32 @@ export class ComfyClient {
   }
 
   /**
-   * Step progress, in tenths.
-   *
-   * Every change reaches the database as a status write, and a sampler reports
-   * every step — thirty writes an image, hundreds a video. Tenths are what a
-   * person reading the canvas can use anyway.
+   * What ComfyUI is doing, in words: which sampling pass and step, or which
+   * stage around them. ComfyUI says which node is running and how far a
+   * sampler has got; the graph says what each node is. A video is a few
+   * passes of a handful of steps each, so every change is reported.
    */
-  private watchProgress(promptId: string, clientId: string, onStage?: (stage: string) => void) {
+  private watchProgress(
+    promptId: string,
+    clientId: string,
+    onStage?: (stage: string) => void,
+    graph?: Record<string, unknown>,
+  ) {
     let reporting = false;
     let socket: WebSocket | null = null;
     if (onStage && typeof WebSocket !== 'undefined') {
       try {
         socket = new WebSocket(`${this.url('/ws').replace(/^http/, 'ws')}?clientId=${encodeURIComponent(clientId)}`);
-        let last = -1;
+        const describe = progressDescriber(graph ?? {});
         socket.addEventListener('message', (event) => {
           if (typeof event.data !== 'string') return;
           try {
-            const message = JSON.parse(event.data) as { type?: string; data?: { prompt_id?: string; value?: number; max?: number } };
-            if (message.type !== 'progress' || message.data?.prompt_id !== promptId) return;
-            const { value = 0, max = 0 } = message.data;
-            if (!max) return;
+            const message = JSON.parse(event.data) as ComfyMessage;
+            if (message.data?.prompt_id !== promptId) return;
+            const stage = describe(message);
+            if (!stage) return;
             reporting = true;
-            const tenth = Math.min(10, Math.floor((value / max) * 10));
-            if (tenth === last) return;
-            last = tenth;
-            onStage(`rendering ${tenth * 10}%`);
+            onStage(stage);
           } catch {
             // A message this does not understand is not this caller's problem.
           }
@@ -483,15 +484,15 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     }));
   }
 
-  async generateVideo(input: { prompt: string; image?: Buffer } & VideoClipOptions): Promise<AiMediaResult> {
+  async generateVideo(input: { prompt: string; image?: Buffer; onStage?: (stage: string) => void } & VideoClipOptions): Promise<AiMediaResult> {
     if (input.image) return this.animateImage({ ...input, image: input.image });
-    return this.render({ operation: 'txt2vid', want: 'video', prompt: input.prompt, references: [], values: clipValues(input), sound: input.sound });
+    return this.render({ operation: 'txt2vid', want: 'video', prompt: input.prompt, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage });
   }
 
-  async animateImage(input: { prompt: string; image: Buffer } & VideoClipOptions): Promise<AiMediaResult> {
+  async animateImage(input: { prompt: string; image: Buffer; onStage?: (stage: string) => void } & VideoClipOptions): Promise<AiMediaResult> {
     const mimeType = (await sharp(input.image).metadata().catch(() => null))?.format === 'jpeg' ? 'image/jpeg' : 'image/png';
     return this.render({
-      operation: 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input), sound: input.sound,
+      operation: 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage,
     });
   }
 
@@ -531,9 +532,11 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     }
 
     const clientId = randomUUID();
-    const promptId = await this.client.queue(fillTemplate(template, values), clientId);
+    const graph = fillTemplate(template, values);
+    const promptId = await this.client.queue(graph, clientId);
     const files = await this.client.wait(promptId, clientId, {
       timeoutMs: env.COMFYUI_TIMEOUT_MS,
+      graph,
       onStage: input.onStage,
     });
 
@@ -644,4 +647,62 @@ async function withSoundtrack(video: Buffer, audio: Buffer, audioExtension: stri
 
 function toGrid(value: number): number {
   return Math.max(64, Math.round(value / 16) * 16);
+}
+
+type ComfyMessage = {
+  type?: string;
+  data?: { prompt_id?: string; node?: string | null; value?: number; max?: number };
+};
+
+/**
+ * The nodes that run a sampling pass, matched whole: KSamplerSelect only picks
+ * a sampler and LTXVLatentUpsampler resizes, and neither is a pass.
+ */
+const SAMPLER = /^(KSampler|KSamplerAdvanced|SamplerCustom|SamplerCustomAdvanced)$/;
+
+/** What a running node is doing, by its class, for the stages around sampling. */
+const NODE_STAGES: [RegExp, string][] = [
+  [/Loader|LoadCheckpoint|UNETLoader|CLIPLoader|VAELoader/i, 'loading models'],
+  [/TextEncode/i, 'reading the prompt'],
+  [/Upscale|Upsampler/i, 'upscaling'],
+  [/Decode/i, 'making the frames'],
+  [/Save|Preview/i, 'saving'],
+];
+
+/**
+ * Turns ComfyUI's messages into a short phrase, or null when nothing changed.
+ * Exported for its test: the phrasing is the whole point.
+ */
+export function progressDescriber(graph: Record<string, unknown>) {
+  const classOf = (node: string | null | undefined) =>
+    node ? String((graph[node] as { class_type?: unknown } | undefined)?.class_type ?? '') : '';
+  const samplers = Object.keys(graph).filter((node) => SAMPLER.test(classOf(node)));
+  const seen: string[] = [];
+  let current: string | null = null;
+  let last = '';
+  return (message: ComfyMessage): string | null => {
+    let stage: string | null = null;
+    if (message.type === 'executing') {
+      current = message.data?.node ?? null;
+      const kind = classOf(current);
+      if (current && SAMPLER.test(kind) && !seen.includes(current)) seen.push(current);
+      stage = NODE_STAGES.find(([pattern]) => pattern.test(kind))?.[1] ?? null;
+    } else if (message.type === 'progress') {
+      const { value = 0, max = 0 } = message.data ?? {};
+      if (!max) return null;
+      const pass = samplers.length > 1 && seen.length
+        ? `${passName(seen.length, samplers.length)}, `
+        : '';
+      stage = `${pass}step ${value} of ${max}`;
+    }
+    if (!stage || stage === last) return null;
+    last = stage;
+    return stage;
+  };
+}
+
+/** Two passes read as draft and detail; more are numbered. */
+function passName(pass: number, total: number): string {
+  if (total === 2) return pass === 1 ? 'draft pass' : 'detail pass';
+  return `pass ${pass} of ${total}`;
 }

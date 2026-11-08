@@ -11,6 +11,7 @@ vi.mock('@/lib/env', () => ({
 }));
 
 import {
+  progressDescriber,
   baseSize,
   clipValues,
   ComfyClient,
@@ -288,3 +289,52 @@ function body(request: IncomingMessage): Promise<string> {
     request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
   });
 }
+
+describe('describing ComfyUI progress', () => {
+  // The shape of the shipped image-to-video workflow: two sampling passes
+  // around a decode.
+  const graph = {
+    '1': { class_type: 'CheckpointLoaderSimple' },
+    '5': { class_type: 'CLIPTextEncode' },
+    '10': { class_type: 'SamplerCustomAdvanced' },
+    '20': { class_type: 'LTXVLatentUpsampler' },
+    '30': { class_type: 'SamplerCustomAdvanced' },
+    '40': { class_type: 'VAEDecodeTiled' },
+    '50': { class_type: 'SaveVideo' },
+  };
+  const run = (messages: { type: string; data: Record<string, unknown> }[]) => {
+    const describe = progressDescriber(graph);
+    return messages.map((message) => describe({ ...message, data: { prompt_id: 'p', ...message.data } })).filter(Boolean);
+  };
+
+  it('names the pass and step, and the stages around them', () => {
+    expect(run([
+      { type: 'executing', data: { node: '1' } },
+      { type: 'executing', data: { node: '5' } },
+      { type: 'executing', data: { node: '10' } },
+      { type: 'progress', data: { value: 1, max: 8 } },
+      { type: 'progress', data: { value: 8, max: 8 } },
+      { type: 'executing', data: { node: '20' } },
+      { type: 'executing', data: { node: '30' } },
+      { type: 'progress', data: { value: 2, max: 3 } },
+      { type: 'executing', data: { node: '40' } },
+      { type: 'executing', data: { node: '50' } },
+    ])).toEqual([
+      'loading models',
+      'reading the prompt',
+      'draft pass, step 1 of 8',
+      'draft pass, step 8 of 8',
+      'upscaling',
+      'detail pass, step 2 of 3',
+      'making the frames',
+      'saving',
+    ]);
+  });
+
+  it('leaves the pass out of a one-pass workflow, and repeats nothing', () => {
+    const describe = progressDescriber({ '3': { class_type: 'KSampler' } });
+    const say = (value: number) => describe({ type: 'progress', data: { prompt_id: 'p', value, max: 15 } });
+    expect(say(4)).toBe('step 4 of 15');
+    expect(say(4)).toBeNull();
+  });
+});

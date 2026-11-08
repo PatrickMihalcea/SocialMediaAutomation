@@ -59,10 +59,23 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     // silent step, and nothing else writes while it renders. Without this the
     // step is declared dead and dispatched again mid-render.
     const beat = setInterval(() => void ctx.heartbeat(), 60_000);
+    // What the clip is up to, shown on the run beside "4 of 7". Written in
+    // order and never awaited by the render: a slow status write must not
+    // hold up the GPU.
+    const clipNumber = clips.length + 1;
+    const since = Date.now();
+    let writing: Promise<void> = Promise.resolve();
+    const report = (stage: string) => {
+      const progress = { clips: [...clips], _progress: { done: clips.length, total: images.length, stage: `clip ${clipNumber}, ${stage}`, since } };
+      writing = writing.catch(() => {}).then(() => ctx.saveProgress(progress));
+      void writing.catch(() => {});
+    };
+    report('starting');
     try {
-      await runAiMediaJob(job.id);
+      await runAiMediaJob(job.id, { onStage: report });
     } finally {
       clearInterval(beat);
+      await writing.catch(() => {});
     }
 
     const finished = await db.aiMediaJob.findUnique({
