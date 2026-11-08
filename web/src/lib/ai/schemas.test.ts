@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assistantReplySchema, imagePromptsSchema } from '@/lib/ai/schemas';
+import { assistantReplySchema, clipToSentence, imagePromptsSchema } from '@/lib/ai/schemas';
 
 const POST_ID = '11111111-1111-4111-8111-111111111111';
 const CAMPAIGN_ID = '22222222-2222-4222-8222-222222222222';
@@ -146,5 +146,21 @@ describe('named extra outputs', () => {
   it('used to refuse anything past a sentence', () => {
     // The old ceiling. A cast of three never fitted inside it.
     expect(reply('A'.repeat(201)).success).toBe(true);
+  });
+});
+
+describe('an over-long image prompt', () => {
+  const sentence = 'A misty forest at dawn with light through the trees. ';
+
+  it('is cut back to its last full sentence instead of failing the set', () => {
+    const long = sentence.repeat(60);
+    const parsed = imagePromptsSchema.parse({ prompts: [{ title: 'Forest', prompt: long }], postTitle: 'Forest' });
+    const prompt = parsed.prompts[0].prompt;
+    expect(prompt.length).toBeLessThanOrEqual(2000);
+    expect(prompt.endsWith('trees.')).toBe(true);
+  });
+
+  it('leaves a prompt within the limit alone', () => {
+    expect(clipToSentence(sentence, 2000)).toBe(sentence);
   });
 });

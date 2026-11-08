@@ -84,6 +84,7 @@ export function buildIdeaInstruction(
       config.imageTitleGuidance,
     ),
     directed('prompt is the full description.', config.promptGuidance),
+    'Keep each prompt under 1,500 characters.',
   ].join(' ');
 }
 

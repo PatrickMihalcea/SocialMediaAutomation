@@ -207,6 +207,16 @@ export type AssistantReply = z.infer<typeof assistantReplySchema>;
  * only guess at them from the theme. Putting the set first means the title and
  * caption are written with the actual images in view.
  */
+const PROMPT_MAX = 2000;
+
+/** The text cut back to its last full sentence within max characters. */
+export function clipToSentence(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const head = value.slice(0, max);
+  const end = Math.max(head.lastIndexOf('. '), head.lastIndexOf('.\n'));
+  return end > max / 2 ? head.slice(0, end + 1) : head.trimEnd();
+}
+
 export const imagePromptsSchema = z.object({
   prompts: z
     .array(
@@ -217,7 +227,9 @@ export const imagePromptsSchema = z.object({
          *
          * Recorded so the copy below can refer to the set concretely.
          */
-        prompt: z.string().max(2000),
+        // Shortened rather than refused: a prompt a little over is still a
+        // good prompt, and failing the whole set for it wasted the run.
+        prompt: z.string().transform((value) => clipToSentence(value, PROMPT_MAX)),
       }),
     )
     .min(1)
