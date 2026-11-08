@@ -481,10 +481,10 @@ export function WorkflowRunView({
                     {/* Audio counts as showable even with no still: a chosen
                         track is exactly what a Select items step was asked to
                         produce, and the tile opens a player. */}
-                    {!!(node.produced ?? []).some((asset) => asset.url || asset.type === 'AUDIO') && (
+                    {!!(node.produced ?? []).some(isShowable) && (
                       <div className="mt-3 flex flex-wrap gap-3">
                         {(node.produced ?? [])
-                          .filter((asset) => asset.url || asset.type === 'AUDIO')
+                          .filter(isShowable)
                           .slice(0, 8)
                           .map((asset, assetIndex, shown) => (
                             <button
@@ -721,6 +721,14 @@ export function WorkflowRunView({
 }
 
 /** How each stored media kind is drawn in a frame. */
+/**
+ * Whether a produced asset can be shown as a tile: a still, a playable video
+ * (which may not have its poster yet), or a track.
+ */
+function isShowable(asset: ProducedAsset): boolean {
+  return Boolean(asset.url || (asset.type === 'VIDEO' && asset.fullUrl) || asset.type === 'AUDIO');
+}
+
 const MEDIA_FRAME_TYPE: Record<string, 'image' | 'video' | 'audio'> = {
   VIDEO: 'video',
   AUDIO: 'audio',
