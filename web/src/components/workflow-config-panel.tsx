@@ -612,6 +612,13 @@ export function NodeConfigPanel({
       if (field.key === 'includeSubfolders') return typeof config.assetId !== 'string';
     }
     if (node.type === 'PICK' && field.key === 'index') return config.mode === 'index';
+    if (node.type === 'BEAT_SLIDESHOW') {
+      // Each timing shows only the settings it uses; beat is the default.
+      const byBeat = (config.timing ?? 'beat') === 'beat';
+      if (field.key === 'beatsPerClip' || field.key === 'visualLeadMs') return byBeat;
+      if (field.key === 'secondsPerClip') return !byBeat;
+    }
+    if (node.type === 'ANIMATE_IMAGE' && field.key === 'soundPrompt') return config.sound === true;
     if (node.type === 'TEXT_OVERLAY') {
       // Overlay structure replaced the freeform template picker. The template
       // field remains in the schema so a connected Overlay text port still

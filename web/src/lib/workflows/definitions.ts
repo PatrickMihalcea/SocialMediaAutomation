@@ -118,8 +118,15 @@ const trimmerConfigSchema = z.preprocess(
 
 const beatSlideshowConfigSchema = z
   .object({
+    /**
+     * How clips are timed. beat cuts on the music; seconds gives every clip
+     * the same length; full plays each video to its end.
+     */
+    timing: z.enum(['beat', 'seconds', 'full']).default('beat'),
     /** 4 = one bar, punchy. 8 = two bars, the usual for this genre. */
     beatsPerClip: z.number().int().min(1).max(32).default(8),
+    /** Seconds per clip when timing by seconds, and per still in full length. */
+    secondsPerClip: z.number().int().min(1).max(15).default(4),
     size: z.enum(VIDEO_OUTPUT_SIZE_VALUES).optional(),
     width: z.number().int().positive().optional(),
     height: z.number().int().positive().optional(),
@@ -150,7 +157,9 @@ const beatSlideshowConfigSchema = z
 /** Normalises preset size and legacy width/height into one stored shape. */
 function normalizeBeatSlideshowConfig(
   config: Record<string, unknown> & {
+    timing: 'beat' | 'seconds' | 'full';
     beatsPerClip: number;
+    secondsPerClip: number;
     size?: VideoOutputSize;
     fps: number;
     fit: 'cover' | 'blur-pad';
@@ -508,8 +517,8 @@ export const NODE_DEFINITIONS = {
 
   BEAT_SLIDESHOW: {
     type: 'BEAT_SLIDESHOW',
-    label: 'Beat slideshow',
-    description: 'Plays incoming images and video clips in order, cuts them to the beat, and renders one video.',
+    label: 'Slideshow',
+    description: 'Plays incoming images and video clips in order over a music track, timed to the beat, by seconds, or at each video\'s full length, and renders one video.',
     category: 'assemble',
     icon: 'clapperboard',
     inputs: [

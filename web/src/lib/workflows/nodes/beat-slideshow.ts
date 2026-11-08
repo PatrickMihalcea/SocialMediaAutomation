@@ -5,7 +5,7 @@ import { mediaKey, storage } from '@/lib/storage';
 import { enqueue } from '@/lib/queue';
 import { PermanentJobError } from '@/lib/queue/runner';
 import { resolveBeatGrid } from '@/lib/audio/analyse';
-import { buildBeatPlan } from '@/lib/render/plan';
+import { buildBeatPlan, buildTimedPlan } from '@/lib/render/plan';
 import { prepareImage } from '@/lib/render/layout';
 import { renderer } from '@/lib/render';
 import type { BeatSegment, RenderPlan } from '@/lib/render/types';
@@ -13,7 +13,9 @@ import type { NodeRunContext } from '@/lib/workflows/node-context';
 import { resolveVideoOutputDimensions } from '@/lib/workflows/video-output-presets';
 
 interface Config {
+  timing?: 'beat' | 'seconds' | 'full';
   beatsPerClip: number;
+  secondsPerClip?: number;
   size?: string;
   width?: number;
   height?: number;
@@ -67,10 +69,20 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   });
   if (!audio) throw new PermanentJobError('That track is no longer in the media library.');
 
-  const grid = await resolveBeatGrid(audio);
-  const plan = buildBeatPlan({
-    // A video's stored length, so a short clip is cut rather than looped.
-    clipSeconds: ordered.map((asset) => (asset.type === MediaType.VIDEO ? asset.duration : null)),
+  // A video's stored length, so a short clip is played once rather than looped,
+  // or, at full length, played to its end.
+  const clipSeconds = ordered.map((asset) => (asset.type === MediaType.VIDEO ? asset.duration : null));
+  const timing = config.timing ?? 'beat';
+  // Only beat timing needs the track analysed; the others just play it.
+  const grid = timing === 'beat' ? await resolveBeatGrid(audio) : null;
+  const plan = !grid ? buildTimedPlan({
+    clipSeconds,
+    mode: timing === 'full' ? 'full' : 'seconds',
+    secondsPerClip: config.secondsPerClip ?? 4,
+    fps: config.fps,
+    audioStartSeconds: audio.audioStart,
+  }) : buildBeatPlan({
+    clipSeconds,
     grid,
     imageCount: ordered.length,
     beatsPerClip: config.beatsPerClip,
@@ -186,11 +198,12 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       derivationPreset: JSON.stringify({
         kind: 'beat-video',
         renderer: result.renderer,
-        bpm: grid.bpm,
+        timing,
+        bpm: grid?.bpm ?? null,
         beatsPerClip: plan.beatsPerClip,
         startBeatIndex: plan.startBeatIndex,
         adjustment: plan.adjustment,
-        beatAnalyzer: grid.analyzer,
+        beatAnalyzer: grid?.analyzer ?? null,
         mediaAssetIds: used.map((item) => item.id),
         imageAssetIds: used.filter((item) => item.type === MediaType.IMAGE).map((item) => item.id),
         cutPoints,

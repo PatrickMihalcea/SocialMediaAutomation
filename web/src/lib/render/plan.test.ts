@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BeatPlanError, buildBeatPlan } from '@/lib/render/plan';
+import { BeatPlanError, buildBeatPlan, buildTimedPlan } from '@/lib/render/plan';
 import type { BeatGrid } from '@/lib/audio/types';
 
 /** An even grid at a given tempo, the shape a quantised track produces. */
@@ -183,4 +183,19 @@ describe('buildBeatPlan', () => {
     expect(plan.durations).toEqual([120, 120]);
   });
 
+});
+
+describe('buildTimedPlan', () => {
+  it('plays every video to its end at full length, and gives stills the seconds set', () => {
+    const plan = buildTimedPlan({ clipSeconds: [3.04, null, 5], mode: 'full', secondsPerClip: 4, fps: 30 });
+    expect(plan.durations).toEqual([91, 120, 150]);
+    expect(plan.totalFrames).toBe(361);
+    expect(plan.audioStartSeconds).toBe(0);
+  });
+
+  it('gives every clip the same length by seconds, and plays a shorter video once', () => {
+    const plan = buildTimedPlan({ clipSeconds: [3, 10, null], mode: 'seconds', secondsPerClip: 4, fps: 30, audioStartSeconds: 12 });
+    expect(plan.durations).toEqual([90, 120, 120]);
+    expect(plan.audioStartSeconds).toBe(12);
+  });
 });

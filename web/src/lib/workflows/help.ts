@@ -351,9 +351,22 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
   },
   BEAT_SLIDESHOW: {
+    timing: {
+      label: 'Timing',
+      description: 'How long each image or clip stays on screen. To the beat cuts on the music. Seconds per clip gives each the same length, and a shorter video plays once. Full length plays every video to its end, and gives each still image the seconds set below.',
+      optionLabels: {
+        beat: 'To the beat',
+        seconds: 'Seconds per clip',
+        full: 'Full length',
+      },
+    },
+    secondsPerClip: {
+      label: 'Seconds per clip',
+      description: 'How long each image or clip stays on screen. At Full length, only still images use this; videos play to their end.',
+    },
     beatsPerClip: {
-      label: 'Pace',
-      description: 'How long each image or video clip remains on screen, measured in musical beats.',
+      label: 'Beats per clip',
+      description: 'How long each image or video clip remains on screen, measured in musical beats. A video shorter than that plays once and the next one follows.',
       presets: [
         { label: 'Fast — 4 beats per clip', value: 4 },
         { label: 'Balanced — 8 beats per clip', value: 8 },
@@ -374,8 +387,8 @@ export const WORKFLOW_FIELD_HELP: Partial<
       optionLabels: COMMON_OPTIONS,
     },
     kenBurns: {
-      label: 'Add slow camera movement',
-      description: 'Applies alternating zoom movement to still images.',
+      label: 'Slow zoom on still images',
+      description: 'Adds a gentle alternating zoom to still images. Videos are left as they are.',
     },
     visualLeadMs: {
       label: 'Visual timing offset',

@@ -242,3 +242,48 @@ function isEvenlySpaced(beats: number[], bpm: number): boolean {
   const tail = beats.slice(-8);
   return tail.slice(1).every((t, i) => Math.abs(t - tail[i] - expected) < expected * 0.12);
 }
+
+export interface TimedPlanInput {
+  /** Each clip's own length in seconds; null for a still image. */
+  clipSeconds: Array<number | null>;
+  /**
+   * seconds: every clip gets this long, and a shorter video plays once.
+   * full: every video plays its whole length, and a still gets this long.
+   */
+  mode: 'seconds' | 'full';
+  secondsPerClip: number;
+  fps: number;
+  /** Where the music starts, in seconds. */
+  audioStartSeconds?: number | null;
+}
+
+/**
+ * Cuts by time instead of by beat. No beat grid is needed, so the track does
+ * not have to be analysed; the music simply starts at its saved start point.
+ */
+export function buildTimedPlan(input: TimedPlanInput): BeatPlan {
+  const { fps } = input;
+  if (input.clipSeconds.length < 1) throw new BeatPlanError('There are no images to build a video from.');
+  if (fps < 1) throw new BeatPlanError('Frame rate must be at least 1.');
+  const slot = Math.max(1, Math.round(input.secondsPerClip * fps));
+
+  const cutFrames = [0];
+  for (const own of input.clipSeconds) {
+    const length = own != null && own > 0 ? Math.floor(own * fps) : null;
+    const frames = input.mode === 'full' ? length ?? slot : Math.min(slot, length ?? slot);
+    cutFrames.push(cutFrames[cutFrames.length - 1] + Math.max(1, frames));
+  }
+  const durations = cutFrames.slice(1).map((frame, i) => frame - cutFrames[i]);
+  const totalFrames = cutFrames[cutFrames.length - 1];
+  return {
+    startBeatIndex: 0,
+    audioStartSeconds: input.audioStartSeconds ?? 0,
+    cutFrames,
+    durations,
+    totalFrames,
+    totalSeconds: totalFrames / fps,
+    beatsPerClip: 0,
+    adjustment: 'none',
+    imageCount: input.clipSeconds.length,
+  };
+}
