@@ -7,6 +7,7 @@ interface Config {
   maxClips: number;
   seconds: number;
   motion: 'subtle' | 'natural' | 'lively';
+  camera?: Camera;
   sound: boolean;
   soundPrompt?: string;
   provider: 'default' | 'comfyui';
@@ -52,12 +53,13 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       workspaceId: ctx.workspaceId,
       userId: ctx.userId,
       kind: 'VIDEO_ANIMATE',
-      prompt: withSound(withMotion(config.prompt, config.motion), config),
+      prompt: withSound(withMotion(withCamera(config.prompt, config.camera), config.motion), config),
       inputAssetIds: [images[index]],
       provider: animationProvider(config),
       seconds: config.seconds,
       motion: config.motion,
       sound: config.sound ?? false,
+      stillCamera: (config.camera ?? 'still') === 'still',
       inline: true,
     });
     // A clip on a laptop GPU can take longer than the sweeper waits for a
@@ -152,4 +154,24 @@ async function recentClipMs(
   });
   const values = recent.map((job) => job.durationMs!).sort((a, b) => a - b);
   return values.length ? values[Math.floor(values.length / 2)] : null;
+}
+
+type Camera = 'still' | 'push-in' | 'pull-out' | 'pan-left' | 'pan-right' | 'orbit';
+
+/**
+ * The camera, said once and plainly, after the scene. Kept apart from the
+ * scene prompt so the two cannot contradict each other, and so a still camera
+ * can be enforced by more than words where the provider allows.
+ */
+const CAMERA_NOTES: Record<Camera, string> = {
+  still: 'The camera is locked off on a tripod and does not move at all: no zoom, no push in, no pan, no drift.',
+  'push-in': 'The camera pushes in slowly and steadily toward the subject.',
+  'pull-out': 'The camera pulls back slowly and steadily from the subject.',
+  'pan-left': 'The camera pans slowly to the left.',
+  'pan-right': 'The camera pans slowly to the right.',
+  orbit: 'The camera orbits gently around the subject with natural parallax.',
+};
+
+export function withCamera(prompt: string, camera: Camera = 'still'): string {
+  return `${prompt.trim()} ${CAMERA_NOTES[camera]}`;
 }

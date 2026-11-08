@@ -63,6 +63,11 @@ export interface VideoClipOptions {
   /** Image to video only. Providers without such a control ignore it. */
   motion?: AnimationMotion;
   /**
+   * A still camera, enforced by more than the prompt where the provider can:
+   * ComfyUI applies the Cinemagraph LoRA. Unset leaves the camera to the prompt.
+   */
+  stillCamera?: boolean;
+  /**
    * Whether to keep the soundtrack a model generates with the clip. False
    * saves it silent; left unset, the clip keeps whatever sound it came with.
    */

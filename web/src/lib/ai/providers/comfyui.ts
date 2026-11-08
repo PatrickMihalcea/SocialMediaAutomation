@@ -492,7 +492,7 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
   async animateImage(input: { prompt: string; image: Buffer; onStage?: (stage: string) => void } & VideoClipOptions): Promise<AiMediaResult> {
     const mimeType = (await sharp(input.image).metadata().catch(() => null))?.format === 'jpeg' ? 'image/jpeg' : 'image/png';
     return this.render({
-      operation: 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage,
+      operation: 'img2vid', want: 'video', prompt: input.stillCamera ? `${CAMERA_LOCK_PROMPT} ${input.prompt}` : input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage,
     });
   }
 
@@ -604,8 +604,20 @@ export function clipValues(options: VideoClipOptions): Record<string, number> {
     seconds,
     frames: seconds * CLIP_FPS + 1,
     motion_strength: MOTION_STRENGTH[options.motion ?? 'natural'],
+    // 0 leaves the LoRA loaded but doing nothing, so one workflow serves both.
+    camera_lock: options.stillCamera ? CAMERA_LOCK_STRENGTH : 0,
   };
 }
+
+/**
+ * Cinemagraph LoRA strength for a still camera. Its card recommends 1.0 to
+ * 1.2, but at that strength it also freezes people, and these clips want small
+ * movement in them; this is the lower end that still holds the camera.
+ */
+const CAMERA_LOCK_STRENGTH = 0.7;
+
+/** The LoRA's own trigger words, which it was trained to respond to. */
+const CAMERA_LOCK_PROMPT = 'CINEMAGRAPH_MOTION, tripod locked-off static camera, zero camera movement.';
 
 /**
  * The same shape at about one megapixel, on a 64-pixel grid.

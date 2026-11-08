@@ -428,7 +428,10 @@ export const NODE_DEFINITIONS = {
     inputs: [{ id: 'images', label: 'Images', type: media([...IMAGES], true), required: true }],
     outputs: [{ id: 'clips', label: 'Clips', type: media([...VIDEOS], true) }],
     configSchema: z.object({
-      prompt: z.string().max(1000).default('Slow cinematic push in, subject stays centred.'),
+      /** What happens in the scene. The camera is its own setting below. */
+      prompt: z.string().max(2000).default('Bring the scene gently to life: soft light shifting, small natural movement.'),
+      /** The camera, said in one plain sentence; see withCamera in nodes/animate-image. */
+      camera: z.enum(['still', 'push-in', 'pull-out', 'pan-left', 'pan-right', 'orbit']).default('still'),
       maxClips: z.number().int().min(1).max(12).default(8),
       /**
        * Length of each clip. Beat slideshow plays a clip shorter than its slot

@@ -92,7 +92,12 @@ describe('clip length and motion', () => {
   });
 
   it('defaults to four seconds of natural motion, what the workflows rendered before either was a setting', () => {
-    expect(clipValues({})).toEqual({ seconds: 4, frames: 97, motion_strength: 0.7 });
+    expect(clipValues({})).toEqual({ seconds: 4, frames: 97, motion_strength: 0.7, camera_lock: 0 });
+  });
+
+  it('turns the camera-lock LoRA on only for a still camera', () => {
+    expect(clipValues({ stillCamera: true }).camera_lock).toBeGreaterThan(0);
+    expect(clipValues({ stillCamera: false }).camera_lock).toBe(0);
   });
 
   it('holds the still more firmly the subtler the motion', () => {

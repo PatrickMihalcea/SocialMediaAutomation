@@ -242,14 +242,26 @@ export const WORKFLOW_FIELD_HELP: Partial<
   },
   ANIMATE_IMAGE: {
     prompt: {
-      label: 'Camera movement',
-      description: 'One continuous shot. Custom text is passed to the model as written.',
+      label: 'What happens',
+      description: 'What moves in the scene: people, weather, light, objects. Describe the camera with the Camera setting instead, so the two never disagree.',
       multiline: true,
       presets: [
-        { label: 'Slow push in', value: 'Slow cinematic push in, subject stays centred.' },
-        { label: 'Gentle orbit', value: 'Gentle camera orbit with natural parallax, subject stays stable.' },
-        { label: 'Hold still', value: 'Locked camera, subtle environmental motion only.' },
+        { label: 'Gentle life', value: 'Bring the scene gently to life: soft light shifting, small natural movement.' },
+        { label: 'Weather and light', value: 'Weather moves outside, light flickers and shifts softly, everything else stays calm.' },
+        { label: 'People breathe and blink', value: 'People breathe slowly, blink occasionally and shift slightly; nothing else changes.' },
       ],
+    },
+    camera: {
+      label: 'Camera',
+      description: 'How the camera moves. Still keeps the frame fixed, so only the scene moves.',
+      optionLabels: {
+        still: 'Still',
+        'push-in': 'Push in',
+        'pull-out': 'Pull out',
+        'pan-left': 'Pan left',
+        'pan-right': 'Pan right',
+        orbit: 'Orbit',
+      },
     },
     maxClips: {
       label: 'Maximum clips',
@@ -270,10 +282,10 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
     motion: {
       label: 'Amount of motion',
-      description: 'How much moves in each clip, added to the camera movement above. Subtle is close to still; Lively moves more and can drift further from the picture.',
+      description: 'How much moves in each clip. Subtle is close to still; Lively moves more and can drift further from the picture.',
       optionLabels: {
         subtle: 'Subtle — almost still',
-        natural: 'Natural — as the camera movement says',
+        natural: 'Natural — as the prompt describes',
         lively: 'Lively — more movement, may drift',
       },
     },
