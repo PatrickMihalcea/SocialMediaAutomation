@@ -1156,6 +1156,8 @@ function unwrap(schema: z.ZodTypeAny): z.ZodTypeAny {
   let current = schema;
   for (let guard = 0; guard < 10; guard++) {
     if (current instanceof z.ZodDefault) current = current._def.innerType;
+    // A fallback for unknown stored values; the field underneath is the setting.
+    else if (current instanceof z.ZodCatch) current = current._def.innerType;
     else if (current instanceof z.ZodOptional) current = current.unwrap();
     else if (current instanceof z.ZodNullable) current = current.unwrap();
     else if (current instanceof z.ZodEffects) current = current.innerType();
