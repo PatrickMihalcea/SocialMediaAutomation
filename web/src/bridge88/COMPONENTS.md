@@ -265,6 +265,21 @@ export interface DropdownProps {
 export function Dropdown(props: DropdownProps): JSX.Element;
 ```
 
+### ProgressBar
+`import { ProgressBar } from '@/bridge88/components';`
+
+One-line: how far a long task has got, as a thin ink bar. Pair it with the percentage in text.
+
+```jsx
+<ProgressBar label="Animate image progress" value={62} />
+```
+
+- 6px tall, full width, ink fill on the soft surface; the fill eases over a second so a value updated every second moves steadily.
+
+```ts
+export function ProgressBar(props: { value: number; label: string; className?: string }): JSX.Element;
+```
+
 ### Slider
 `import { Slider } from '@/bridge88/components';`
 

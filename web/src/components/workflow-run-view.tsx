@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { Braces, ChevronLeft, ChevronRight, Music, Play, SlidersHorizontal } from 'lucide-react';
 import type { WorkflowNodeRunStatus, WorkflowRunStatus } from '@prisma/client';
-import { Badge, Button, Dialog, IconButton, humanizeMachineValue, MediaFrame, StatusMessage, VideoPlayer } from '@/bridge88/components';
+import { Badge, Button, Dialog, IconButton, humanizeMachineValue, MediaFrame, ProgressBar, StatusMessage, VideoPlayer } from '@/bridge88/components';
 import { cancelRunAction, getNodeRunOutputAction, retryNodeAction } from '@/app/actions/workflows';
 import { WorkflowNodeOutput } from '@/components/workflow-node-output';
 import {
@@ -16,6 +16,7 @@ import {
   isNodeTerminal,
   isRunTerminal,
 } from '@/lib/workflows/labels';
+import { progressPercent } from '@/lib/workflows/node-output';
 
 interface ProducedAsset {
   id: string;
@@ -52,7 +53,7 @@ interface NodeRun {
    */
   hasOutput?: boolean;
   /** How far through its set a step that counts its own work has got. */
-  progress?: { done: number; total: number; stage?: string; since?: number } | null;
+  progress?: { done: number; total: number; stage?: string; since?: number; expectedMs?: number } | null;
 }
 
 interface RunStatus {
@@ -439,11 +440,20 @@ export function WorkflowRunView({
                             is working, a step on four of seven ten minutes
                             later is not. */}
                         {node.progress && node.status === 'RUNNING'
-                          ? ` · ${node.progress.done} OF ${node.progress.total}${stageOf(node.progress, now + skew.current)}`
+                          ? progressPercent(node.progress, now + skew.current) !== null
+                            ? ` · ${progressPercent(node.progress, now + skew.current)}%`
+                            : ` · ${node.progress.done} OF ${node.progress.total}${stageOf(node.progress, now + skew.current)}`
                           : ''}
                         {node.attempt > 1 ? ` · ATTEMPT ${node.attempt} OF ${node.maxAttempts}` : ''}
                       </span>
                     </div>
+                    {node.progress && node.status === 'RUNNING' && progressPercent(node.progress, now + skew.current) !== null && (
+                      <ProgressBar
+                        className="mt-3"
+                        label={`${node.nodeName} progress`}
+                        value={progressPercent(node.progress, now + skew.current)!}
+                      />
+                    )}
                     {node.error && (
                       <p className="b88-body-sm mt-3" role="alert">
                         {node.error}

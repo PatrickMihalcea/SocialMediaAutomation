@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasReviewableOutput, nodeProgress, reviewableOutput } from '@/lib/workflows/node-output';
+import { hasReviewableOutput, nodeProgress, progressPercent, reviewableOutput } from '@/lib/workflows/node-output';
 
 const ID = '3f2504e0-4f89-11d3-9a0c-0305e82c3301';
 const OTHER = '9c858901-8a57-4791-81fe-4c455b099bc9';
@@ -86,5 +86,21 @@ describe('nodeProgress', () => {
     ['a marker that is not an object', { _progress: 'halfway' }],
   ])('ignores %s', (_label, output) => {
     expect(nodeProgress(output)).toBeNull();
+  });
+});
+
+describe('a step\'s percentage', () => {
+  const minute = 60_000;
+  it('counts finished clips plus the share of the current one', () => {
+    // 2 of 4 done, the third halfway through its expected 18 minutes.
+    expect(progressPercent({ done: 2, total: 4, since: 0, expectedMs: 18 * minute }, 9 * minute)).toBe(62);
+  });
+
+  it('holds below 100 while a clip runs long', () => {
+    expect(progressPercent({ done: 3, total: 4, since: 0, expectedMs: minute }, 60 * minute)).toBe(99);
+  });
+
+  it('says nothing without an expected time', () => {
+    expect(progressPercent({ done: 1, total: 4 }, 0)).toBeNull();
   });
 });

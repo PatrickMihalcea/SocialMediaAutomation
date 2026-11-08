@@ -38,6 +38,11 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     ? (ctx.previousOutput.clips as string[])
     : [];
   const clips: string[] = [...done];
+  const total = Math.min(images.length, config.maxClips);
+  // Clip times this step has measured, and the last ones this provider took,
+  // for the first clip of a run.
+  const durations: number[] = [];
+  const typicalMs = await recentClipMs(db, animationProvider(config));
 
   for (let index = clips.length; index < Math.min(images.length, config.maxClips); index++) {
     await ctx.assertNotCancelled();
@@ -59,24 +64,19 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     // silent step, and nothing else writes while it renders. Without this the
     // step is declared dead and dispatched again mid-render.
     const beat = setInterval(() => void ctx.heartbeat(), 60_000);
-    // What the clip is up to, shown on the run beside "4 of 7". Written in
-    // order and never awaited by the render: a slow status write must not
-    // hold up the GPU.
-    const clipNumber = clips.length + 1;
+    // When this clip started and how long one takes, so the run can show a
+    // percentage that moves every second rather than once a clip.
     const since = Date.now();
-    let writing: Promise<void> = Promise.resolve();
-    const report = (stage: string) => {
-      const progress = { clips: [...clips], _progress: { done: clips.length, total: images.length, stage: `clip ${clipNumber}, ${stage}`, since } };
-      writing = writing.catch(() => {}).then(() => ctx.saveProgress(progress));
-      void writing.catch(() => {});
-    };
-    report('starting');
+    await ctx.saveProgress({
+      clips: [...clips],
+      _progress: { done: clips.length, total, since, expectedMs: expectedClipMs(durations, typicalMs, config.seconds) },
+    });
     try {
-      await runAiMediaJob(job.id, { onStage: report });
+      await runAiMediaJob(job.id);
     } finally {
       clearInterval(beat);
-      await writing.catch(() => {});
     }
+    durations.push(Date.now() - since);
 
     const finished = await db.aiMediaJob.findUnique({
       where: { id: job.id },
@@ -88,7 +88,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
 
     clips.push(finished.outputAssetId);
     await ctx.emitAssets('clips', [finished.outputAssetId]);
-    await ctx.saveProgress({ clips, _progress: { done: clips.length, total: images.length } });
+    await ctx.saveProgress({ clips, _progress: { done: clips.length, total } });
   }
 
   return { clips };
@@ -128,4 +128,28 @@ export function withMotion(prompt: string, motion: Config['motion'] = 'natural')
 export function withSound(prompt: string, config: Pick<Config, 'sound' | 'soundPrompt'>): string {
   const sound = config.soundPrompt?.trim();
   return config.sound && sound ? `${prompt} Sound: ${sound.replace(/[.\s]+$/, '')}.` : prompt;
+}
+
+/**
+ * How long a clip should take: this step's own clips once it has any, else the
+ * provider's recent clips, else a rough figure from the clip length.
+ */
+export function expectedClipMs(measured: number[], typical: number | null, seconds: number): number {
+  if (measured.length) return measured.reduce((sum, value) => sum + value, 0) / measured.length;
+  return typical ?? seconds * 6 * 60_000;
+}
+
+/** The middle of the provider's last few finished clips, in milliseconds. */
+async function recentClipMs(
+  db: typeof import('@/lib/db').db,
+  provider: string | undefined,
+): Promise<number | null> {
+  const recent = await db.aiMediaJob.findMany({
+    where: { kind: 'VIDEO_ANIMATE', ...(provider ? { provider } : {}), status: 'COMPLETED', durationMs: { not: null } },
+    orderBy: { completedAt: 'desc' },
+    take: 5,
+    select: { durationMs: true },
+  });
+  const values = recent.map((job) => job.durationMs!).sort((a, b) => a - b);
+  return values.length ? values[Math.floor(values.length / 2)] : null;
 }

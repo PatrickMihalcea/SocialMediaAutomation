@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-import { animationProvider, withMotion, withSound } from '@/lib/workflows/nodes/animate-image';
+import { animationProvider, expectedClipMs, withMotion, withSound } from '@/lib/workflows/nodes/animate-image';
 
 /**
  * LTX takes its motion from the words: holding the first frame harder or
@@ -39,5 +39,13 @@ describe('the sound prompt', () => {
   it('leaves the prompt alone while sound is off or nothing is described', () => {
     expect(withSound('Slow push in.', { sound: false, soundPrompt: 'thunder' })).toBe('Slow push in.');
     expect(withSound('Slow push in.', { sound: true, soundPrompt: '   ' })).toBe('Slow push in.');
+  });
+});
+
+describe('how long a clip should take', () => {
+  it('uses this step\'s own clips first, then recent ones, then a guess from the length', () => {
+    expect(expectedClipMs([10, 20], 99, 3)).toBe(15);
+    expect(expectedClipMs([], 1_080_000, 3)).toBe(1_080_000);
+    expect(expectedClipMs([], null, 3)).toBe(18 * 60_000);
   });
 });

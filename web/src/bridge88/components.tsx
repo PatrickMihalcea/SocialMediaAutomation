@@ -296,6 +296,30 @@ export function Switch({
   );
 }
 
+/**
+ * How far something long has got, as a thin ink bar on the soft surface. The
+ * fill eases between values, so a percentage updated every second reads as
+ * steady movement.
+ */
+export function ProgressBar({ value, label, className = '' }: { value: number; label: string; className?: string }) {
+  const clamped = Math.max(0, Math.min(100, value));
+  return (
+    <div
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(clamped)}
+      className={`h-1.5 w-full overflow-hidden rounded-full bg-surface-soft ${className}`}
+    >
+      <div
+        className="h-full rounded-full bg-[var(--ink)] transition-[width] duration-1000 ease-linear motion-reduce:transition-none"
+        style={{ width: `${clamped}%` }}
+      />
+    </div>
+  );
+}
+
 export function Slider({
   label,
   hint,

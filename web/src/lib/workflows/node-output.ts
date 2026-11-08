@@ -55,6 +55,11 @@ export interface NodeProgress {
   stage?: string;
   /** When the item in hand was started, so the wait can be shown. */
   since?: number;
+  /**
+   * How long one item is expected to take. With since, it lets the page show
+   * a percentage that moves every second instead of jumping per item.
+   */
+  expectedMs?: number;
 }
 
 /**
@@ -72,7 +77,7 @@ export function nodeProgress(output: unknown): NodeProgress | null {
   if (typeof output !== 'object' || output === null) return null;
   const raw = (output as { _progress?: unknown })._progress;
   if (typeof raw !== 'object' || raw === null) return null;
-  const { done, total, stage, since } = raw as Record<string, unknown>;
+  const { done, total, stage, since, expectedMs } = raw as Record<string, unknown>;
   if (typeof done !== 'number' || typeof total !== 'number') return null;
   if (total <= 0) return null;
   return {
@@ -80,5 +85,18 @@ export function nodeProgress(output: unknown): NodeProgress | null {
     total,
     ...(typeof stage === 'string' && stage ? { stage } : {}),
     ...(typeof since === 'number' ? { since } : {}),
+    ...(typeof expectedMs === 'number' && expectedMs > 0 ? { expectedMs } : {}),
   };
+}
+
+/**
+ * How far through a step is, 0 to 100: the items done plus the share of the
+ * current one its expected time says has passed. Held at 99 until the step
+ * reports it finished, so a slow item never reads as done.
+ */
+export function progressPercent(progress: NodeProgress, nowMs: number): number | null {
+  if (!progress.expectedMs || progress.since == null) return null;
+  const current = Math.min(0.99, Math.max(0, (nowMs - progress.since) / progress.expectedMs));
+  const done = Math.min(progress.done + (progress.done < progress.total ? current : 0), progress.total);
+  return Math.min(99, Math.floor((done / progress.total) * 100));
 }
