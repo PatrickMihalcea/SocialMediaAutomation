@@ -492,7 +492,7 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
   async animateImage(input: { prompt: string; image: Buffer; onStage?: (stage: string) => void } & VideoClipOptions): Promise<AiMediaResult> {
     const mimeType = (await sharp(input.image).metadata().catch(() => null))?.format === 'jpeg' ? 'image/jpeg' : 'image/png';
     return this.render({
-      operation: 'img2vid', want: 'video', prompt: input.stillCamera ? `${CAMERA_LOCK_PROMPT} ${input.prompt}` : input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage,
+      operation: 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage,
     });
   }
 
@@ -517,8 +517,11 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     );
 
     input.onStage?.('uploading inputs');
+    // The camera-lock LoRA answers to its own trigger words, which mean
+    // nothing to a workflow that does not load it.
+    const locked = Number(input.values.camera_lock ?? 0) > 0 && [...template.placeholders].includes('camera_lock');
     const values: Record<string, string | number> = {
-      prompt: input.prompt,
+      prompt: locked ? `${CAMERA_LOCK_PROMPT} ${input.prompt}` : input.prompt,
       negative_prompt: '',
       seed: Math.floor(Math.random() * 2 ** 32),
       ...input.values,

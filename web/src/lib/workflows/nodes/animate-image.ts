@@ -6,8 +6,8 @@ interface Config {
   prompt: string;
   maxClips: number;
   seconds: number;
-  motion: 'subtle' | 'natural' | 'lively';
   camera?: Camera;
+  cameraPrompt?: string;
   sound: boolean;
   soundPrompt?: string;
   provider: 'default' | 'comfyui';
@@ -53,13 +53,12 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       workspaceId: ctx.workspaceId,
       userId: ctx.userId,
       kind: 'VIDEO_ANIMATE',
-      prompt: withSound(withMotion(withCamera(config.prompt, config.camera), config.motion), config),
+      prompt: withSound(withCamera(config.prompt, config), config),
       inputAssetIds: [images[index]],
       provider: animationProvider(config),
       seconds: config.seconds,
-      motion: config.motion,
       sound: config.sound ?? false,
-      stillCamera: (config.camera ?? 'still') === 'still',
+      stillCamera: (config.camera ?? 'locked') === 'locked',
       inline: true,
     });
     // A clip on a laptop GPU can take longer than the sweeper waits for a
@@ -103,26 +102,6 @@ export function animationProvider(config: Pick<Config, 'provider' | 'useMockGene
 }
 
 /**
- * The amount of motion, said in the prompt.
- *
- * Measured on LTX-2.5: how firmly the first frame holds the still made no
- * visible difference between the two extremes, because the model takes its
- * motion from the words. So the setting is words, appended last where they
- * carry most weight, and Natural adds none, leaving the camera movement as
- * written.
- */
-const MOTION_NOTES: Record<Config['motion'], string | null> = {
-  subtle: 'Keep the motion very subtle and slow, almost still: only the faintest movement, and the camera barely moves.',
-  natural: null,
-  lively: 'Make the motion lively and pronounced: clear, energetic movement in the scene and a confident camera move.',
-};
-
-export function withMotion(prompt: string, motion: Config['motion'] = 'natural'): string {
-  const note = MOTION_NOTES[motion];
-  return note ? `${prompt.trim()} ${note}` : prompt;
-}
-
-/**
  * What the clip should sound like, said in the prompt. LTX makes picture and
  * sound from one prompt, so there is no separate input: a sentence about the
  * sound is how it is steered. Left out when sound is off.
@@ -156,22 +135,20 @@ async function recentClipMs(
   return values.length ? values[Math.floor(values.length / 2)] : null;
 }
 
-type Camera = 'still' | 'push-in' | 'pull-out' | 'pan-left' | 'pan-right' | 'orbit';
+type Camera = 'locked' | 'custom' | 'none';
 
 /**
- * The camera, said once and plainly, after the scene. Kept apart from the
- * scene prompt so the two cannot contradict each other, and so a still camera
- * can be enforced by more than words where the provider allows.
+ * Locked says plainly that the frame holds still and that the scene does not:
+ * a camera instruction alone tends to read as "nothing moves".
  */
-const CAMERA_NOTES: Record<Camera, string> = {
-  still: 'The camera is locked off on a tripod and does not move at all: no zoom, no push in, no pan, no drift.',
-  'push-in': 'The camera pushes in slowly and steadily toward the subject.',
-  'pull-out': 'The camera pulls back slowly and steadily from the subject.',
-  'pan-left': 'The camera pans slowly to the left.',
-  'pan-right': 'The camera pans slowly to the right.',
-  orbit: 'The camera orbits gently around the subject with natural parallax.',
-};
+const LOCKED_CAMERA =
+  'Static shot from a locked-off camera on a tripod: the frame never moves, zooms, pushes in, pans or drifts. '
+  + 'Everything in the scene keeps moving naturally.';
 
-export function withCamera(prompt: string, camera: Camera = 'still'): string {
-  return `${prompt.trim()} ${CAMERA_NOTES[camera]}`;
+/** The camera, said once after the instructions, or nothing at No preference. */
+export function withCamera(prompt: string, config: Pick<Config, 'camera' | 'cameraPrompt'>): string {
+  const camera = config.camera ?? 'locked';
+  const custom = config.cameraPrompt?.trim().replace(/[.\s]+$/, '');
+  const note = camera === 'locked' ? LOCKED_CAMERA : camera === 'custom' && custom ? `Camera: ${custom}.` : null;
+  return note ? `${prompt.trim()} ${note}` : prompt.trim();
 }

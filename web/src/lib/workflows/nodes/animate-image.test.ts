@@ -2,23 +2,19 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-import { animationProvider, expectedClipMs, withMotion, withSound } from '@/lib/workflows/nodes/animate-image';
+import { animationProvider, expectedClipMs, withCamera, withSound } from '@/lib/workflows/nodes/animate-image';
 
-/**
- * LTX takes its motion from the words: holding the first frame harder or
- * looser made no visible difference between the extremes. So the setting is
- * said in the prompt.
- */
-describe('amount of motion', () => {
-  const camera = 'Slow cinematic push in, subject stays centred.';
+describe('the camera', () => {
+  const instructions = 'Snow falls past the window.';
 
-  it('leaves the camera movement as written for natural motion', () => {
-    expect(withMotion(camera, 'natural')).toBe(camera);
+  it('locks the frame and says the scene still moves', () => {
+    expect(withCamera(instructions, { camera: 'locked' })).toMatch(/^Snow falls past the window\. Static shot.*Everything in the scene keeps moving naturally\.$/);
   });
 
-  it('asks for less, or more, after the camera movement', () => {
-    expect(withMotion(camera, 'subtle')).toMatch(/^Slow cinematic push in.*almost still/);
-    expect(withMotion(camera, 'lively')).toMatch(/^Slow cinematic push in.*lively and pronounced/);
+  it('sends a custom camera as written, and nothing at No preference', () => {
+    expect(withCamera(instructions, { camera: 'custom', cameraPrompt: 'slow push in toward the window.' }))
+      .toBe('Snow falls past the window. Camera: slow push in toward the window.');
+    expect(withCamera(instructions, { camera: 'none', cameraPrompt: 'ignored' })).toBe(instructions);
   });
 });
 

@@ -242,8 +242,8 @@ export const WORKFLOW_FIELD_HELP: Partial<
   },
   ANIMATE_IMAGE: {
     prompt: {
-      label: 'What happens',
-      description: 'What moves in the scene: people, weather, light, objects. Describe the camera with the Camera setting instead, so the two never disagree.',
+      label: 'Instructions',
+      description: 'General instruction and styling: what happens in the scene and how it should look. Leave the camera to the Camera setting.',
       multiline: true,
       presets: [
         { label: 'Gentle life', value: 'Bring the scene gently to life: soft light shifting, small natural movement.' },
@@ -253,15 +253,17 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
     camera: {
       label: 'Camera',
-      description: 'How the camera moves. Still keeps the frame fixed, so only the scene moves.',
+      description: 'Locked holds the frame still while the scene keeps moving. Custom lets you describe the camera yourself. No preference adds nothing about the camera.',
       optionLabels: {
-        still: 'Still',
-        'push-in': 'Push in',
-        'pull-out': 'Pull out',
-        'pan-left': 'Pan left',
-        'pan-right': 'Pan right',
-        orbit: 'Orbit',
+        locked: 'Locked',
+        custom: 'Custom',
+        none: 'No preference',
       },
+    },
+    cameraPrompt: {
+      label: 'Camera movement',
+      description: 'How the camera moves, for example "slow push in toward the window" or "gentle pan to the right".',
+      multiline: true,
     },
     maxClips: {
       label: 'Maximum clips',
@@ -279,15 +281,6 @@ export const WORKFLOW_FIELD_HELP: Partial<
       label: 'Sound prompt',
       description: 'What each clip should sound like, for example "wind through ruins, distant thunder, no music". Added to the prompt; used only while Generate sound is on.',
       multiline: true,
-    },
-    motion: {
-      label: 'Amount of motion',
-      description: 'How much moves in each clip. Subtle is close to still; Lively moves more and can drift further from the picture.',
-      optionLabels: {
-        subtle: 'Subtle — almost still',
-        natural: 'Natural — as the prompt describes',
-        lively: 'Lively — more movement, may drift',
-      },
     },
     provider: {
       label: 'Animate with',
