@@ -1051,7 +1051,7 @@ export function NodeConfigPanel({
 
       {shownFields.map((field) => {
         const connection = connections.find((item) => item.portId === field.key);
-        const control = renderField(field);
+        const control = renderField(fieldForMode(node.type, field, config));
         if (!connection) return <div key={field.key}>{control}</div>;
         return (
           <ConnectedSetting
@@ -1233,4 +1233,20 @@ function numberField(key: string, label: string, schema: z.ZodNumber): FieldSpec
   // Whole numbers step by one; a decimal range gets about fifty stops.
   const step = schema.isInt ? 1 : Number(((max - min) / 50).toPrecision(1));
   return { key, label, kind: 'range', min, max, step };
+}
+
+/**
+ * A field's label for the step's current mode, where one setting means
+ * something narrower in it: at Full length, videos play to their end and the
+ * seconds apply to still images only.
+ */
+function fieldForMode(type: string, field: FieldSpec, config: Record<string, unknown>): FieldSpec {
+  if (type === 'BEAT_SLIDESHOW' && field.key === 'secondsPerClip' && config.timing === 'full') {
+    return {
+      ...field,
+      label: 'Seconds per still image',
+      description: 'How long each still image stays on screen. Videos play to their end.',
+    };
+  }
+  return field;
 }
