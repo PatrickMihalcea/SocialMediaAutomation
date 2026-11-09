@@ -89,7 +89,8 @@ const schema = z.object({
    * on a laptop GPU genuinely takes tens of minutes; it is here to free the
    * worker from a ComfyUI that has wedged, not to hurry one that is working.
    */
-  COMFYUI_TIMEOUT_MS: z.coerce.number().int().positive().default(45 * 60 * 1000),
+  // Two hours: a 5-second looped clip at full size runs past 45 minutes on an M4 Max.
+  COMFYUI_TIMEOUT_MS: z.coerce.number().int().positive().default(120 * 60 * 1000),
 
   /**
    * Image generation by running the `image-use` CLI, which renders against the
