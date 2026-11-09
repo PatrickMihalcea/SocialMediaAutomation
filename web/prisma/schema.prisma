@@ -1318,7 +1318,6 @@ model WorkflowNode {
   workspace     Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   outgoingEdges WorkflowEdge[]    @relation("EdgeSource")
   incomingEdges WorkflowEdge[]    @relation("EdgeTarget")
-  nodeRuns      WorkflowNodeRun[]
 
   @@index([workflowId])
   @@index([workspaceId])
@@ -1402,6 +1401,9 @@ model WorkflowNodeRun {
   id          String                @id @default(uuid()) @db.Uuid
   workspaceId String                @map("workspace_id") @db.Uuid
   runId       String                @map("run_id") @db.Uuid
+  /// The step this ran, as it was in the run's frozen graph. Deliberately not
+  /// a foreign key: deleting a step from the workflow must not delete its
+  /// history from past runs, or pull it out from under a run still going.
   nodeId      String                @map("node_id") @db.Uuid
   /// Copied from the snapshot so the run view never has to join back to a node
   /// that has since been deleted from the canvas.
@@ -1435,7 +1437,6 @@ model WorkflowNodeRun {
 
   workspace      Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   run            WorkflowRun            @relation(fields: [runId], references: [id], onDelete: Cascade)
-  node           WorkflowNode           @relation(fields: [nodeId], references: [id], onDelete: Cascade)
   producedAssets WorkflowNodeRunAsset[]
   /// Posts this step created. SetNull on the other side: deleting a run must
   /// never take a real post — possibly a published one — with it.
