@@ -632,7 +632,7 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     // With sound off the soundtrack would only be thrown away, so the sound
     // half of the graph is not run at all. Should ComfyUI refuse the trimmed
     // graph, the full one runs instead: the clip matters more than the saving.
-    const silent = input.want === 'video' && input.sound === false ? withoutSoundBranch(full) : null;
+    const silent = input.want === 'video' && input.sound === false && !soundlessRefused ? withoutSoundBranch(full) : null;
     const queueAndWait = async (graph: Record<string, unknown>) => {
       const promptId = await this.client.queue(graph, clientId);
       return this.client.wait(promptId, clientId, {
@@ -647,7 +647,10 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
       files = await queueAndWait(silent ?? full);
     } catch (error) {
       if (!silent || /cancelled/i.test(error instanceof Error ? error.message : '')) throw error;
-      console.warn('[comfyui] the workflow without sound was refused; running it whole', error);
+      // Refused once, refused always: the model cannot run without sound, so
+      // later clips go straight to the full workflow instead of losing time.
+      soundlessRefused = true;
+      console.warn('[comfyui] the workflow without sound was refused; running it whole from now on', error);
       files = await queueAndWait(full);
     }
 
@@ -858,6 +861,9 @@ function passName(pass: number, total: number): string {
   if (total === 2) return pass === 1 ? 'draft pass' : 'detail pass';
   return `pass ${pass} of ${total}`;
 }
+
+/** Set once ComfyUI refuses a workflow without its sound half, for the life of the worker. */
+let soundlessRefused = false;
 
 /** Nodes that only ever make or save sound. */
 const SOUND_ONLY = new Set(['LTXVEmptyLatentAudio', 'LTXVAudioVAEDecode', 'SaveAudio']);
