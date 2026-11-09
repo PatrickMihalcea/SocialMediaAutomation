@@ -621,7 +621,11 @@ export function NodeConfigPanel({
     if (node.type === 'ANIMATE_IMAGE' && field.key === 'soundPrompt') return config.sound === true;
     if (node.type === 'ANIMATE_IMAGE' && field.key === 'cameraPrompt') return config.camera === 'custom';
     if (node.type === 'ANIMATE_IMAGE' && field.key === 'loopStrictness') return config.loop === true;
-    if (node.type === 'IMAGE_GENERATOR' && field.key === 'redrawAttempts') return config.checkCharacters === true;
+    if (node.type === 'IMAGE_GENERATOR') {
+      // The old on/off switch is replaced by the question.
+      if (field.key === 'checkCharacters') return false;
+      if (field.key === 'redrawAttempts') return typeof config.checkQuestion === 'string' && config.checkQuestion.trim() !== '';
+    }
     if (node.type === 'TEXT_OVERLAY') {
       // Overlay structure replaced the freeform template picker. The template
       // field remains in the schema so a connected Overlay text port still

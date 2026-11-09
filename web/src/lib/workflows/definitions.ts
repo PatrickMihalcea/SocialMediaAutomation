@@ -414,12 +414,14 @@ export const NODE_DEFINITIONS = {
        */
       provider: z.enum(['mock', 'openai', 'image-use', 'comfyui']).default('image-use'),
       /**
-       * Look at each picture and redraw it when the characters the prompt
-       * names were swapped for generic ones. Checked on the ChatGPT
+       * A yes-or-no question the AI answers looking at each picture; a no
+       * redraws it. Empty turns the check off. Answered on the ChatGPT
        * subscription, so it costs nothing per picture.
        */
-      checkCharacters: z.boolean().default(false),
+      checkQuestion: z.string().max(1000).default(''),
       redrawAttempts: z.number().int().min(0).max(3).default(2),
+      /** Superseded by checkQuestion; kept so steps saved with it keep checking. */
+      checkCharacters: z.boolean().default(false),
       /** Superseded by `provider`; kept so steps saved before it keep mocking. */
       useMockGeneration: z.boolean().default(false),
     }),

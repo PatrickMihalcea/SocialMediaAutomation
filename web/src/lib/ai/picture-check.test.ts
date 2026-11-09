@@ -26,25 +26,25 @@ cp "${dir}/answer.json" "$out"
   return { env: { CODEX_BIN: bin, CHARACTER_CHECK_MODEL: 'test-model' } };
 });
 
-import { checkCharacters } from '@/lib/ai/character-check';
+import { checkPicture } from '@/lib/ai/picture-check';
 
 const dir = path.join(tmpdir(), `fake-codex-${process.pid}`);
 const answer = (value: unknown) => writeFileSync(path.join(dir, 'answer.json'), JSON.stringify(value));
 
-describe('checking a picture for its named characters', () => {
+describe('asking a question about a picture', () => {
   beforeEach(() => {
     mkdirSync(dir, { recursive: true });
     rmSync(path.join(dir, 'fail'), { force: true });
   });
 
-  it('reports the characters missing from the picture', async () => {
-    answer({ named: ['SpongeBob', 'Pikachu'], missing: ['Pikachu'], allPresent: true });
-    const result = await checkCharacters(Buffer.from('png'), 'SpongeBob and Pikachu on a train');
-    expect(result).toEqual({ named: ['SpongeBob', 'Pikachu'], missing: ['Pikachu'], allPresent: true });
+  it('returns the answer and its reason', async () => {
+    answer({ pass: false, reason: 'The children are generic, not cartoon characters.' });
+    expect(await checkPicture(Buffer.from('png'), 'SpongeBob on a train', 'Are the characters real cartoons?'))
+      .toEqual({ pass: false, reason: 'The children are generic, not cartoon characters.' });
   });
 
   it('lets the picture through when the checker cannot run', async () => {
     writeFileSync(path.join(dir, 'fail'), '');
-    expect(await checkCharacters(Buffer.from('png'), 'SpongeBob')).toBeNull();
+    expect(await checkPicture(Buffer.from('png'), 'SpongeBob', 'Real cartoons?')).toBeNull();
   });
 });

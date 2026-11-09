@@ -1,7 +1,7 @@
 import 'server-only';
 import { MediaType } from '@prisma/client';
 import { db } from '@/lib/db';
-import { checkCharacters } from '@/lib/ai/character-check';
+import { checkPicture } from '@/lib/ai/picture-check';
 import { generateImage } from '@/lib/ai';
 import type { ImageSize } from '@/lib/ai/image-sizes';
 import type { ImageProviderName } from '@/lib/ai/provider-selection';
@@ -24,6 +24,9 @@ export interface Config {
   provider: ImageProviderName;
   /** Superseded by `provider`. Still read, so steps saved before it keep mocking. */
   useMockGeneration: boolean;
+  /** A yes-or-no question asked about each picture; a no redraws it. Empty is off. */
+  checkQuestion?: string;
+  /** Superseded by checkQuestion; still read, so steps saved with it keep checking. */
   checkCharacters?: boolean;
   redrawAttempts?: number;
 }
@@ -114,8 +117,10 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     return write;
   };
 
-  // Pictures whose characters could not be confirmed after every redraw.
-  const characterWarnings: string[] = [];
+  // What the check said about each picture, kept with the output so anyone
+  // can see why a picture was redrawn or let through.
+  const checks: Array<{ picture: number; attempt: number; pass: boolean; reason: string }> = [];
+  const question = checkQuestionOf(config);
 
   const renderOne = async (index: number): Promise<string> => {
     const prompt = composePrompt({
@@ -142,23 +147,19 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     });
     let result = await draw();
 
-    // Redrawn when the named characters came back as generic look-alikes,
-    // keeping whichever attempt drew the most of them.
-    if (config.checkCharacters && provider !== 'mock') {
-      let best = { result, missing: Infinity };
+    // Asked about each picture, and redrawn on a no. The last attempt is used
+    // whatever it says, so a run never stalls on a question it cannot satisfy.
+    if (question && provider !== 'mock') {
       for (let attempt = 0; ; attempt++) {
-        say('checking the characters');
-        const check = await checkCharacters(result.data, prompts[index]);
-        if (!check || check.allPresent) { best = { result, missing: 0 }; break; }
-        if (check.missing.length < best.missing) best = { result, missing: check.missing.length };
-        if (attempt >= (config.redrawAttempts ?? 2)) {
-          characterWarnings.push(`Picture ${index + 1} may be missing ${check.missing.join(', ')}.`);
-          break;
-        }
-        say(`redrawing, missing ${check.missing.slice(0, 3).join(', ')}`);
+        say('checking the picture');
+        const check = await checkPicture(result.data, prompts[index], question);
+        if (!check) break;
+        checks.push({ picture: index + 1, attempt: attempt + 1, ...check });
+        console.log(`[check] picture ${index + 1}, attempt ${attempt + 1}: ${check.pass ? 'pass' : 'fail'}. ${check.reason}`);
+        if (check.pass || attempt >= (config.redrawAttempts ?? 2)) break;
+        say('redrawing after the check');
         result = await draw();
       }
-      result = best.result;
     }
 
     const extension = result.mimeType === 'image/svg+xml' ? 'svg' : 'png';
@@ -229,8 +230,8 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   return {
     images,
     titles: titles.slice(0, images.length),
-    // Shown with the step's output: the run went ahead, but someone should look.
-    ...(characterWarnings.length ? { characterWarnings } : {}),
+    // Every answer the check gave, so a redraw or a let-through can be read.
+    ...(checks.length ? { checks } : {}),
   };
 }
 
@@ -365,4 +366,14 @@ export function composePrompt(input: {
         + `Where anything above implies a different medium, finish or rendering technique, follow the style instead: ${style}`
       : null,
   ].filter(Boolean).join('\n\n');
+}
+
+/** Asked when a step was saved with the old on/off character check and no question. */
+export const DEFAULT_CHECK_QUESTION =
+  'Are all the characters in this picture real, recognisable characters from existing cartoons, games or films, rather than made-up or generic ones?';
+
+export function checkQuestionOf(config: Pick<Config, 'checkQuestion' | 'checkCharacters'>): string | null {
+  const question = config.checkQuestion?.trim();
+  if (question) return question;
+  return config.checkCharacters ? DEFAULT_CHECK_QUESTION : null;
 }

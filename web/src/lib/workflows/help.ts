@@ -204,13 +204,14 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
   },
   IMAGE_GENERATOR: {
-    checkCharacters: {
-      label: 'Check named characters',
-      description: 'After each picture, the AI looks at it and checks that the characters the prompt names, such as SpongeBob or Pikachu, are actually drawn and not swapped for generic look-alikes. If they are missing, the picture is redrawn. Runs on your ChatGPT subscription; the check takes a few seconds and a redraw a minute or two.',
+    checkQuestion: {
+      label: 'Check question',
+      description: 'A yes-or-no question the AI answers while looking at each picture, for example "Are all the characters real, recognisable cartoon characters, not made-up ones?" A no redraws the picture. Leave it empty to skip the check. Each answer and its reason are saved with the step\'s output.',
+      multiline: true,
     },
     redrawAttempts: {
       label: 'Redraw attempts',
-      description: 'How many times to redraw a picture that is missing its characters. After the last attempt the best one is used anyway, so the run never gets stuck.',
+      description: 'How many times to redraw a picture the check says no to. After the last attempt the picture is used anyway, so the run never gets stuck.',
     },
     style: {
       label: 'Image style',
