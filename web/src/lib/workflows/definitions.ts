@@ -242,7 +242,7 @@ export const NODE_DEFINITIONS = {
        * wins over both, because a wired value is always the more specific one.
        */
       themeMode: z.enum(['fixed', 'random']).default('fixed'),
-      theme: z.string().max(2000).default(''),
+      theme: z.string().max(4000).default(''),
       /**
        * Candidate themes for random mode, comma-separated in the panel. Each
        * run draws one uniformly from the whole pool — repeats included, because
@@ -294,11 +294,11 @@ export const NODE_DEFINITIONS = {
         .min(0, 'Temperature cannot be below 0.')
         .max(1.3, 'Temperature cannot be above 1.3.')
         .default(0.7),
-      promptGuidance: z.string().max(2_000, 'How to write the prompts must be 2,000 characters or fewer.').default(''),
-      titleGuidance: z.string().max(2_000, 'How to write the title must be 2,000 characters or fewer.').default(''),
-      imageTitleGuidance: z.string().max(2_000, 'How to write the image titles must be 2,000 characters or fewer.').default(''),
-      captionGuidance: z.string().max(2_000, 'How to write the caption must be 2,000 characters or fewer.').default(''),
-      hashtagsGuidance: z.string().max(2_000, 'How to pick hashtags must be 2,000 characters or fewer.').default(''),
+      promptGuidance: z.string().max(10_000, 'How to write the prompts must be 10,000 characters or fewer.').default(''),
+      titleGuidance: z.string().max(10_000, 'How to write the title must be 10,000 characters or fewer.').default(''),
+      imageTitleGuidance: z.string().max(10_000, 'How to write the image titles must be 10,000 characters or fewer.').default(''),
+      captionGuidance: z.string().max(10_000, 'How to write the caption must be 10,000 characters or fewer.').default(''),
+      hashtagsGuidance: z.string().max(10_000, 'How to pick hashtags must be 10,000 characters or fewer.').default(''),
       /** Extra, named text fields created as ports on this particular step. */
       additionalOutputs: z.array(z.object({
         id: z.string().regex(/^[a-z][a-zA-Z0-9]*$/, 'Use letters and numbers, starting with a letter.').max(40),
