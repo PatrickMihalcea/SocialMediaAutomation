@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import { WorkflowRetrySettings } from '@/components/workflow-retry-settings';
 import { describeStepRun } from '@/lib/workflows/step-summary';
 import Link from 'next/link';
 import { Badge, Button, EmptyState, StatusMessage } from '@/bridge88/components';
@@ -277,6 +278,12 @@ async function WorkflowDetail({
                   // before times were a list opens on the time it actually runs.
                   scheduleTimes: scheduleTimesOf(workflow),
                 }}
+              />
+            )}
+            {ctx.can('workflow:edit') && !workflow.archivedAt && (
+              <WorkflowRetrySettings
+                slug={slug}
+                workflow={{ id: workflow.id, retryFailedRuns: workflow.retryFailedRuns, retryLimit: workflow.retryLimit }}
               />
             )}
           </div>

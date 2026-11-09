@@ -1272,6 +1272,9 @@ model Workflow {
   /// Next instant this workflow is due, UTC. Null when it runs manually only.
   nextRunAt        DateTime? @map("next_run_at")
   lastRunAt        DateTime? @map("last_run_at")
+  /// Start a fresh run when one fails, up to retryLimit times in a row.
+  retryFailedRuns  Boolean   @default(false) @map("retry_failed_runs")
+  retryLimit       Int       @default(2) @map("retry_limit")
   archivedAt       DateTime? @map("archived_at")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
@@ -1371,6 +1374,11 @@ model WorkflowRun {
   /// Set the instant a cancel is requested. In-flight nodes check it between
   /// awaits; it is the durable half of cooperative cancellation.
   cancelledAt   DateTime?          @map("cancelled_at")
+  /// Set when this run was started because an earlier one failed: the run it
+  /// retries and how many retries in a row it is, so the chain stops at the
+  /// workflow's limit.
+  retryOfId     String?            @map("retry_of_id") @db.Uuid
+  retryNumber   Int                @default(0) @map("retry_number")
   startedAt     DateTime?          @map("started_at")
   finishedAt    DateTime?          @map("finished_at")
   durationMs    Int?               @map("duration_ms")

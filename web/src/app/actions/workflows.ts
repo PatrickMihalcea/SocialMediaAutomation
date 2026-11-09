@@ -85,6 +85,9 @@ const scheduleSchema = z.object({
     .optional(),
   scheduleHour: z.number().int().min(0).max(23).optional(),
   scheduleMinute: z.number().int().min(0).max(59).optional(),
+  /** Start a fresh run when one fails, up to retryLimit times in a row. */
+  retryFailedRuns: z.boolean().optional(),
+  retryLimit: z.number().int().min(1).max(5).optional(),
   // No timezone: it belongs to the workspace, and a workflow that could pick
   // its own would run at a wall-clock time the rest of the workspace disagrees
   // with. Workspace settings is the one place it changes.

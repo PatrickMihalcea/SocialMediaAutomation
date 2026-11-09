@@ -50,6 +50,8 @@ export async function startWorkflowRun(input: {
   userId?: string | null;
   trigger?: WorkflowRunTrigger;
   runInput?: Record<string, unknown>;
+  /** Set when this run retries a failed one. */
+  retry?: { ofRunId: string; number: number };
 }): Promise<string> {
   const workflow = await db.workflow.findFirst({
     where: { id: input.workflowId, workspaceId: input.workspaceId },
@@ -89,6 +91,7 @@ export async function startWorkflowRun(input: {
         status: WorkflowRunStatus.RUNNING,
         graph: snapshot as unknown as Prisma.InputJsonValue,
         input: (input.runInput ?? {}) as Prisma.InputJsonValue,
+        ...(input.retry ? { retryOfId: input.retry.ofRunId, retryNumber: input.retry.number } : {}),
         startedAt: new Date(),
       },
     });
@@ -650,8 +653,27 @@ export async function settleRun(runId: string): Promise<void> {
 
   const workflow = await db.workflow.findUnique({
     where: { id: run.workflowId },
-    select: { name: true, workspace: { select: { slug: true } } },
+    select: {
+      name: true, workspace: { select: { slug: true } },
+      retryFailedRuns: true, retryLimit: true, enabled: true, archivedAt: true,
+    },
   });
+
+  // A failed run starts a new one when the workflow says to, counting each
+  // retry from the run that first failed so the chain stops at the limit. A
+  // cancelled run is somebody's decision and is never restarted.
+  const retrying = shouldRetryRun(status, workflow, run);
+  if (retrying) {
+    await startWorkflowRun({
+      workflowId: run.workflowId,
+      workspaceId: run.workspaceId,
+      userId: run.triggeredById,
+      // A fresh run from the workflow as it now stands: new ideas, new
+      // pictures, current settings. Nothing is carried over from the failure.
+      trigger: run.trigger,
+      retry: { ofRunId: run.retryOfId ?? run.id, number: run.retryNumber + 1 },
+    }).catch((error) => console.error(`[workflow] could not start a retry of run ${run.id}`, error));
+  }
 
   if (run.triggeredById) {
     await notify({
@@ -665,7 +687,9 @@ export async function settleRun(runId: string): Promise<void> {
       body:
         status === WorkflowRunStatus.SUCCEEDED
           ? undefined
-          : 'Open the run to see which step stopped and why.',
+          : retrying
+            ? `Starting it again (retry ${run.retryNumber + 1} of ${workflow?.retryLimit}). Open the run to see which step stopped and why.`
+            : 'Open the run to see which step stopped and why.',
       href: `/w/${workflow?.workspace.slug ?? run.workspaceId}/workflows/${run.workflowId}/runs/${run.id}`,
     });
   }
@@ -677,6 +701,21 @@ export async function settleRun(runId: string): Promise<void> {
     entityId: run.id,
     metadata: { workflowId: run.workflowId },
   });
+}
+
+/**
+ * Whether a run that just ended starts a new one: only a failure, only when
+ * the workflow asks for it, and only while the chain is under its limit.
+ */
+export function shouldRetryRun(
+  status: WorkflowRunStatus,
+  workflow: { retryFailedRuns: boolean; retryLimit: number; archivedAt: Date | null } | null,
+  run: { retryNumber: number },
+): boolean {
+  return status === WorkflowRunStatus.FAILED
+    && Boolean(workflow?.retryFailedRuns)
+    && !workflow?.archivedAt
+    && run.retryNumber < (workflow?.retryLimit ?? 0);
 }
 
 // ---------------------------------------------------------------- control
