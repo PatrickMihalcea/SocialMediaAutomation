@@ -74,6 +74,8 @@ const run = promisify(execFile);
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 const POLL_MS = 1_000;
+/** How many polls between asking whether to stop: every five seconds. */
+const STOP_CHECK_POLLS = 5;
 
 // ---------------------------------------------------------------- templates
 
@@ -272,7 +274,13 @@ export class ComfyClient {
   async wait(
     promptId: string,
     clientId: string,
-    options: { timeoutMs: number; onStage?: (stage: string) => void; graph?: Record<string, unknown> },
+    options: {
+      timeoutMs: number;
+      onStage?: (stage: string) => void;
+      graph?: Record<string, unknown>;
+      /** Asked every few seconds; true stops the render in ComfyUI and gives up. */
+      shouldStop?: () => Promise<boolean>;
+    },
   ): Promise<ComfyFile[]> {
     const deadline = Date.now() + options.timeoutMs;
     const socket = this.watchProgress(promptId, clientId, options.onStage, options.graph);
@@ -283,7 +291,14 @@ export class ComfyClient {
       options.onStage?.(stage);
     };
     try {
+      let polls = 0;
       while (Date.now() < deadline) {
+        // A cancelled run must not keep the only GPU busy for the rest of a
+        // clip nobody will use, so the render itself is stopped.
+        if (options.shouldStop && polls++ % STOP_CHECK_POLLS === 0 && await options.shouldStop().catch(() => false)) {
+          await this.abandon(promptId);
+          throw new AiError('Stopped: the run was cancelled.', { retryable: false });
+        }
         const response = await this.request(`/history/${encodeURIComponent(promptId)}`);
         const history = (await response.json()) as Record<string, HistoryEntry>;
         const entry = history[promptId];
@@ -486,17 +501,17 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     }));
   }
 
-  async generateVideo(input: { prompt: string; image?: Buffer; onStage?: (stage: string) => void } & VideoClipOptions): Promise<AiMediaResult> {
+  async generateVideo(input: { prompt: string; image?: Buffer; onStage?: (stage: string) => void; shouldStop?: () => Promise<boolean> } & VideoClipOptions): Promise<AiMediaResult> {
     if (input.image) return this.animateImage({ ...input, image: input.image });
-    return this.render({ operation: 'txt2vid', want: 'video', prompt: input.prompt, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage });
+    return this.render({ operation: 'txt2vid', want: 'video', prompt: input.prompt, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage, shouldStop: input.shouldStop });
   }
 
-  async animateImage(input: { prompt: string; image: Buffer; onStage?: (stage: string) => void } & VideoClipOptions): Promise<AiMediaResult> {
+  async animateImage(input: { prompt: string; image: Buffer; onStage?: (stage: string) => void; shouldStop?: () => Promise<boolean> } & VideoClipOptions): Promise<AiMediaResult> {
     const mimeType = (await sharp(input.image).metadata().catch(() => null))?.format === 'jpeg' ? 'image/jpeg' : 'image/png';
     const result = await this.render({
       // A loop ends on the frame it starts on, which also keeps the framing
       // from drifting into a zoom.
-      operation: input.loop ? 'img2vid_loop' : 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage,
+      operation: input.loop ? 'img2vid_loop' : 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage, shouldStop: input.shouldStop,
     });
     if (!crossfadesLoop(input)) return result;
     // A loose loop ends near, not on, its first frame; the dissolve hides the
@@ -520,6 +535,7 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     /** False leaves the generated soundtrack out; the saved video is silent. */
     sound?: boolean;
     onStage?: (stage: string) => void;
+    shouldStop?: () => Promise<boolean>;
   }): Promise<AiMediaResult> {
     if (!this.isConfigured()) {
       throw new AiError('ComfyUI runs only on the local worker. Start it with `npm run worker:local` on the machine running ComfyUI.');
@@ -555,6 +571,7 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
       timeoutMs: env.COMFYUI_TIMEOUT_MS,
       graph,
       onStage: input.onStage,
+      shouldStop: input.shouldStop,
     });
 
     const wanted = input.want === 'video' ? VIDEO_EXTENSIONS : IMAGE_EXTENSIONS;

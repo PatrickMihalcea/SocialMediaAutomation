@@ -160,6 +160,7 @@ describe('ComfyUiProvider against a ComfyUI server', () => {
   let baseUrl = '';
   const directory = mkdtempSync(join(tmpdir(), 'comfy-provider-'));
   let posted: Record<string, unknown> | null = null;
+  const stopped: string[] = [];
   let uploads = 0;
   let mode: 'ok' | 'refuse' | 'fail' = 'ok';
   let pollsBeforeDone = 0;
@@ -212,6 +213,8 @@ describe('ComfyUiProvider against a ComfyUI server', () => {
           },
         });
       }
+      if (url.pathname === '/queue' && request.method === 'POST') { stopped.push('removed'); await body(request); return send(200, {}); }
+      if (url.pathname === '/interrupt') { stopped.push('interrupted'); return send(200, {}); }
       if (url.pathname === '/queue') return send(200, { queue_running: [[1, 'p1']], queue_pending: [] });
       if (url.pathname === '/view') {
         response.writeHead(200);
@@ -231,10 +234,19 @@ describe('ComfyUiProvider against a ComfyUI server', () => {
   });
 
   beforeEach(() => {
+    stopped.length = 0;
     posted = null;
     uploads = 0;
     mode = 'ok';
     pollsBeforeDone = 0;
+  });
+
+  it('stops the render in ComfyUI when the run is cancelled', async () => {
+    pollsBeforeDone = 1000;
+    await expect(new ComfyUiProvider().animateImage({
+      prompt: 'slow push in', image: PNG, seconds: 3, shouldStop: async () => true,
+    })).rejects.toThrow('the run was cancelled');
+    expect(stopped).toEqual(['removed', 'interrupted']);
   });
 
   it('fills the graph in, waits for history and returns the saved image', async () => {

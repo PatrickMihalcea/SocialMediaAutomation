@@ -76,11 +76,15 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       clips: [...clips],
       _progress: { done: clips.length, total, since, expectedMs: expectedClipMs(durations, typicalMs, config.seconds) },
     });
+    // Asked while ComfyUI renders, so cancelling the run stops the clip
+    // rather than leaving the GPU on it for half an hour.
+    const cancelled = () => ctx.assertNotCancelled().then(() => false, () => true);
     try {
-      await runAiMediaJob(job.id);
+      await runAiMediaJob(job.id, { shouldStop: cancelled });
     } finally {
       clearInterval(beat);
     }
+    await ctx.assertNotCancelled();
     durations.push(Date.now() - since);
 
     const finished = await db.aiMediaJob.findUnique({

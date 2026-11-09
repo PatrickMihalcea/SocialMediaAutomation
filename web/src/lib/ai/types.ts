@@ -86,8 +86,8 @@ export interface VideoGenerationProvider {
   readonly model: string;
   isConfigured(): boolean;
   /** onStage reports progress in a few words, for providers that know it. */
-  generateVideo(input: { prompt: string; image?: Buffer; onStage?: (stage: string) => void } & VideoClipOptions): Promise<AiMediaResult>;
-  animateImage(input: { prompt: string; image: Buffer; onStage?: (stage: string) => void } & VideoClipOptions): Promise<AiMediaResult>;
+  generateVideo(input: { prompt: string; image?: Buffer; onStage?: (stage: string) => void; shouldStop?: () => Promise<boolean> } & VideoClipOptions): Promise<AiMediaResult>;
+  animateImage(input: { prompt: string; image: Buffer; onStage?: (stage: string) => void; shouldStop?: () => Promise<boolean> } & VideoClipOptions): Promise<AiMediaResult>;
 }
 
 export interface AudioProvider {
