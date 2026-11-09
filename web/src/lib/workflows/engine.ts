@@ -50,8 +50,6 @@ export async function startWorkflowRun(input: {
   userId?: string | null;
   trigger?: WorkflowRunTrigger;
   runInput?: Record<string, unknown>;
-  /** Set when this run retries a failed one. */
-  retry?: { ofRunId: string; number: number };
 }): Promise<string> {
   const workflow = await db.workflow.findFirst({
     where: { id: input.workflowId, workspaceId: input.workspaceId },
@@ -91,7 +89,6 @@ export async function startWorkflowRun(input: {
         status: WorkflowRunStatus.RUNNING,
         graph: snapshot as unknown as Prisma.InputJsonValue,
         input: (input.runInput ?? {}) as Prisma.InputJsonValue,
-        ...(input.retry ? { retryOfId: input.retry.ofRunId, retryNumber: input.retry.number } : {}),
         startedAt: new Date(),
       },
     });
@@ -659,20 +656,13 @@ export async function settleRun(runId: string): Promise<void> {
     },
   });
 
-  // A failed run starts a new one when the workflow says to, counting each
-  // retry from the run that first failed so the chain stops at the limit. A
-  // cancelled run is somebody's decision and is never restarted.
+  // A failed run starts over from its first step when the workflow says to,
+  // counting its restarts so it stops at the limit. A cancelled run is
+  // somebody's decision and is never restarted.
   const retrying = shouldRetryRun(status, workflow, run);
   if (retrying) {
-    await startWorkflowRun({
-      workflowId: run.workflowId,
-      workspaceId: run.workspaceId,
-      userId: run.triggeredById,
-      // A fresh run from the workflow as it now stands: new ideas, new
-      // pictures, current settings. Nothing is carried over from the failure.
-      trigger: run.trigger,
-      retry: { ofRunId: run.retryOfId ?? run.id, number: run.retryNumber + 1 },
-    }).catch((error) => console.error(`[workflow] could not start a retry of run ${run.id}`, error));
+    await restartRunFromScratch(run.id)
+      .catch((error) => console.error(`[workflow] could not restart run ${run.id}`, error));
   }
 
   if (run.triggeredById) {
@@ -688,7 +678,7 @@ export async function settleRun(runId: string): Promise<void> {
         status === WorkflowRunStatus.SUCCEEDED
           ? undefined
           : retrying
-            ? `Starting it again (retry ${run.retryNumber + 1} of ${workflow?.retryLimit}). Open the run to see which step stopped and why.`
+            ? `Starting it over from the beginning (restart ${run.retryNumber + 1} of ${workflow?.retryLimit}). Open the run to see which step stopped and why.`
             : 'Open the run to see which step stopped and why.',
       href: `/w/${workflow?.workspace.slug ?? run.workspaceId}/workflows/${run.workflowId}/runs/${run.id}`,
     });
@@ -920,6 +910,74 @@ export async function retryWorkflowNode(nodeRunId: string, workspaceId: string):
       status: WorkflowNodeRunStatus.PENDING,
       pendingDeps: { lte: 0 },
     },
+    select: { id: true, workspaceId: true },
+  });
+  for (const row of ready) await claimAndEnqueue(row);
+}
+
+/**
+ * Starts a failed run over from its first step, as the same run.
+ *
+ * Every step is reset and the run counts one more restart, which is what
+ * stops a run that always fails from restarting forever. Each step takes the
+ * workflow's current settings, as playing from a step does, so a fix made
+ * after the failure is picked up. Nothing produced by the failed attempt is
+ * reused: it is a run from scratch.
+ */
+export async function restartRunFromScratch(runId: string): Promise<void> {
+  const run = await db.workflowRun.findUnique({ where: { id: runId } });
+  if (!run) return;
+  const snapshot = readSnapshot(run.graph);
+  const graph = toGraph(snapshot);
+
+  await db.$transaction(async (tx) => {
+    const claimed = await tx.workflowRun.updateMany({
+      where: { id: runId, status: WorkflowRunStatus.FAILED },
+      data: {
+        status: WorkflowRunStatus.RUNNING,
+        retryNumber: { increment: 1 },
+        startedAt: new Date(),
+        finishedAt: null,
+        durationMs: null,
+        error: null,
+        cancelledAt: null,
+      },
+    });
+    if (claimed.count === 0) return;
+
+    const rows = await tx.workflowNodeRun.findMany({ where: { runId }, select: { nodeId: true } });
+    const live = await tx.workflowNode.findMany({
+      where: { workflowId: run.workflowId, id: { in: rows.map((row) => row.nodeId) } },
+      select: { id: true, name: true, config: true },
+    });
+    const current = new Map(live.map((node) => [node.id, node]));
+    for (const { nodeId } of rows) {
+      // Distinct upstream steps, as indegrees() counts them.
+      const pending = new Set(graph.edges.filter((e) => e.targetNodeId === nodeId).map((e) => e.sourceNodeId)).size;
+      const latest = current.get(nodeId);
+      await tx.workflowNodeRun.updateMany({
+        where: { runId, nodeId },
+        data: {
+          ...(latest ? { config: (latest.config ?? {}) as Prisma.InputJsonValue, nodeName: latest.name } : {}),
+          status: WorkflowNodeRunStatus.PENDING,
+          pendingDeps: pending,
+          output: Prisma.DbNull,
+          error: null,
+          attempt: 0,
+          startedAt: null,
+          finishedAt: null,
+          heartbeatAt: null,
+          durationMs: null,
+          jobId: null,
+        },
+      });
+    }
+    // The failed attempt's provenance goes; its media stays in the library.
+    await tx.workflowNodeRunAsset.deleteMany({ where: { nodeRun: { runId } } });
+  });
+
+  const ready = await db.workflowNodeRun.findMany({
+    where: { runId, status: WorkflowNodeRunStatus.PENDING, pendingDeps: { lte: 0 } },
     select: { id: true, workspaceId: true },
   });
   for (const row of ready) await claimAndEnqueue(row);

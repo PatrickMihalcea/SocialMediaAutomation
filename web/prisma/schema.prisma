@@ -1374,10 +1374,8 @@ model WorkflowRun {
   /// Set the instant a cancel is requested. In-flight nodes check it between
   /// awaits; it is the durable half of cooperative cancellation.
   cancelledAt   DateTime?          @map("cancelled_at")
-  /// Set when this run was started because an earlier one failed: the run it
-  /// retries and how many retries in a row it is, so the chain stops at the
-  /// workflow's limit.
-  retryOfId     String?            @map("retry_of_id") @db.Uuid
+  /// How many times this run has started over after failing, so it stops at
+  /// the workflow's limit.
   retryNumber   Int                @default(0) @map("retry_number")
   startedAt     DateTime?          @map("started_at")
   finishedAt    DateTime?          @map("finished_at")

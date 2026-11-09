@@ -5,11 +5,11 @@ import { Slider, StatusMessage, Switch } from '@/bridge88/components';
 import { updateWorkflowAction } from '@/app/actions/workflows';
 
 /**
- * Whether a failed run starts a fresh one by itself.
+ * Whether a failed run starts itself over from the first step.
  *
  * Saved as it changes, like the step settings, so there is no Save to forget.
- * The limit is a count of retries in a row from the run that first failed: a
- * workflow that fails every time stops after that many rather than looping.
+ * The limit is how many times one run may start over: a run that fails every
+ * time stops after that many rather than looping.
  */
 export function WorkflowRetrySettings({
   slug,
@@ -38,7 +38,7 @@ export function WorkflowRetrySettings({
     <div className="space-y-4">
       <p className="b88-eyebrow">Failed runs</p>
       <Switch
-        label="Start again when a run fails"
+        label="Restart a failed run from the beginning"
         description={pending ? 'Saving' : undefined}
         checked={enabled}
         onChange={(next) => {
@@ -48,8 +48,8 @@ export function WorkflowRetrySettings({
       />
       {enabled && (
         <Slider
-          label="Times in a row"
-          hint="How many fresh runs to start after a failure before giving up. A cancelled run is never started again."
+          label="Restarts allowed"
+          hint="How many times a run may start over from its first step before it is left failed. A cancelled run is never restarted."
           min={1}
           max={5}
           step={1}
