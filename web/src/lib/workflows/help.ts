@@ -264,6 +264,10 @@ export const WORKFLOW_FIELD_HELP: Partial<
       label: 'Seamless loop',
       description: 'Each clip ends on exactly the frame it starts on, so it loops cleanly. The picture has to come back to its starting framing, which also stops a slow zoom building up.',
     },
+    loopStrictness: {
+      label: 'Loop strictness',
+      description: 'How exactly each clip has to end on its first frame. 100 matches it exactly: very stable, but the scene moves less. Lower gives snow, fire and characters more room to move, still pulls the framing back, and dissolves the end into the start so the loop stays seamless.',
+    },
     cameraPrompt: {
       label: 'Camera movement',
       description: 'How the camera moves, for example "slow push in toward the window" or "gentle pan to the right".',

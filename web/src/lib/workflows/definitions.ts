@@ -439,6 +439,11 @@ export const NODE_DEFINITIONS = {
       cameraPrompt: z.string().max(500).default(''),
       /** End each clip on its starting frame: it loops, and the framing cannot drift. */
       loop: z.boolean().default(false),
+      /**
+       * How exactly a loop ends on its first frame. 100 matches it exactly;
+       * lower frees the scene to move and crossfades the seam.
+       */
+      loopStrictness: z.number().int().min(30).max(100).default(100),
       maxClips: z.number().int().min(1).max(12).default(8),
       /**
        * Length of each clip. Beat slideshow plays a clip shorter than its slot

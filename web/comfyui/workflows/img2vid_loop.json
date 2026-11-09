@@ -465,7 +465,7 @@
         0
       ],
       "frame_idx": -1,
-      "strength": 1.0
+      "strength": "{{loop_strength}}"
     },
     "_meta": {
       "title": "Last frame = first frame"
@@ -545,7 +545,7 @@
         0
       ],
       "frame_idx": -1,
-      "strength": 1.0
+      "strength": "{{loop_strength}}"
     },
     "_meta": {
       "title": "Last frame = first frame"

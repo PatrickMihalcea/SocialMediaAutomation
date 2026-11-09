@@ -9,6 +9,7 @@ interface Config {
   camera?: Camera;
   cameraPrompt?: string;
   loop?: boolean;
+  loopStrictness?: number;
   sound: boolean;
   soundPrompt?: string;
   provider: 'default' | 'comfyui';
@@ -61,6 +62,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       sound: config.sound ?? false,
       stillCamera: (config.camera ?? 'locked') === 'locked',
       loop: config.loop ?? false,
+      loopStrictness: config.loopStrictness ?? 100,
       inline: true,
     });
     // A clip on a laptop GPU can take longer than the sweeper waits for a

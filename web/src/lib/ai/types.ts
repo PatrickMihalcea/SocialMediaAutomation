@@ -70,6 +70,11 @@ export interface VideoClipOptions {
   /** Image to video only: end on the starting frame, so the clip loops. */
   loop?: boolean;
   /**
+   * How exactly a loop must end on its first frame, 0 to 100. 100 matches it
+   * exactly; lower gives the scene more room and crossfades the seam.
+   */
+  loopStrictness?: number;
+  /**
    * Whether to keep the soundtrack a model generates with the clip. False
    * saves it silent; left unset, the clip keeps whatever sound it came with.
    */

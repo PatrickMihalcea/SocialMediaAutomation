@@ -92,7 +92,17 @@ describe('clip length and motion', () => {
   });
 
   it('defaults to four seconds of natural motion, what the workflows rendered before either was a setting', () => {
-    expect(clipValues({})).toEqual({ seconds: 4, frames: 97, motion_strength: 0.7, camera_lock: 0 });
+    expect(clipValues({})).toEqual({ seconds: 4, frames: 97, loop_strength: 1, motion_strength: 0.7, camera_lock: 0 });
+  });
+
+  it('renders extra frames for a loose loop, and loosens its end frame', () => {
+    const loose = clipValues({ seconds: 5, loop: true, loopStrictness: 50 });
+    expect(loose.frames).toBe(5 * 24 + 16 + 1);
+    expect((loose.frames - 1) % 8).toBe(0);
+    expect(loose.loop_strength).toBe(0.5);
+    // Strict, or no loop at all, renders exactly the length asked for.
+    expect(clipValues({ seconds: 5, loop: true }).frames).toBe(121);
+    expect(clipValues({ seconds: 5, loopStrictness: 50 }).frames).toBe(121);
   });
 
   it('turns the camera-lock LoRA on only for a still camera', () => {

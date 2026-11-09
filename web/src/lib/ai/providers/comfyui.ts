@@ -1,5 +1,6 @@
 import 'server-only';
 import { execFile } from 'node:child_process';
+import { loopCrossfade } from '@/lib/media/loop-crossfade';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -492,11 +493,21 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
 
   async animateImage(input: { prompt: string; image: Buffer; onStage?: (stage: string) => void } & VideoClipOptions): Promise<AiMediaResult> {
     const mimeType = (await sharp(input.image).metadata().catch(() => null))?.format === 'jpeg' ? 'image/jpeg' : 'image/png';
-    return this.render({
+    const result = await this.render({
       // A loop ends on the frame it starts on, which also keeps the framing
       // from drifting into a zoom.
       operation: input.loop ? 'img2vid_loop' : 'img2vid', want: 'video', prompt: input.prompt, image: { image: input.image, mimeType }, references: [], values: clipValues(input), sound: input.sound, onStage: input.onStage,
     });
+    if (!crossfadesLoop(input)) return result;
+    // A loose loop ends near, not on, its first frame; the dissolve hides the
+    // difference, and the extra frames rendered for it keep the clip's length.
+    const length = result.durationSeconds ?? Number(clipValues(input).frames) / CLIP_FPS;
+    input.onStage?.('joining the loop');
+    return {
+      ...result,
+      data: await loopCrossfade(result.data, length, LOOP_FADE_SECONDS),
+      durationSeconds: length - LOOP_FADE_SECONDS,
+    };
   }
 
   private async render(input: {
@@ -608,11 +619,23 @@ export function clipValues(options: VideoClipOptions): Record<string, number> {
   const seconds = Math.max(1, Math.round(options.seconds ?? DEFAULT_CLIP_SECONDS));
   return {
     seconds,
-    frames: seconds * CLIP_FPS + 1,
+    // Extra frames for the dissolve a loose loop is joined with, so the clip
+    // still runs the length asked for once they overlap.
+    frames: seconds * CLIP_FPS + (crossfadesLoop(options) ? LOOP_FADE_FRAMES : 0) + 1,
+    loop_strength: Math.min(100, Math.max(0, options.loopStrictness ?? 100)) / 100,
     motion_strength: MOTION_STRENGTH[options.motion ?? 'natural'],
     // 0 leaves the LoRA loaded but doing nothing, so one workflow serves both.
     camera_lock: options.stillCamera ? CAMERA_LOCK_STRENGTH : 0,
   };
+}
+
+/** Frames a loose loop's seam is dissolved over; a multiple of 8, as LTX needs. */
+const LOOP_FADE_FRAMES = 16;
+const LOOP_FADE_SECONDS = LOOP_FADE_FRAMES / CLIP_FPS;
+
+/** A loop that does not have to end exactly on its first frame gets its seam dissolved. */
+export function crossfadesLoop(options: VideoClipOptions): boolean {
+  return Boolean(options.loop) && (options.loopStrictness ?? 100) < 100;
 }
 
 /**
