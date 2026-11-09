@@ -1,6 +1,7 @@
 import 'server-only';
 import { execFile } from 'node:child_process';
 import { loopCrossfade } from '@/lib/media/loop-crossfade';
+import { joinOverlapping, lastFrames, trimTo } from '@/lib/media/clip-chain';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -40,7 +41,7 @@ import type { ImageSize } from '@/lib/ai/image-sizes';
  * LOCAL_QUEUE), because the cloud has no route to the laptop's localhost.
  */
 
-export type ComfyOperation = 'txt2img' | 'edit' | 'variation' | 'txt2vid' | 'img2vid' | 'img2vid_loop';
+export type ComfyOperation = 'txt2img' | 'edit' | 'variation' | 'txt2vid' | 'img2vid' | 'img2vid_loop' | 'img2vid_extend';
 
 /** What the operation's files are called, and what each is for. Also the README's table. */
 export const COMFY_OPERATIONS: Record<ComfyOperation, string> = {
@@ -50,6 +51,7 @@ export const COMFY_OPERATIONS: Record<ComfyOperation, string> = {
   txt2vid: 'Studio video from a prompt',
   img2vid: 'Animate image steps and studio animations',
   img2vid_loop: 'Animate image steps set to loop: the still is the first and the last frame',
+  img2vid_extend: 'Long clips, built piece by piece: each piece continues from the last frames of the one before',
 };
 
 const ROLE_PLACEHOLDERS: Record<AiImageRole, string> = {
@@ -508,6 +510,9 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
 
   async animateImage(input: { prompt: string; image: Buffer; onStage?: (stage: string) => void; shouldStop?: () => Promise<boolean> } & VideoClipOptions): Promise<AiMediaResult> {
     const mimeType = (await sharp(input.image).metadata().catch(() => null))?.format === 'jpeg' ? 'image/jpeg' : 'image/png';
+    if ((input.seconds ?? DEFAULT_CLIP_SECONDS) > LONGEST_SINGLE_CLIP_SECONDS) {
+      return this.animateInPieces({ ...input, mimeType });
+    }
     const result = await this.render({
       // A loop ends on the frame it starts on, which also keeps the framing
       // from drifting into a zoom.
@@ -525,11 +530,68 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     };
   }
 
+  /**
+   * A long clip built from short pieces, each continuing from the last frames
+   * of the one before.
+   *
+   * One long render costs far more than its length: the model relates every
+   * frame to every other, so time grows with the square of the length. Pieces
+   * of three seconds keep each render short. Each piece opens on the previous
+   * piece's last frames, so the motion carries on through the join, and ends
+   * pulled toward the original still, so the framing cannot drift from piece
+   * to piece. The overlap is dissolved, which hides the seam.
+   */
+  private async animateInPieces(
+    input: { prompt: string; image: Buffer; mimeType: string; onStage?: (stage: string) => void; shouldStop?: () => Promise<boolean> } & VideoClipOptions,
+  ): Promise<AiMediaResult> {
+    const total = Math.min(MAX_CHAINED_SECONDS, Math.round(input.seconds ?? DEFAULT_CLIP_SECONDS));
+    const firstFrames = PIECE_SECONDS * CLIP_FPS + 1;
+    const nextFrames = PIECE_SECONDS * CLIP_FPS + OVERLAP_FRAMES;
+    const pieces = 1 + Math.ceil(Math.max(0, total - firstFrames / CLIP_FPS) / ((nextFrames - OVERLAP_FRAMES) / CLIP_FPS));
+    const stage = (piece: number) => (next: string) => input.onStage?.(`piece ${piece} of ${pieces}, ${next}`);
+    const common = { prompt: input.prompt, image: { image: input.image, mimeType: input.mimeType }, references: [], sound: input.sound, shouldStop: input.shouldStop };
+
+    // The first piece starts on the still, as any clip does.
+    const first = await this.render({
+      ...common,
+      operation: 'img2vid_loop',
+      want: 'video',
+      values: { seconds: PIECE_SECONDS, frames: firstFrames, motion_strength: MOTION_STRENGTH.natural, loop_strength: PIECE_ANCHOR, camera_lock: 0 },
+      onStage: stage(1),
+    });
+    let clip = first.data;
+    let length = firstFrames / CLIP_FPS;
+
+    for (let piece = 2; piece <= pieces; piece++) {
+      stage(piece)('taking the last frames');
+      const tail = await lastFrames(clip, OVERLAP_FRAMES, CLIP_FPS);
+      const next = await this.render({
+        ...common,
+        operation: 'img2vid_extend',
+        want: 'video',
+        video: tail,
+        values: { seconds: PIECE_SECONDS, frames: nextFrames, anchor_strength: PIECE_ANCHOR },
+        onStage: stage(piece),
+      });
+      stage(piece)('joining');
+      clip = await joinOverlapping(clip, next.data, OVERLAP_FRAMES / CLIP_FPS);
+      length += (nextFrames - OVERLAP_FRAMES) / CLIP_FPS;
+    }
+
+    if (length > total) {
+      clip = await trimTo(clip, total);
+      length = total;
+    }
+    return { ...first, data: clip, durationSeconds: length, model: 'comfyui:img2vid_extend' };
+  }
+
   private async render(input: {
     operation: ComfyOperation;
     want: 'image' | 'video';
     prompt: string;
     image?: { image: Buffer; mimeType: string };
+    /** A short video uploaded for {{video}}: the frames a piece continues from. */
+    video?: Buffer;
     references: AiImageReference[];
     values: Record<string, string | number>;
     /** False leaves the generated soundtrack out; the saved video is silent. */
@@ -557,6 +619,7 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
       ...input.values,
     };
     if (input.image) values.image = await this.client.upload(input.image.image, input.image.mimeType);
+    if (input.video) values.video = await this.client.upload(input.video, 'video/mp4');
     for (const role of template.roles) {
       // First of each role. Nothing sends two of one role today, and a graph
       // with one slot for it could not take a second anyway.
@@ -645,6 +708,23 @@ export function clipValues(options: VideoClipOptions): Record<string, number> {
     camera_lock: options.stillCamera ? CAMERA_LOCK_STRENGTH : 0,
   };
 }
+
+/** Longer than this, a clip is built from pieces; up to this, it is one render. */
+export const LONGEST_SINGLE_CLIP_SECONDS = 6;
+/** The longest a clip built from pieces may run. */
+const MAX_CHAINED_SECONDS = 25;
+/** Each piece's own length, in seconds. */
+export const PIECE_SECONDS = 3;
+/**
+ * Frames each piece continues from: 9 is the smallest guide LTX can use whole,
+ * since it works in chunks of 8 frames plus one. About a third of a second.
+ */
+const OVERLAP_FRAMES = 9;
+/**
+ * How firmly each piece's last frame is pulled toward the original still: the
+ * strength that held the camera in the loop tests while leaving motion free.
+ */
+const PIECE_ANCHOR = 0.5;
 
 /** Frames a loose loop's seam is dissolved over; a multiple of 8, as LTX needs. */
 const LOOP_FADE_FRAMES = 16;

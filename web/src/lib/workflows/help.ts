@@ -292,7 +292,7 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
     seconds: {
       label: 'Clip length (seconds)',
-      description: 'How long each clip runs. Cut to the beat plays a clip that is shorter than its slot once and moves on to the next, so a short clip makes a shorter video. Longer clips take longer to render, about 6 minutes for 4 s on your Mac.',
+      description: 'How long each clip runs, up to 25 seconds. Up to 6 seconds is one render. Longer clips are built from 3-second pieces, each continuing from the last frames of the one before and joined with a soft dissolve; each piece takes about 20 minutes on your Mac, so 20 seconds is about two and a half hours.',
     },
     sound: {
       label: 'Generate sound',
