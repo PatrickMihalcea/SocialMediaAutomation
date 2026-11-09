@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -12,6 +12,7 @@ vi.mock('@/lib/env', () => ({
 
 import {
   progressDescriber,
+  withoutSoundBranch,
   baseSize,
   clipValues,
   ComfyClient,
@@ -364,4 +365,26 @@ describe('describing ComfyUI progress', () => {
     expect(say(4)).toBe('step 4 of 15');
     expect(say(4)).toBeNull();
   });
+});
+
+describe('running a video workflow without its sound', () => {
+  const isRef = (value: unknown): value is [string, number] => Array.isArray(value) && value.length === 2 && typeof value[0] === 'string';
+  for (const name of ['img2vid', 'img2vid_loop', 'img2vid_extend', 'txt2vid']) {
+    it(`drops the sound half of ${name} and keeps every video connection`, () => {
+      const graph = JSON.parse(readFileSync(`comfyui/workflows/${name}.json`, 'utf8')) as Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+      const trimmed = withoutSoundBranch(graph) as typeof graph;
+      const classes = Object.values(trimmed).map((node) => node.class_type);
+      expect(classes.filter((c) => /Audio|AVLatent/.test(c))).toEqual([]);
+      expect(classes).toContain('SaveVideo');
+      expect(classes.filter((c) => c === 'SamplerCustomAdvanced')).toHaveLength(2);
+      for (const node of Object.values(trimmed)) {
+        for (const value of Object.values(node.inputs)) if (isRef(value)) expect(trimmed[value[0]]).toBeDefined();
+      }
+      // Each sampling pass is fed the video latent directly.
+      for (const node of Object.values(trimmed).filter((n) => n.class_type === 'SamplerCustomAdvanced')) {
+        const source = trimmed[(node.inputs.latent_image as [string, number])[0]].class_type;
+        expect(source).toMatch(/LTXVAddGuide|LTXVImgToVideoInplace|EmptyLTXVLatentVideo|LTXVLatentUpsampler/);
+      }
+    });
+  }
 });

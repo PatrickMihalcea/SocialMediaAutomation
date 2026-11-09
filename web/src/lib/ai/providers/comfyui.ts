@@ -628,14 +628,28 @@ export class ComfyUiProvider implements AiProvider, ImageEditingProvider, VideoG
     }
 
     const clientId = randomUUID();
-    const graph = fillTemplate(template, values);
-    const promptId = await this.client.queue(graph, clientId);
-    const files = await this.client.wait(promptId, clientId, {
-      timeoutMs: env.COMFYUI_TIMEOUT_MS,
-      graph,
-      onStage: input.onStage,
-      shouldStop: input.shouldStop,
-    });
+    const full = fillTemplate(template, values);
+    // With sound off the soundtrack would only be thrown away, so the sound
+    // half of the graph is not run at all. Should ComfyUI refuse the trimmed
+    // graph, the full one runs instead: the clip matters more than the saving.
+    const silent = input.want === 'video' && input.sound === false ? withoutSoundBranch(full) : null;
+    const queueAndWait = async (graph: Record<string, unknown>) => {
+      const promptId = await this.client.queue(graph, clientId);
+      return this.client.wait(promptId, clientId, {
+        timeoutMs: env.COMFYUI_TIMEOUT_MS,
+        graph,
+        onStage: input.onStage,
+        shouldStop: input.shouldStop,
+      });
+    };
+    let files: ComfyFile[];
+    try {
+      files = await queueAndWait(silent ?? full);
+    } catch (error) {
+      if (!silent || /cancelled/i.test(error instanceof Error ? error.message : '')) throw error;
+      console.warn('[comfyui] the workflow without sound was refused; running it whole', error);
+      files = await queueAndWait(full);
+    }
 
     const wanted = input.want === 'video' ? VIDEO_EXTENSIONS : IMAGE_EXTENSIONS;
     const file = files.find((candidate) => wanted.has(extname(candidate.filename).toLowerCase()));
@@ -843,4 +857,56 @@ export function progressDescriber(graph: Record<string, unknown>) {
 function passName(pass: number, total: number): string {
   if (total === 2) return pass === 1 ? 'draft pass' : 'detail pass';
   return `pass ${pass} of ${total}`;
+}
+
+/** Nodes that only ever make or save sound. */
+const SOUND_ONLY = new Set(['LTXVEmptyLatentAudio', 'LTXVAudioVAEDecode', 'SaveAudio']);
+
+/**
+ * The same workflow with its sound half removed.
+ *
+ * LTX workflows join a sound latent to the video before each sampling pass
+ * and split it off after. Without sound, every reference to a join is pointed
+ * at its video input and every reference to a split at what was split, the
+ * sound nodes go, and whatever no longer feeds a saved output is dropped. The
+ * picture is computed exactly as before; only the sound work disappears.
+ * Exported for its test.
+ */
+export function withoutSoundBranch(graph: Record<string, unknown>): Record<string, unknown> {
+  type Node = { class_type: string; inputs: Record<string, unknown> };
+  const nodes = JSON.parse(JSON.stringify(graph)) as Record<string, Node>;
+  const isRef = (value: unknown): value is [string, number] =>
+    Array.isArray(value) && value.length === 2 && typeof value[0] === 'string' && typeof value[1] === 'number';
+
+  // What each join or split's video output really is.
+  const replacement = new Map<string, unknown>();
+  for (const [id, node] of Object.entries(nodes)) {
+    if (node.class_type === 'LTXVConcatAVLatent') replacement.set(`${id}:0`, node.inputs.video_latent);
+    if (node.class_type === 'LTXVSeparateAVLatent') replacement.set(`${id}:0`, node.inputs.av_latent);
+  }
+  const resolve = (value: unknown): unknown => {
+    let current = value;
+    for (let hops = 0; isRef(current) && replacement.has(`${current[0]}:${current[1]}`) && hops < 10; hops++) {
+      current = replacement.get(`${current[0]}:${current[1]}`);
+    }
+    return current;
+  };
+  for (const node of Object.values(nodes)) {
+    for (const [name, value] of Object.entries(node.inputs)) node.inputs[name] = resolve(value);
+  }
+  for (const [id, node] of Object.entries(nodes)) {
+    if (SOUND_ONLY.has(node.class_type) || node.class_type === 'LTXVConcatAVLatent' || node.class_type === 'LTXVSeparateAVLatent') {
+      delete nodes[id];
+    }
+  }
+
+  // Keep only what still feeds a saved output.
+  const keep = new Set<string>();
+  const visit = (id: string) => {
+    if (keep.has(id) || !nodes[id]) return;
+    keep.add(id);
+    for (const value of Object.values(nodes[id].inputs)) if (isRef(value)) visit(value[0]);
+  };
+  for (const [id, node] of Object.entries(nodes)) if (/^Save/.test(node.class_type)) visit(id);
+  return Object.fromEntries(Object.entries(nodes).filter(([id]) => keep.has(id)));
 }
