@@ -1,6 +1,7 @@
 import 'server-only';
 import { MediaType } from '@prisma/client';
 import { db } from '@/lib/db';
+import { checkCharacters } from '@/lib/ai/character-check';
 import { generateImage } from '@/lib/ai';
 import type { ImageSize } from '@/lib/ai/image-sizes';
 import type { ImageProviderName } from '@/lib/ai/provider-selection';
@@ -23,6 +24,8 @@ export interface Config {
   provider: ImageProviderName;
   /** Superseded by `provider`. Still read, so steps saved before it keep mocking. */
   useMockGeneration: boolean;
+  checkCharacters?: boolean;
+  redrawAttempts?: number;
 }
 
 /**
@@ -111,6 +114,9 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     return write;
   };
 
+  // Pictures whose characters could not be confirmed after every redraw.
+  const characterWarnings: string[] = [];
+
   const renderOne = async (index: number): Promise<string> => {
     const prompt = composePrompt({
       prompt: prompts[index],
@@ -119,20 +125,41 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       referenceUse: config.referenceUse,
       hasStyleReference: Boolean(style),
     });
-    const result = await generateImage({
+    const say = (next: string) => {
+      if (next === stage) return;
+      stage = next;
+      // Not awaited: the generation must not wait on a status write.
+      void record().catch(() => {});
+    };
+    const draw = () => generateImage({
       workspaceId: ctx.workspaceId,
       userId: ctx.userId!,
       prompt,
       size: config.size,
       references,
       provider,
-      onStage: (next) => {
-        if (next === stage) return;
-        stage = next;
-        // Not awaited: the generation must not wait on a status write.
-        void record().catch(() => {});
-      },
+      onStage: say,
     });
+    let result = await draw();
+
+    // Redrawn when the named characters came back as generic look-alikes,
+    // keeping whichever attempt drew the most of them.
+    if (config.checkCharacters && provider !== 'mock') {
+      let best = { result, missing: Infinity };
+      for (let attempt = 0; ; attempt++) {
+        say('checking the characters');
+        const check = await checkCharacters(result.data, prompts[index]);
+        if (!check || check.allPresent) { best = { result, missing: 0 }; break; }
+        if (check.missing.length < best.missing) best = { result, missing: check.missing.length };
+        if (attempt >= (config.redrawAttempts ?? 2)) {
+          characterWarnings.push(`Picture ${index + 1} may be missing ${check.missing.join(', ')}.`);
+          break;
+        }
+        say(`redrawing, missing ${check.missing.slice(0, 3).join(', ')}`);
+        result = await draw();
+      }
+      result = best.result;
+    }
 
     const extension = result.mimeType === 'image/svg+xml' ? 'svg' : 'png';
     const title = titles[index];
@@ -199,7 +226,12 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
   if (failure !== null) throw failure;
 
   const images = slots as string[];
-  return { images, titles: titles.slice(0, images.length) };
+  return {
+    images,
+    titles: titles.slice(0, images.length),
+    // Shown with the step's output: the run went ahead, but someone should look.
+    ...(characterWarnings.length ? { characterWarnings } : {}),
+  };
 }
 
 /**

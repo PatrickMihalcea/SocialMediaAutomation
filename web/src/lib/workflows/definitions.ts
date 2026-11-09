@@ -413,6 +413,13 @@ export const NODE_DEFINITIONS = {
        * operator's own Mac, so a step set to it waits for that machine.
        */
       provider: z.enum(['mock', 'openai', 'image-use', 'comfyui']).default('image-use'),
+      /**
+       * Look at each picture and redraw it when the characters the prompt
+       * names were swapped for generic ones. Checked on the ChatGPT
+       * subscription, so it costs nothing per picture.
+       */
+      checkCharacters: z.boolean().default(false),
+      redrawAttempts: z.number().int().min(0).max(3).default(2),
       /** Superseded by `provider`; kept so steps saved before it keep mocking. */
       useMockGeneration: z.boolean().default(false),
     }),

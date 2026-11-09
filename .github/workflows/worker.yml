@@ -194,6 +194,12 @@ jobs:
           printf '{"latest_version":"%s"}\n' "$version" > ~/.codex/version.json
           echo "reporting codex $version"
 
+      # The Codex CLI itself, for the Image generator's character check: it
+      # looks at a picture on the same ChatGPT login the images are made on.
+      # Failing to install only turns the check off; pictures still go through.
+      - name: Install the Codex CLI
+        run: npm install -g @openai/codex@latest --silent || echo "codex CLI not installed; character checks will be skipped"
+
       - name: Run due work
         working-directory: web
         # A comfortable margin under timeout-minutes above, so this process

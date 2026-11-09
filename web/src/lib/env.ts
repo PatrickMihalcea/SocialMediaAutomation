@@ -103,6 +103,10 @@ const schema = z.object({
    * process untouched — only the ones the app itself decides are listed here.
    */
   IMAGE_USE_BIN: z.string().default(''),
+  /** The Codex CLI, used to check a picture shows the characters it was asked for. */
+  CODEX_BIN: z.string().default('codex'),
+  /** A ChatGPT-account model that can read images; small and quick is enough. */
+  CHARACTER_CHECK_MODEL: z.string().default('gpt-6-luna'),
   /**
    * An interpreter to run the CLI with, for a machine whose `python3` predates
    * the 3.10 it needs. Empty means execute the script directly.
