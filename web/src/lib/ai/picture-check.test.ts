@@ -38,9 +38,9 @@ describe('asking a question about a picture', () => {
   });
 
   it('returns the answer and its reason', async () => {
-    answer({ pass: false, reason: 'The children are generic, not cartoon characters.' });
+    answer({ pass: false, reason: 'The children are generic, not cartoon characters.', score: 2 });
     expect(await checkPicture(Buffer.from('png'), 'SpongeBob on a train', 'Are the characters real cartoons?'))
-      .toEqual({ pass: false, reason: 'The children are generic, not cartoon characters.' });
+      .toEqual({ pass: false, reason: 'The children are generic, not cartoon characters.', score: 2 });
   });
 
   it('lets the picture through when the checker cannot run', async () => {

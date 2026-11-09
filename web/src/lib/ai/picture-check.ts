@@ -9,15 +9,18 @@ export interface PictureCheck {
   pass: boolean;
   /** One sentence on why, from the AI that looked. */
   reason: string;
+  /** How well the picture answers the question, 0 to 10; picks the best when none passes. */
+  score: number;
 }
 
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['pass', 'reason'],
+  required: ['pass', 'reason', 'score'],
   properties: {
     pass: { type: 'boolean' },
     reason: { type: 'string' },
+    score: { type: 'integer', minimum: 0, maximum: 10 },
   },
 };
 
@@ -49,7 +52,8 @@ export async function checkPicture(image: Buffer, prompt: string, question: stri
     ]);
     if (code !== 0) return null;
     const parsed = JSON.parse(await readFile(answer, 'utf8')) as PictureCheck;
-    return typeof parsed.pass === 'boolean' && typeof parsed.reason === 'string' ? parsed : null;
+    if (typeof parsed.pass !== 'boolean' || typeof parsed.reason !== 'string') return null;
+    return { pass: parsed.pass, reason: parsed.reason, score: typeof parsed.score === 'number' ? parsed.score : parsed.pass ? 10 : 0 };
   } catch (error) {
     console.warn('[check] the check could not run; keeping the picture', error);
     return null;
@@ -64,6 +68,7 @@ export function instruction(prompt: string, question: string): string {
     question.trim(),
     '',
     'Set pass to true only if the answer is clearly yes. Give the reason in one short sentence, naming what you saw.',
+    'Also give a score from 0 to 10 for how close the picture comes to a clear yes.',
     'For context, the picture was generated from this prompt (judge the picture, not the prompt):',
     prompt,
   ].join('\n');

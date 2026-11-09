@@ -120,7 +120,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
 
   // What the check said about each picture, kept with the output so anyone
   // can see why a picture was redrawn or let through.
-  const checks: Array<{ picture: number; attempt: number; pass: boolean; reason: string }> = [];
+  const checks: Array<{ picture: number; attempt: number; pass: boolean; reason: string; score: number }> = [];
   const question = checkQuestionOf(config);
 
   const renderOne = async (index: number): Promise<string> => {
@@ -150,17 +150,23 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
 
     // Asked about each picture, and redrawn on a no. The last attempt is used
     // whatever it says, so a run never stalls on a question it cannot satisfy.
+    // When no attempt passes, the one that came closest is used rather than
+    // the last, which is no likelier to be good than the first.
     if (question && provider !== 'mock') {
+      let best: { result: typeof result; score: number } | null = null;
       for (let attempt = 0; ; attempt++) {
-        say('checking the picture');
+        say('testing the picture');
         const check = await checkPicture(result.data, prompts[index], question);
         if (!check) break;
-        checks.push({ picture: index + 1, attempt: attempt + 1, ...check });
-        console.log(`[check] picture ${index + 1}, attempt ${attempt + 1}: ${check.pass ? 'pass' : 'fail'}. ${check.reason}`);
-        if (check.pass || attempt >= (config.redrawAttempts ?? 2)) break;
-        say('redrawing after the check');
+        checks.push({ picture: index + 1, attempt: attempt + 1, pass: check.pass, reason: check.reason, score: check.score });
+        console.log(`[check] picture ${index + 1}, attempt ${attempt + 1}: ${check.pass ? 'pass' : 'fail'} (${check.score}/10). ${check.reason}`);
+        if (check.pass) { best = null; break; }
+        if (!best || check.score > best.score) best = { result, score: check.score };
+        if (attempt >= (config.redrawAttempts ?? 2)) break;
+        say('redrawing after a failed test');
         result = await draw();
       }
+      if (best) result = best.result;
     }
 
     const extension = result.mimeType === 'image/svg+xml' ? 'svg' : 'png';
