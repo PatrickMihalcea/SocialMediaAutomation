@@ -22,3 +22,11 @@ describe('saving a step that tests its pictures', () => {
     expect(() => parseConfig('IMAGE_GENERATOR', { testPicture: true, checkQuestion: 'Real cartoons?' })).not.toThrow();
   });
 });
+
+describe('a refused picture', () => {
+  it('is recognised from the image tool\'s message', async () => {
+    const { isRefusal } = await import('@/lib/workflows/nodes/image-generator');
+    expect(isRefusal(new Error('image-use exited with 1: … | no image returned; the model replied instead: "I can\'t."'))).toBe(true);
+    expect(isRefusal(new Error('image-use exited with 1: timed out'))).toBe(false);
+  });
+});

@@ -91,15 +91,27 @@ describe('resuming a part-finished image step', () => {
     );
   });
 
+  /** A refusal is the model declining one try; the same prompt usually draws next time. */
+  it('tries a refused picture again straight away instead of failing the step', async () => {
+    mocks.generateImage
+      .mockRejectedValueOnce(new Error('image-use exited with 1: no image returned; the model replied instead: "I can\'t."'))
+      .mockResolvedValue({ data: Buffer.from('a'), mimeType: 'image/png', generationId: 'g1' });
+    const ctx = context(null);
+
+    const output = await run(ctx);
+
+    expect((output as { images: string[] }).images).toHaveLength(4);
+  });
+
   /** The whole point: a failure part-way keeps what came before it. */
   it('keeps the finished images when a later one fails', async () => {
     mocks.generateImage
       .mockResolvedValueOnce({ data: Buffer.from('a'), mimeType: 'image/png', generationId: 'g1' })
       .mockResolvedValueOnce({ data: Buffer.from('b'), mimeType: 'image/png', generationId: 'g2' })
-      .mockRejectedValueOnce(new Error('image-use exited with 1: no image returned'));
+      .mockRejectedValueOnce(new Error('image-use exited with 1: timed out'));
     const ctx = context(null);
 
-    await expect(run(ctx)).rejects.toThrow(/no image returned/);
+    await expect(run(ctx)).rejects.toThrow(/timed out/);
 
     const saved = (ctx.saveProgress as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
     expect(saved.images).toEqual(['asset-1', 'asset-2']);
@@ -240,12 +252,12 @@ describe('making pictures side by side', () => {
 
     await held.settle();
     const [one, two, three, four] = held.waiting;
-    two.fail(new Error('image-use exited with 1: no image returned'));
+    two.fail(new Error('image-use exited with 1: timed out'));
     one.finish();
     three.finish();
     four.finish();
 
-    await expect(done).rejects.toThrow(/no image returned/);
+    await expect(done).rejects.toThrow(/timed out/);
     const saved = (ctx.saveProgress as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
     expect(saved._slots).toEqual(['asset-one', null, 'asset-three', 'asset-four']);
     expect(saved._progress).toMatchObject({ done: 3, total: 4 });

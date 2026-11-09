@@ -931,6 +931,11 @@ def _post_for_image(
     last_revised_prompt: str = ""
     last_phase = "connecting"
     failure_detail: str | None = None
+    # What the model wrote instead of (or as well as) an image. When the image
+    # call ends with no picture this is the model's own reason, usually a
+    # content-policy refusal, and the only place that reason appears.
+    reply_text: list[str] = []
+    call_status: str | None = None
 
     def emit(msg: str) -> None:
         if progress:
@@ -980,9 +985,13 @@ def _post_for_image(
                             effective_tool = tool
                     if isinstance(resp.get("usage"), dict):
                         usage = resp["usage"]
+            if t == "response.output_text.delta" and isinstance(evt.get("delta"), str):
+                reply_text.append(evt["delta"])
             if t == "response.output_item.done":
                 item = evt.get("item")
                 if isinstance(item, dict) and item.get("type") == "image_generation_call":
+                    if isinstance(item.get("status"), str):
+                        call_status = item["status"]
                     if isinstance(item.get("result"), str):
                         image_b64 = item["result"]
                         item_meta = {k: v for k, v in item.items() if k != "result"}
@@ -1018,6 +1027,12 @@ def _post_for_image(
             raise GatewayError(
                 f"backend failed mid-generation: {failure_detail} "
                 f"(events seen: {types_seen})"
+            )
+        said = " ".join("".join(reply_text).split())
+        if said:
+            raise GatewayError(
+                f"no image returned; the model replied instead: \"{said[:400]}\""
+                + (f" (image call status: {call_status})" if call_status else "")
             )
         raise GatewayError(f"no image returned. events seen: {types_seen}")
 

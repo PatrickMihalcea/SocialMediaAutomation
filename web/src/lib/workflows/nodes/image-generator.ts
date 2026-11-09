@@ -137,7 +137,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       // Not awaited: the generation must not wait on a status write.
       void record().catch(() => {});
     };
-    const draw = () => generateImage({
+    const once = () => generateImage({
       workspaceId: ctx.workspaceId,
       userId: ctx.userId!,
       prompt,
@@ -146,6 +146,21 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       provider,
       onStage: say,
     });
+    // A refusal ("no image returned") is the model declining this one try,
+    // and the same prompt is often drawn on the next. Retried here, at once,
+    // rather than failing the step and waiting for the next worker pass to
+    // redo everything.
+    const draw = async () => {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await once();
+        } catch (error) {
+          if (attempt > REFUSAL_RETRIES || !isRefusal(error)) throw error;
+          console.log(`[image] picture ${index + 1} was refused (${errorText(error).slice(0, 200)}); trying again`);
+          say('trying again after a refusal');
+        }
+      }
+    };
     let result = await draw();
 
     // Asked about each picture, and redrawn on a no. The last attempt is used
@@ -383,4 +398,16 @@ export function checkQuestionOf(config: Pick<Config, 'testPicture' | 'checkQuest
   const question = config.checkQuestion?.trim();
   if (config.testPicture) return question || null;
   return config.checkCharacters ? DEFAULT_CHECK_QUESTION : null;
+}
+
+/** Immediate retries of a picture the model declined to draw, before the step fails. */
+const REFUSAL_RETRIES = 2;
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** The image backend answered with words instead of a picture. */
+export function isRefusal(error: unknown): boolean {
+  return /no image returned/i.test(errorText(error));
 }
