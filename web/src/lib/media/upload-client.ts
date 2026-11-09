@@ -19,13 +19,15 @@
 export async function uploadMedia(
   slug: string,
   formData: FormData,
-): Promise<{ message: string }> {
+): Promise<{ message: string; assetIds: string[] }> {
   const files = formData.getAll('files').filter((value): value is File => value instanceof File);
   if (!files.length) throw new Error('Choose at least one file.');
 
   const folderId = asText(formData.get('folderId'));
   const uploadRequestId = asText(formData.get('uploadRequestId'));
   const failures: string[] = [];
+  // The new assets, so a caller that uploads in order to pick one can.
+  const assetIds: string[] = [];
 
   for (const [index, file] of files.entries()) {
     const identity = fileIdentity(file, uploadRequestId, index);
@@ -35,7 +37,10 @@ export async function uploadMedia(
     query.set('uploadRequestId', identity);
 
     const direct = await uploadDirect(slug, file, { folderId, uploadRequestId: identity });
-    if (direct === 'done') continue;
+    if (typeof direct === 'object') {
+      assetIds.push(direct.assetId);
+      continue;
+    }
     if (direct !== 'unavailable') {
       failures.push(`${file.name}: ${direct}`);
       continue;
@@ -50,15 +55,17 @@ export async function uploadMedia(
       },
     );
 
+    const payload = (await response.json().catch(() => ({}))) as { error?: string; assetId?: string };
     if (!response.ok) {
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
       failures.push(`${file.name}: ${payload.error ?? describeTransportFailure(response.status, file.size)}`);
+    } else if (payload.assetId) {
+      assetIds.push(payload.assetId);
     }
   }
 
   if (failures.length === files.length) throw new Error(failures.join('; '));
   if (failures.length) throw new Error(`Some files did not upload — ${failures.join('; ')}`);
-  return { message: files.length === 1 ? 'Media uploaded.' : `${files.length} files uploaded.` };
+  return { message: files.length === 1 ? 'Media uploaded.' : `${files.length} files uploaded.`, assetIds };
 }
 
 const asText = (value: FormDataEntryValue | null) => (typeof value === 'string' ? value.trim() : '');
@@ -100,7 +107,7 @@ async function uploadDirect(
   slug: string,
   file: File,
   options: { folderId: string; uploadRequestId: string },
-): Promise<'done' | 'unavailable' | string> {
+): Promise<{ assetId: string } | 'unavailable' | string> {
   const endpoint = `/api/workspaces/${encodeURIComponent(slug)}/media/upload/direct`;
   const contentType = file.type || 'application/octet-stream';
 
@@ -153,7 +160,7 @@ async function uploadDirect(
     const payload = (await finished.json().catch(() => ({}))) as { error?: string };
     return payload.error ?? 'the upload finished but could not be recorded.';
   }
-  return 'done';
+  return { assetId };
 }
 
 /**

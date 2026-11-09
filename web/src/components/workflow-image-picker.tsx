@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { ImagePlus } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ImagePlus, Upload } from 'lucide-react';
 import { Button, Dialog, EmptyState, Field, humanizeMachineValue, MediaFrame, StatusMessage } from '@/bridge88/components';
 import { listReferenceImagesAction } from '@/app/actions/workflows';
+import { uploadMedia } from '@/lib/media/upload-client';
 
 interface ReferenceImage {
   id: string;
@@ -236,8 +237,8 @@ export function useReferenceImages() {
     return () => { listeners.delete(listener); };
   }, []);
 
-  async function load(slug: string) {
-    if (cache?.slug === slug || loading) return;
+  async function load(slug: string, fresh = false) {
+    if ((!fresh && cache?.slug === slug) || loading) return;
     setLoading(true);
     setError('');
     try {
@@ -287,7 +288,30 @@ export function WorkflowImageField({
   onChange: (assetId: string | null) => void;
 }) {
   const [picking, setPicking] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const fileInput = useRef<HTMLInputElement>(null);
   const { load } = useReferenceImages();
+
+  // Straight from the computer: the file goes into the media library like any
+  // upload, and is chosen here as soon as it lands.
+  async function uploadFromComputer(file: File) {
+    setUploading(true);
+    setUploadError('');
+    try {
+      const formData = new FormData();
+      formData.append('files', file);
+      const { assetIds } = await uploadMedia(slug, formData);
+      if (!assetIds[0]) throw new Error('The image uploaded, but it could not be selected. Choose it from the library.');
+      await load(slug, true);
+      onChange(assetIds[0]);
+    } catch (cause) {
+      setUploadError(cause instanceof Error ? cause.message : 'The image could not be uploaded.');
+    } finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  }
 
   // Fetched up front when one is already chosen, so the field opens showing
   // its thumbnail rather than filling in once the picker has been opened.
@@ -310,9 +334,22 @@ export function WorkflowImageField({
         </button>
         <div className="min-w-0">
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" size="sm" disabled={disabled} onClick={() => setPicking(true)}>
-              {assetId ? 'Change image' : 'Choose an image'}
+            <Button type="button" variant="secondary" size="sm" disabled={disabled || uploading} onClick={() => setPicking(true)}>
+              {assetId ? 'Change image' : 'Choose from library'}
             </Button>
+            <Button type="button" variant="secondary" size="sm" disabled={disabled || uploading} onClick={() => fileInput.current?.click()}>
+              <Upload size={14} aria-hidden /> {uploading ? 'Uploading…' : 'Upload from computer'}
+            </Button>
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void uploadFromComputer(file);
+              }}
+            />
             {assetId && (
               <Button type="button" variant="tertiary" size="sm" disabled={disabled} onClick={() => onChange(null)}>
                 Remove
@@ -322,6 +359,7 @@ export function WorkflowImageField({
           {overriddenBy && (
             <p className="b88-caption mt-2">Ignored while {overriddenBy} is connected.</p>
           )}
+          {uploadError && <StatusMessage tone="error" className="mt-2">{uploadError}</StatusMessage>}
         </div>
       </div>
       {hint && <p className="mt-1.5 text-sm">{hint}</p>}

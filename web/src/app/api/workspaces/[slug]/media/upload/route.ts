@@ -73,12 +73,12 @@ export async function POST(
       type: request.headers.get('content-type') || 'application/octet-stream',
     });
 
-    await storeMediaFiles(slug, [file], {
+    const { ids } = await storeMediaFiles(slug, [file], {
       folderId: url.searchParams.get('folderId'),
       uploadRequestId: url.searchParams.get('uploadRequestId'),
     });
 
-    return NextResponse.json({ filename, message: 'Media uploaded.' });
+    return NextResponse.json({ filename, assetId: ids[0], message: 'Media uploaded.' });
   } catch (error) {
     const appError = toAppError(error);
     if (appError.detail) console.error('[api] media upload', appError.detail);

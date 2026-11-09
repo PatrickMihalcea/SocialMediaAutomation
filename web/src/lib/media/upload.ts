@@ -54,7 +54,7 @@ export async function storeMediaFiles(
   slug: string,
   files: File[],
   options: { folderId?: string | null; uploadRequestId?: string | null } = {},
-): Promise<{ count: number }> {
+): Promise<{ count: number; ids: string[] }> {
   const ctx = await requireWorkspace(slug, 'media:upload');
   if (!files.length) throw invalid('Choose at least one file.');
   const folderId = options.folderId ?? null;
@@ -127,7 +127,7 @@ export async function storeMediaFiles(
     });
   }
   revalidatePath(`/w/${slug}/media`);
-  return { count: files.length };
+  return { count: files.length, ids: prepared.map(({ id }) => id) };
 }
 
 /**
