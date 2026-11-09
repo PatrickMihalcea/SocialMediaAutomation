@@ -290,6 +290,10 @@ export function WorkflowImageField({
   const [picking, setPicking] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  // The picked file itself, shown until the library has processed the upload:
+  // a new image is not in the library's list until its thumbnail exists.
+  const [preview, setPreview] = useState<{ assetId: string; url: string } | null>(null);
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);
   const fileInput = useRef<HTMLInputElement>(null);
   const { load } = useReferenceImages();
 
@@ -303,6 +307,7 @@ export function WorkflowImageField({
       formData.append('files', file);
       const { assetIds } = await uploadMedia(slug, formData);
       if (!assetIds[0]) throw new Error('The image uploaded, but it could not be selected. Choose it from the library.');
+      setPreview({ assetId: assetIds[0], url: URL.createObjectURL(file) });
       await load(slug, true);
       onChange(assetIds[0]);
     } catch (cause) {
@@ -330,7 +335,7 @@ export function WorkflowImageField({
           aria-label={assetId ? `Change the ${label.toLowerCase()}` : `Choose a ${label.toLowerCase()}`}
           className="flex size-14 items-center justify-center overflow-hidden rounded-md border border-hairline bg-surface-soft transition-opacity hover:opacity-80 disabled:opacity-50"
         >
-          {assetId ? <PickedThumb assetId={assetId} /> : <ImagePlus size={16} />}
+          {assetId ? <PickedThumb assetId={assetId} fallbackUrl={preview?.assetId === assetId ? preview.url : undefined} /> : <ImagePlus size={16} />}
         </button>
         <div className="min-w-0">
           <div className="flex flex-wrap gap-2">
@@ -382,8 +387,8 @@ export function WorkflowImageField({
 }
 
 /** The chosen image's thumbnail; an id is the one thing the client cannot render. */
-function PickedThumb({ assetId }: { assetId: string }) {
-  const url = useReferenceImages().images.find((image) => image.id === assetId)?.url;
+function PickedThumb({ assetId, fallbackUrl }: { assetId: string; fallbackUrl?: string }) {
+  const url = useReferenceImages().images.find((image) => image.id === assetId)?.url ?? fallbackUrl;
   if (!url) return <ImagePlus size={16} />;
   return <img src={url} alt="" className="size-full object-cover" loading="lazy" />;
 }
