@@ -292,7 +292,7 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
     seconds: {
       label: 'Clip length (seconds)',
-      description: 'How long each clip runs, up to 25 seconds. Up to 6 seconds is one render. Longer clips are built from 3-second pieces, each continuing from the last frames of the one before and joined with a soft dissolve; each piece takes about 20 minutes on your Mac, so 20 seconds is about two and a half hours.',
+      description: 'How long each clip runs, up to 25 seconds. Up to 6 seconds is one render. Longer clips are built from 3-second pieces, each continuing from the last frames of the one before and joined with a soft dissolve; each piece takes about 27 minutes on your Mac, so 20 seconds is about three hours.',
     },
     sound: {
       label: 'Generate sound',
