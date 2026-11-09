@@ -624,7 +624,7 @@ export function NodeConfigPanel({
     if (node.type === 'IMAGE_GENERATOR') {
       // The old on/off switch is replaced by the question.
       if (field.key === 'checkCharacters') return false;
-      if (field.key === 'redrawAttempts') return typeof config.checkQuestion === 'string' && config.checkQuestion.trim() !== '';
+      if (field.key === 'checkQuestion' || field.key === 'redrawAttempts') return config.testPicture === true;
     }
     if (node.type === 'TEXT_OVERLAY') {
       // Overlay structure replaced the freeform template picker. The template

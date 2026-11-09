@@ -414,16 +414,26 @@ export const NODE_DEFINITIONS = {
        */
       provider: z.enum(['mock', 'openai', 'image-use', 'comfyui']).default('image-use'),
       /**
-       * A yes-or-no question the AI answers looking at each picture; a no
-       * redraws it. Empty turns the check off. Answered on the ChatGPT
-       * subscription, so it costs nothing per picture.
+       * Test each picture with a question the AI answers pass or fail while
+       * looking at it; a fail redraws. Answered on the ChatGPT subscription,
+       * so it costs nothing per picture.
        */
+      testPicture: z.boolean().default(false),
       checkQuestion: z.string().max(1000).default(''),
       redrawAttempts: z.number().int().min(0).max(3).default(2),
-      /** Superseded by checkQuestion; kept so steps saved with it keep checking. */
+      /** Superseded by testPicture; kept so steps saved with it keep checking. */
       checkCharacters: z.boolean().default(false),
       /** Superseded by `provider`; kept so steps saved before it keep mocking. */
       useMockGeneration: z.boolean().default(false),
+    }).superRefine((config, ctx) => {
+      // A test with nothing to ask would pass every picture without saying so.
+      if (config.testPicture && !config.checkQuestion.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['checkQuestion'],
+          message: 'Write the test question, or turn Test each picture off.',
+        });
+      }
     }),
     longRunning: true,
   },

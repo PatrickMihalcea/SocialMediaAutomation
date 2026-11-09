@@ -204,9 +204,13 @@ export const WORKFLOW_FIELD_HELP: Partial<
     },
   },
   IMAGE_GENERATOR: {
+    testPicture: {
+      label: 'Test each picture',
+      description: 'After each picture is made, the AI looks at it and answers your test question with a pass or fail. A fail redraws the picture. Runs on your ChatGPT subscription; each test takes a few seconds.',
+    },
     checkQuestion: {
-      label: 'Check question',
-      description: 'A yes-or-no question the AI answers while looking at each picture, for example "Are all the characters real, recognisable cartoon characters, not made-up ones?" A no redraws the picture. Leave it empty to skip the check. Each answer and its reason are saved with the step\'s output.',
+      label: 'Test question',
+      description: 'The question the picture has to pass, for example "Are all the characters real, recognisable cartoon characters, not made-up ones?" Each result and its reason are saved with the step\'s output.',
       multiline: true,
     },
     redrawAttempts: {

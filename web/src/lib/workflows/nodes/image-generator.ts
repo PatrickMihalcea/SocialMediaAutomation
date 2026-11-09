@@ -24,7 +24,8 @@ export interface Config {
   provider: ImageProviderName;
   /** Superseded by `provider`. Still read, so steps saved before it keep mocking. */
   useMockGeneration: boolean;
-  /** A yes-or-no question asked about each picture; a no redraws it. Empty is off. */
+  /** Test each picture with checkQuestion; a fail redraws it. */
+  testPicture?: boolean;
   checkQuestion?: string;
   /** Superseded by checkQuestion; still read, so steps saved with it keep checking. */
   checkCharacters?: boolean;
@@ -372,8 +373,8 @@ export function composePrompt(input: {
 export const DEFAULT_CHECK_QUESTION =
   'Are all the characters in this picture real, recognisable characters from existing cartoons, games or films, rather than made-up or generic ones?';
 
-export function checkQuestionOf(config: Pick<Config, 'checkQuestion' | 'checkCharacters'>): string | null {
+export function checkQuestionOf(config: Pick<Config, 'testPicture' | 'checkQuestion' | 'checkCharacters'>): string | null {
   const question = config.checkQuestion?.trim();
-  if (question) return question;
+  if (config.testPicture) return question || null;
   return config.checkCharacters ? DEFAULT_CHECK_QUESTION : null;
 }
