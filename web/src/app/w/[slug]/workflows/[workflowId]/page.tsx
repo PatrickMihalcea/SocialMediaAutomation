@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import { describeStepRun } from '@/lib/workflows/step-summary';
 import Link from 'next/link';
 import { Badge, Button, EmptyState, StatusMessage } from '@/bridge88/components';
 import { requireWorkspace } from '@/lib/auth/guard';
@@ -63,7 +64,10 @@ async function WorkflowDetail({
           take: HISTORY,
           include: {
             nodeRuns: {
-              select: { nodeId: true, status: true, durationMs: true },
+              select: {
+                nodeId: true, nodeType: true, status: true, durationMs: true, error: true,
+                attempt: true, maxAttempts: true, startedAt: true, queuedAt: true, output: true,
+              },
             },
           },
         },
@@ -303,6 +307,9 @@ async function WorkflowDetail({
                       nodeId: node.nodeId,
                       status: node.status,
                       durationMs: node.durationMs,
+                      // Worked out here so the page ships a few lines per step,
+                      // not every step's whole output.
+                      detail: describeStepRun(node),
                     })),
                   }))}
                 />

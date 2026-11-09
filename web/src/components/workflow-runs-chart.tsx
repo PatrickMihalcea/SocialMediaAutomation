@@ -8,6 +8,7 @@ import {
   NODE_STATUS_LABEL,
   RUN_STATUS_LABEL,
   RUN_STATUS_TONE,
+  NODE_STATUS_TONE,
   formatElapsed,
 } from '@/lib/workflows/labels';
 
@@ -15,6 +16,8 @@ export interface RunNodeCell {
   nodeId: string;
   status: WorkflowNodeRunStatus;
   durationMs: number | null;
+  /** A few short lines on what the step did; see describeStepRun. */
+  detail?: string[];
 }
 
 export interface RunBar {
@@ -100,6 +103,9 @@ export function WorkflowRunsChart({
   timezone: string;
 }) {
   const [selected, setSelected] = useState<string | null>(runs[runs.length - 1]?.id ?? null);
+  // The step square under the pointer, described below the chart: a native
+  // tooltip is too slow to appear and too terse to say anything useful.
+  const [hovered, setHovered] = useState<{ lane: string; run: RunBar; cell: RunNodeCell | undefined } | null>(null);
 
   const { max, ticks } = useMemo(() => scaleFor(runs.map((r) => r.durationMs ?? 0)), [runs]);
 
@@ -300,8 +306,9 @@ export function WorkflowRunsChart({
                       <Link
                         key={run.id}
                         href={runHref(run.id, lane.id)}
-                        onMouseEnter={() => setSelected(run.id)}
-                        onFocus={() => setSelected(run.id)}
+                        onMouseEnter={() => { setSelected(run.id); setHovered({ lane: lane.name, run, cell }); }}
+                        onFocus={() => { setSelected(run.id); setHovered({ lane: lane.name, run, cell }); }}
+                        onMouseLeave={() => setHovered(null)}
                         title={cellTitle(lane.name, cell)}
                         className={`${COLUMN} flex items-center justify-center px-[3px] transition-opacity hover:opacity-80`}
                       >
@@ -327,6 +334,29 @@ export function WorkflowRunsChart({
       </div>
 
       <p className="b88-caption mt-3 text-right">STEPS, IN EXECUTION ORDER</p>
+
+      <div className="mt-3 min-h-[4.5rem] rounded-md bg-surface-soft px-4 py-3" aria-live="polite">
+        {hovered ? (
+          <>
+            <p className="flex flex-wrap items-center gap-2">
+              <span className="font-[540]">{hovered.lane}</span>
+              <span className="b88-caption">
+                {hovered.run.startedAt ? fullLabel(hovered.run.startedAt, timezone) : 'NOT STARTED'}
+              </span>
+              {hovered.cell && <Badge tone={NODE_STATUS_TONE[hovered.cell.status]}>{NODE_STATUS_LABEL[hovered.cell.status]}</Badge>}
+            </p>
+            {hovered.cell ? (
+              (hovered.cell.detail ?? []).map((line, index) => (
+                <p key={index} className="mt-1 text-sm">{line}</p>
+              ))
+            ) : (
+              <p className="mt-1 text-sm">This step was not part of that run.</p>
+            )}
+          </>
+        ) : (
+          <p className="text-sm">Point at a step square to see what that step did in that run.</p>
+        )}
+      </div>
 
       {active && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-hairline-soft pt-4">
@@ -388,8 +418,7 @@ function runTitle(run: RunBar, timezone: string): string {
 
 function cellTitle(laneName: string, cell: RunNodeCell | undefined): string {
   if (!cell) return `${laneName} · not part of this run`;
-  const took = cell.durationMs ? ` · ${formatElapsed(cell.durationMs)}` : '';
-  return `${laneName} · ${NODE_STATUS_LABEL[cell.status]}${took}`;
+  return [`${laneName} · ${NODE_STATUS_LABEL[cell.status]}`, ...(cell.detail ?? [])].join('\n');
 }
 
 function dayLabel(iso: string, timezone: string): string {
