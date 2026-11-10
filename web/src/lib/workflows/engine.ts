@@ -406,6 +406,7 @@ async function buildContext(
     },
 
     async heartbeat() {
+      await reclaimIfRequeued(nodeRun.id).catch(() => {});
       await db.workflowNodeRun
         .update({ where: { id: nodeRun.id }, data: { heartbeatAt: new Date() } })
         .catch(() => {});
@@ -981,6 +982,33 @@ export async function restartRunFromScratch(runId: string): Promise<void> {
     select: { id: true, workspaceId: true },
   });
   for (const row of ready) await claimAndEnqueue(row);
+}
+
+/**
+ * Takes a step back when it was queued again while this worker was still on it.
+ *
+ * A laptop that sleeps mid-render stops sending heartbeats, so the sweeper
+ * reads the step as dead and queues it again; on waking, the render is still
+ * going. Without this, the render finished into a step no longer marked as
+ * running and its work was thrown away, and the queued copy then started the
+ * whole step from scratch. The copy is retired only while it has not started.
+ */
+async function reclaimIfRequeued(nodeRunId: string): Promise<void> {
+  const row = await db.workflowNodeRun.findUnique({ where: { id: nodeRunId }, select: { status: true, jobId: true } });
+  if (row?.status !== WorkflowNodeRunStatus.QUEUED) return;
+  if (row.jobId) {
+    const retired = await db.job.updateMany({
+      where: { id: row.jobId, status: 'QUEUED' },
+      data: { status: 'CANCELLED', error: 'Queued while the step was still running on a worker that had paused; that worker carried on.' },
+    });
+    // The copy already started elsewhere: leave the step to it.
+    if (retired.count === 0) return;
+  }
+  await db.workflowNodeRun.updateMany({
+    where: { id: nodeRunId, status: WorkflowNodeRunStatus.QUEUED },
+    data: { status: WorkflowNodeRunStatus.RUNNING, attempt: { increment: 1 }, jobId: null },
+  });
+  console.log(`[workflow] step ${nodeRunId} was queued again while still running here; took it back`);
 }
 
 // ---------------------------------------------------------------- sweeping
