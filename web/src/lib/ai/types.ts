@@ -74,6 +74,8 @@ export interface VideoClipOptions {
    * exactly; lower gives the scene more room and crossfades the seam.
    */
   loopStrictness?: number;
+  /** Plays the finished clip this many times end to end, as one file. */
+  repeat?: number;
   /**
    * Whether to keep the soundtrack a model generates with the clip. False
    * saves it silent; left unset, the clip keeps whatever sound it came with.

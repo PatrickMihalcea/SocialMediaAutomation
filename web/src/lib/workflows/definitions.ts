@@ -469,7 +469,12 @@ export const NODE_DEFINITIONS = {
        * once and moves on, so a short clip shortens the video rather than
        * looping. The ceiling is a render-time guard, not a model limit.
        */
-      seconds: z.number().int().min(2).max(25).default(4),
+      seconds: z.number().int().min(2).max(6).default(4),
+      /**
+       * Plays each finished clip this many times end to end. One render, a
+       * longer clip: with Seamless loop on, the repeats join without a jump.
+       */
+      loops: z.number().int().min(1).max(10).default(1),
       /** Keep the sound the video model generates. Off saves each clip silent. */
       sound: z.boolean().default(false),
       /** What the clips should sound like; used only while sound is on. */

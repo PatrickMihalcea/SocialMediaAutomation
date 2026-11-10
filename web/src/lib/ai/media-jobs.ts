@@ -1,5 +1,7 @@
 import 'server-only';
 import { withoutAudio } from '@/lib/media/strip-audio';
+import { repeatClip } from '@/lib/media/repeat-clip';
+import { loopCrossfade } from '@/lib/media/loop-crossfade';
 import sharp from 'sharp';
 import { AiMediaJobKind, JobStatus, MediaType } from '@prisma/client';
 import { db } from '@/lib/db';
@@ -91,6 +93,7 @@ export async function createAiMediaJob(input: {
   stillCamera?: boolean;
   loop?: boolean;
   loopStrictness?: number;
+  repeat?: number;
 }): Promise<{ id: string; kind: AiMediaJobKind; status: JobStatus; provider: string }> {
   const used = await currentMonthUsage(input.workspaceId, 'ai_generations');
   await assertWithinLimit(input.workspaceId, 'aiGenerations', used);
@@ -114,6 +117,7 @@ export async function createAiMediaJob(input: {
         ...(input.stillCamera ? { stillCamera: true } : {}),
         ...(input.loop ? { loop: true } : {}),
         ...(typeof input.loopStrictness === 'number' ? { loopStrictness: input.loopStrictness } : {}),
+        ...(input.repeat && input.repeat > 1 ? { repeat: input.repeat } : {}),
       },
     },
     // provider comes back so the caller can say which source is running this
@@ -299,7 +303,22 @@ async function produce(
   // the setting means the same whichever model made the clip.
   if (kind === 'VIDEO_GENERATE') return withoutSoundIf(clip, await video.generateVideo({ prompt, ...clip, onStage, shouldStop }));
   if (kind === 'VIDEO_ANIMATE') {
-    return withoutSoundIf(clip, await video.animateImage({ prompt, image: requiredInput(image, kind).image, ...clip, onStage, shouldStop }));
+    const animated = await withoutSoundIf(clip, await video.animateImage({ prompt, image: requiredInput(image, kind).image, ...clip, onStage, shouldStop }));
+    if (!clip.repeat || clip.repeat <= 1) return animated;
+    // One render, played several times: the length without the render time.
+    // A seamless loop already flows from its end into its start. Any other
+    // clip has its end dissolved into its start first, so no repeat jumps.
+    let once = animated.data;
+    let length = animated.durationSeconds ?? null;
+    if (!clip.loop && length) {
+      once = await loopCrossfade(once, length, REPEAT_FADE_SECONDS);
+      length -= REPEAT_FADE_SECONDS;
+    }
+    return {
+      ...animated,
+      data: await repeatClip(once, clip.repeat),
+      ...(length ? { durationSeconds: length * clip.repeat } : {}),
+    };
   }
   if (kind === 'AUDIO_TTS') return audio.textToSpeech({ text: prompt });
   throw new PermanentJobError(`${kind} produces text, not a MediaAsset, and is not a studio generation job.`);
@@ -353,8 +372,8 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
 
 /** Clip length and motion, each ignored unless it is one the app offers. */
 function requestedClip(metadata: unknown): VideoClipOptions {
-  const { seconds, motion, sound, stillCamera, loop, loopStrictness } = (metadata ?? {}) as {
-    seconds?: unknown; motion?: unknown; sound?: unknown; stillCamera?: unknown; loop?: unknown; loopStrictness?: unknown;
+  const { seconds, motion, sound, stillCamera, loop, loopStrictness, repeat } = (metadata ?? {}) as {
+    seconds?: unknown; motion?: unknown; sound?: unknown; stillCamera?: unknown; loop?: unknown; loopStrictness?: unknown; repeat?: unknown;
   };
   return {
     ...(typeof seconds === 'number' && Number.isInteger(seconds) && seconds > 0 ? { seconds } : {}),
@@ -363,6 +382,7 @@ function requestedClip(metadata: unknown): VideoClipOptions {
     ...(stillCamera === true ? { stillCamera: true } : {}),
     ...(loop === true ? { loop: true } : {}),
     ...(typeof loopStrictness === 'number' ? { loopStrictness } : {}),
+    ...(typeof repeat === 'number' && Number.isInteger(repeat) && repeat > 1 ? { repeat } : {}),
   };
 }
 
@@ -376,3 +396,6 @@ function imageProviderName(provider: string): ImageProviderName | undefined {
     ? provider
     : undefined;
 }
+
+/** The dissolve that joins a non-looping clip's end to its start before repeating. */
+const REPEAT_FADE_SECONDS = 0.5;

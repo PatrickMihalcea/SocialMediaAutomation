@@ -10,6 +10,7 @@ interface Config {
   cameraPrompt?: string;
   loop?: boolean;
   loopStrictness?: number;
+  loops?: number;
   sound: boolean;
   soundPrompt?: string;
   provider: 'default' | 'comfyui';
@@ -63,6 +64,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       stillCamera: (config.camera ?? 'locked') === 'locked',
       loop: config.loop ?? false,
       loopStrictness: config.loopStrictness ?? 100,
+      repeat: config.loops ?? 1,
       inline: true,
     });
     // A clip on a laptop GPU can take longer than the sweeper waits for a
@@ -125,10 +127,6 @@ export function withSound(prompt: string, config: Pick<Config, 'sound' | 'soundP
  */
 export function expectedClipMs(measured: number[], typical: number | null, seconds: number): number {
   if (measured.length) return measured.reduce((sum, value) => sum + value, 0) / measured.length;
-  // A long clip is built from 3-second pieces, measured at about 27 minutes
-  // each on the M4 Max (the first, with no frames to continue from, about 21);
-  // a recent single clip says nothing about how long a chain of them takes.
-  if (seconds > 6) return Math.ceil(seconds / 3) * 27 * 60_000;
   return typical ?? seconds * 6 * 60_000;
 }
 

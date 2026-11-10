@@ -369,7 +369,7 @@ describe('describing ComfyUI progress', () => {
 
 describe('running a video workflow without its sound', () => {
   const isRef = (value: unknown): value is [string, number] => Array.isArray(value) && value.length === 2 && typeof value[0] === 'string';
-  for (const name of ['img2vid', 'img2vid_loop', 'img2vid_extend', 'txt2vid']) {
+  for (const name of ['img2vid', 'img2vid_loop', 'txt2vid']) {
     it(`drops the sound half of ${name} and keeps every video connection`, () => {
       const graph = JSON.parse(readFileSync(`comfyui/workflows/${name}.json`, 'utf8')) as Record<string, { class_type: string; inputs: Record<string, unknown> }>;
       const trimmed = withoutSoundBranch(graph) as typeof graph;
