@@ -673,14 +673,16 @@ export const NODE_DEFINITIONS = {
   PICK: {
     type: 'PICK',
     label: 'Select items',
-    description: 'Selects one or more items from a media list, including a repeatable random selection.',
+    description: 'Selects one or more items from a list of media or text, such as images or prompts, including a repeatable random selection.',
     category: 'utility',
     icon: 'crosshair',
     inputs: [
       {
         id: 'items',
         label: 'Items',
-        type: media([...IMAGES, ...VIDEOS, ...AUDIO], true),
+        // Text too: choosing among prompts is the same job as choosing among
+        // images, and the outputs follow whatever comes in.
+        type: media([...IMAGES, ...VIDEOS, ...AUDIO], true, { alsoAcceptsText: true }),
         required: true,
       },
     ],

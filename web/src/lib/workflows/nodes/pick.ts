@@ -3,6 +3,9 @@ import { PermanentJobError } from '@/lib/queue/runner';
 import type { NodeRunContext } from '@/lib/workflows/node-context';
 import { selectIndices, type SelectionMode } from '@/lib/workflows/select-items';
 
+/** A media asset id, as opposed to a prompt or other text being chosen. */
+const ASSET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 interface Config {
   mode: SelectionMode;
   count: number;
@@ -61,7 +64,8 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     // thing the run did not say — a random selection especially, where reading
     // the ids back tells nobody anything. These are existing assets rather than
     // new ones, but the link is only ever read to render the row.
-    const media = selection.filter((id): id is string => typeof id === 'string');
+    // Only media ids are linked; a selection of prompts is plain text.
+    const media = selection.filter((id): id is string => typeof id === 'string' && ASSET_ID.test(id));
     if (media.length > 0) await ctx.emitAssets('selection', media);
 
     return {

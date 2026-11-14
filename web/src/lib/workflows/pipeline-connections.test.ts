@@ -38,6 +38,10 @@ const MUST_WORK: Array<[string | null, string, string]> = [
   ['MEDIA_LIBRARY.audio', 'PICK.item', 'AUDIO_TRIMMER.audio'],
   ['MEDIA_LIBRARY.videos', 'PICK.item', 'TEXT_OVERLAY.video'],
   ['MEDIA_LIBRARY.videos', 'PICK.item', 'CREATE_DRAFT.video'],
+  // Prompts can be chosen from too, and stay text on the way out.
+  [null, 'IDEA_GENERATOR.prompts', 'PICK.items'],
+  ['IDEA_GENERATOR.prompts', 'PICK.selection', 'IMAGE_GENERATOR.prompts'],
+  ['IDEA_GENERATOR.prompts', 'PICK.item', 'IDEA_GENERATOR.theme'],
   ['MEDIA_LIBRARY.videos', 'PICK.item', 'PUBLISH.video'],
   // Combining and cutting.
   [null, 'BEAT_SLIDESHOW.video', 'TEXT_OVERLAY.video'],

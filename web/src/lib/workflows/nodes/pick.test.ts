@@ -89,11 +89,23 @@ describe('select items step', () => {
  */
 describe('what it chose is shown on the run', () => {
   it('emits the selected items, in the order it selected them', async () => {
-    const ctx = context({ mode: 'index', count: 3, index: 1 }, { items: ITEMS });
+    const ids = ['a', 'b', 'c', 'd'].map((letter) => `${letter.repeat(8)}-0000-4000-8000-000000000000`);
+    const ctx = context({ mode: 'index', count: 3, index: 1 }, { items: ids });
 
     await run(ctx);
 
-    expect(ctx.emitAssets).toHaveBeenCalledWith('selection', ['b', 'c', 'd']);
+    expect(ctx.emitAssets).toHaveBeenCalledWith('selection', ids.slice(1));
+  });
+
+  it('selects prompts like any other list, without linking them as media', async () => {
+    const prompts = ['A train at night', 'A cabin in snow', 'A ship at sea'];
+    const ctx = context({ mode: 'index', count: 1, index: 1 }, { items: prompts });
+
+    const output = await run(ctx);
+
+    expect(output.item).toBe('A cabin in snow');
+    expect(output.selection).toEqual(['A cabin in snow']);
+    expect(ctx.emitAssets).not.toHaveBeenCalled();
   });
 
   it('emits nothing when it selected nothing', async () => {

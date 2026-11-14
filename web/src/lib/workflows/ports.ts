@@ -29,6 +29,12 @@ export interface PortType {
    * appending one item is what "First selected" plainly means.
    */
   acceptsSingle?: boolean;
+  /**
+   * Media inputs only. Also takes text of the same arity, for a step that works
+   * on any list without looking inside it, such as Select items choosing
+   * prompts. Its following outputs then carry the text through.
+   */
+  alsoAcceptsText?: boolean;
 }
 
 export interface PortDefinition {
@@ -56,12 +62,13 @@ export const post = (): PortType => ({ scalar: 'post', list: false });
 export const media = (
   kinds: MediaType[],
   list = false,
-  options: { acceptsSingle?: boolean } = {},
+  options: { acceptsSingle?: boolean; alsoAcceptsText?: boolean } = {},
 ): PortType => ({
   scalar: 'media',
   list,
   mediaKinds: kinds,
   ...(options.acceptsSingle ? { acceptsSingle: true } : {}),
+  ...(options.alsoAcceptsText ? { alsoAcceptsText: true } : {}),
 });
 
 export interface Incompatibility {
@@ -73,7 +80,8 @@ export interface Incompatibility {
  * a sentence the composer can show verbatim.
  */
 export function checkCompatible(source: PortType, target: PortType): Incompatibility | null {
-  if (source.scalar !== target.scalar) {
+  const textIntoAnyList = source.scalar === 'text' && target.alsoAcceptsText;
+  if (source.scalar !== target.scalar && !textIntoAnyList) {
     return { reason: `A ${describe(source)} output cannot connect to a ${describe(target)} input.` };
   }
   if (source.list !== target.list) {
@@ -86,7 +94,7 @@ export function checkCompatible(source: PortType, target: PortType): Incompatibi
         : { reason: `That output is a single ${source.scalar} and this input takes a list of them.` };
     }
   }
-  if (source.scalar === 'media') {
+  if (source.scalar === 'media' && target.scalar === 'media') {
     const accepted = target.mediaKinds ?? [];
     const offered = source.mediaKinds ?? [];
     const unsupported = offered.filter((kind) => !accepted.includes(kind));
@@ -108,7 +116,8 @@ export const isCompatible = (source: PortType, target: PortType): boolean =>
 /** e.g. "video list", "image, video or audio", "text". */
 export function describePortType(type: PortType): string {
   const base = type.scalar === 'media' ? listKinds(type.mediaKinds ?? []) : type.scalar;
-  return type.list ? `${base} list` : base;
+  const described = type.list ? `${base} list` : base;
+  return type.alsoAcceptsText ? `${described}, or text${type.list ? ' list' : ''}` : described;
 }
 
 const describe = describePortType;
