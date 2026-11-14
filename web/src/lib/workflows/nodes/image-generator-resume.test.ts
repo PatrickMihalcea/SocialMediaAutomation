@@ -91,6 +91,16 @@ describe('resuming a part-finished image step', () => {
     );
   });
 
+  /** Select items' First selected sends one prompt, not a list. */
+  it('draws a single prompt as a list of one', async () => {
+    mocks.generateImage.mockResolvedValue({ data: Buffer.from('a'), mimeType: 'image/png', generationId: 'g1' });
+    const ctx = { ...context(null), inputs: { prompts: 'A train at night' } };
+
+    const output = await run(ctx);
+
+    expect((output as { images: string[] }).images).toHaveLength(1);
+  });
+
   /** A refusal is the model declining one try; the same prompt usually draws next time. */
   it('tries a refused picture again straight away instead of failing the step', async () => {
     mocks.generateImage

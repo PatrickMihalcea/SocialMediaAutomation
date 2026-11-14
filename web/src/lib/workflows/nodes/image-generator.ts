@@ -295,7 +295,9 @@ function restoreSlots(previous: Record<string, unknown> | null, total: number): 
   return slots;
 }
 
+/** A bare string is one prompt, as Select items' First selected sends it. */
 function asStringArray(value: unknown): string[] {
+  if (typeof value === 'string') return value.trim() ? [value] : [];
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
 }
 

@@ -56,7 +56,11 @@ export interface PortDefinition {
   followsInput?: string;
 }
 
-export const text = (list = false): PortType => ({ scalar: 'text', list });
+export const text = (list = false, options: { acceptsSingle?: boolean } = {}): PortType => ({
+  scalar: 'text',
+  list,
+  ...(options.acceptsSingle ? { acceptsSingle: true } : {}),
+});
 export const json = (schemaId?: string): PortType => ({ scalar: 'json', list: false, schemaId });
 export const post = (): PortType => ({ scalar: 'post', list: false });
 export const media = (

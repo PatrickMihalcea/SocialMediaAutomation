@@ -314,7 +314,8 @@ export const NODE_DEFINITIONS = {
     category: 'generate',
     icon: 'image',
     inputs: [
-      { id: 'prompts', label: 'Prompts', type: text(true), required: true },
+      // One prompt, such as Select items' First selected, is a list of one.
+      { id: 'prompts', label: 'Prompts', type: text(true, { acceptsSingle: true }), required: true },
       /**
        * One picture every image in the set is made against.
        *

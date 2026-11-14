@@ -42,6 +42,7 @@ const MUST_WORK: Array<[string | null, string, string]> = [
   [null, 'IDEA_GENERATOR.prompts', 'PICK.items'],
   ['IDEA_GENERATOR.prompts', 'PICK.selection', 'IMAGE_GENERATOR.prompts'],
   ['IDEA_GENERATOR.prompts', 'PICK.item', 'IDEA_GENERATOR.theme'],
+  ['IDEA_GENERATOR.prompts', 'PICK.item', 'IMAGE_GENERATOR.prompts'],
   ['MEDIA_LIBRARY.videos', 'PICK.item', 'PUBLISH.video'],
   // Combining and cutting.
   [null, 'BEAT_SLIDESHOW.video', 'TEXT_OVERLAY.video'],
