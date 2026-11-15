@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ImagePlus } from 'lucide-react';
+import { ChevronRight, ImagePlus } from 'lucide-react';
 import { Button, TextArea } from '@/bridge88/components';
 import { ImagePicker, useReferenceImages, type ThemePoolFolder } from '@/components/workflow-image-picker';
 
@@ -44,6 +44,7 @@ export function WorkflowThemePool({
   const [text, setText] = useState(() => themes.join(', '));
   const [picking, setPicking] = useState<string | null>(null);
   const entries = splitEntries(text);
+  const sketchCount = entries.filter((theme) => images[theme]).length;
   const { load } = useReferenceImages();
 
   // Fetched up front when a pairing already exists, so the rows open showing
@@ -81,13 +82,21 @@ export function WorkflowThemePool({
       </p>
 
       {entries.length > 0 && (
-        <div className="mt-4">
-          <div>
-            <p className="b88-label">Reference layouts</p>
-            <p className="mt-1 text-sm">
-              Optional images that guide composition for each theme.
-            </p>
-          </div>
+        // Closed by default: one row per theme makes a long pool a long panel,
+        // and most runs never touch the sketches.
+        <details className="group mt-4">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2">
+            <span>
+              <span className="b88-label block">Reference layouts</span>
+              <span className="mt-1 block text-sm">
+                Optional images that guide composition for each theme.
+              </span>
+            </span>
+            <span className="b88-caption flex items-center gap-1 whitespace-nowrap">
+              {sketchCount ? `${sketchCount} added` : 'None'}
+              <ChevronRight size={15} strokeWidth={1.75} className="transition-transform group-open:rotate-90" aria-hidden="true" />
+            </span>
+          </summary>
           <div className="mt-2 grid gap-2">
             {entries.map((theme) => (
               <ThemeRow
@@ -100,7 +109,7 @@ export function WorkflowThemePool({
               />
             ))}
           </div>
-        </div>
+        </details>
       )}
 
       <ImagePicker

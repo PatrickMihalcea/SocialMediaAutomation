@@ -295,6 +295,13 @@ export const NODE_DEFINITIONS = {
         .max(1.3, 'Temperature cannot be above 1.3.')
         .default(0.7),
       promptGuidance: z.string().max(10_000, 'How to write the prompts must be 10,000 characters or fewer.').default(''),
+      /**
+       * The first idea describes the scene in full and the rest are short
+       * shots within it — a close up, a new angle — rather than every idea
+       * being its own full scene of the same length.
+       */
+      sceneFirst: z.boolean().default(false),
+      followUpGuidance: z.string().max(10_000, 'How to write the other ideas must be 10,000 characters or fewer.').default(''),
       titleGuidance: z.string().max(10_000, 'How to write the title must be 10,000 characters or fewer.').default(''),
       imageTitleGuidance: z.string().max(10_000, 'How to write the image titles must be 10,000 characters or fewer.').default(''),
       captionGuidance: z.string().max(10_000, 'How to write the caption must be 10,000 characters or fewer.').default(''),
@@ -705,6 +712,13 @@ export const NODE_DEFINITIONS = {
         type: media([...IMAGES, ...VIDEOS, ...AUDIO], true),
         followsInput: 'items',
         description: 'Every selected item, for steps that take a list.',
+      },
+      {
+        id: 'rest',
+        label: 'Rest',
+        type: media([...IMAGES, ...VIDEOS, ...AUDIO], true),
+        followsInput: 'items',
+        description: 'Every item that was not selected, in its original order, so one list can be split two ways.',
       },
     ],
     configSchema: z.object({

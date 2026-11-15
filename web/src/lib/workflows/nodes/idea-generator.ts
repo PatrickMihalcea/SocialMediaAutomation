@@ -17,6 +17,8 @@ interface Config {
   count: number;
   temperature: number;
   promptGuidance: string;
+  sceneFirst?: boolean;
+  followUpGuidance?: string;
   titleGuidance: string;
   imageTitleGuidance: string;
   captionGuidance: string;
@@ -83,7 +85,15 @@ export function buildIdeaInstruction(
       'title is two or three words, suitable for burning onto a video as a label.',
       config.imageTitleGuidance,
     ),
-    directed('prompt is the full description.', config.promptGuidance),
+    ...(config.sceneFirst && config.count > 1
+      ? [
+          directed('The first prompt sets the scene: describe the whole image and its environment in full detail.', config.promptGuidance),
+          directed(
+            `Every prompt after the first is a short shot of that same scene, one sentence of 10 to 30 words: a new camera angle or a close up on something already in it, such as "Move the camera to a close up on the gas pump with the planet just out of view behind it". Do not describe the scene again in these, do not add new places, and make each one different.`,
+            config.followUpGuidance ?? '',
+          ),
+        ]
+      : [directed('prompt is the full description.', config.promptGuidance)]),
     'Keep each prompt under 1,500 characters.',
   ].join(' ');
 }

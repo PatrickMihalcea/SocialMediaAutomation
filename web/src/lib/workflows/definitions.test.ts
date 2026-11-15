@@ -252,7 +252,7 @@ describe('node catalogue', () => {
     const pick = getDefinition('PICK')!;
 
     expect(pick.inputs.map((port) => port.id)).toEqual(['items']);
-    expect(pick.outputs.map((port) => port.id)).toEqual(['item', 'selection']);
+    expect(pick.outputs.map((port) => port.id)).toEqual(['item', 'selection', 'rest']);
   });
 
   it('loads library media and defaults selection compatibly with old Pick nodes', () => {

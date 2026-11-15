@@ -56,6 +56,10 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
       seed: `${ctx.runId}:${ctx.nodeRunId}`,
     });
     const selection = positions.map((position) => items[position]);
+    // What was left, in its original order, so a list can be split two ways:
+    // the first prompt one way and every other prompt another.
+    const chosen = new Set(positions);
+    const rest = items.filter((_, position) => !chosen.has(position));
     const chosenTitles = labels ? positions.map((position) => labels[position]) : [];
 
     // Shown on the run row, the same as a step that made its media.
@@ -71,6 +75,7 @@ export async function run(ctx: NodeRunContext): Promise<Record<string, unknown>>
     return {
       item: selection[0],
       selection,
+      rest,
       // The one title belonging to `item`, kept apart from the list above.
       // Sending "First selected" into a step that labels what it is given used
       // to hand one picture the names of all eight, and the step refused —

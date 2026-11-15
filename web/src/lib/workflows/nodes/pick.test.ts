@@ -97,6 +97,16 @@ describe('what it chose is shown on the run', () => {
     expect(ctx.emitAssets).toHaveBeenCalledWith('selection', ids.slice(1));
   });
 
+  it('passes on everything it did not select, in order', async () => {
+    const prompts = ['A train at night', 'A cabin in snow', 'A ship at sea', 'A bus in rain'];
+    const ctx = context({ mode: 'first', count: 1, index: 0 }, { items: prompts });
+
+    const output = await run(ctx);
+
+    expect(output.item).toBe('A train at night');
+    expect(output.rest).toEqual(['A cabin in snow', 'A ship at sea', 'A bus in rain']);
+  });
+
   it('selects prompts like any other list, without linking them as media', async () => {
     const prompts = ['A train at night', 'A cabin in snow', 'A ship at sea'];
     const ctx = context({ mode: 'index', count: 1, index: 1 }, { items: prompts });

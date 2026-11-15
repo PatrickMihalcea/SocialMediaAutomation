@@ -641,6 +641,7 @@ export function NodeConfigPanel({
     if (node.type === 'IDEA_GENERATOR') {
       if (field.key === 'theme') return config.themeMode !== 'random';
       if (field.key === 'themePool') return config.themeMode === 'random';
+      if (field.key === 'followUpGuidance') return config.sceneFirst === true;
     }
     return true;
   });

@@ -165,6 +165,19 @@ export const WORKFLOW_FIELD_HELP: Partial<
         { label: 'Wide establishing shots', value: 'Favour wide establishing shots that show the subject in its surroundings rather than close details.' },
       ],
     },
+    sceneFirst: {
+      label: 'First idea sets the scene',
+      description: 'The first idea describes the whole picture and its surroundings in detail. Every idea after it is a short camera direction within that same scene, such as a close up or a new angle, instead of a full scene of its own.',
+    },
+    followUpGuidance: {
+      label: 'How to write the other ideas',
+      description: 'Direction for every idea after the first — what to focus on, how the camera should move, how long. Leave empty for one short sentence each: a new angle or a close up on something already in the scene.',
+      multiline: true,
+      presets: [
+        { label: 'Close ups on details', value: 'Each one is a close up on a different small detail of the scene, with the main subject just out of view.' },
+        { label: 'Different angles', value: 'Each one moves the camera to a clearly different angle: low, high, from behind, from the side.' },
+      ],
+    },
     titleGuidance: {
       label: 'How to write the post title',
       description: 'Direction for the Post title output — length, tone, a formula to follow. Leave empty to let the model decide from the theme.',

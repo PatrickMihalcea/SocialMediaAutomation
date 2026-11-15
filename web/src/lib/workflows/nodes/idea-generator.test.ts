@@ -158,6 +158,27 @@ describe('resolveTheme', () => {
   });
 });
 
+describe('buildIdeaInstruction scene first', () => {
+  it('asks for one full scene and then short shots within it, following the direction given', () => {
+    const instruction = buildIdeaInstruction(config({
+      sceneFirst: true,
+      followUpGuidance: 'Close ups on details.',
+    }));
+
+    expect(instruction).toContain('The first prompt sets the scene');
+    expect(instruction).toContain('Every prompt after the first is a short shot of that same scene');
+    expect(instruction).toContain('Follow this direction: Close ups on details.');
+    expect(instruction).not.toContain('prompt is the full description.');
+  });
+
+  it('writes every idea as a full scene when it is off', () => {
+    const instruction = buildIdeaInstruction(config());
+
+    expect(instruction).toContain('prompt is the full description.');
+    expect(instruction).not.toContain('The first prompt sets the scene');
+  });
+});
+
 describe('buildIdeaInstruction recent work', () => {
   it('names what the step already covered so the next run does not repeat it', () => {
     const instruction = buildIdeaInstruction(config(), ['Oak kitchen', 'Sunken lounge']);
