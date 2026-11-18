@@ -2,6 +2,7 @@ import 'server-only';
 import { enqueue } from '@/lib/queue';
 import { expandAllRecurrences } from '@/lib/scheduling/recurrence';
 import { db } from '@/lib/db';
+import { deleteOldRunFiles } from '@/lib/media/cleanup';
 
 /**
  * The slow-cadence upkeep: recurrence expansion and analytics refresh.
@@ -21,8 +22,13 @@ export async function enqueueAnalyticsSyncs(): Promise<number> {
   return workspaces.length;
 }
 
-export async function runCoarseUpkeep(): Promise<{ expanded: number; analytics: number }> {
+export async function runCoarseUpkeep(): Promise<{ expanded: number; analytics: number; cleaned: number }> {
   const expanded = await expandAllRecurrences();
   const analytics = await enqueueAnalyticsSyncs();
-  return { expanded: typeof expanded === 'number' ? expanded : 0, analytics };
+  // Never fatal: a cleanup that fails only means the files wait for next time.
+  const { deleted: cleaned } = await deleteOldRunFiles().catch((error: unknown) => {
+    console.error('[upkeep] could not clean up old run files', error);
+    return { deleted: 0 };
+  });
+  return { expanded: typeof expanded === 'number' ? expanded : 0, analytics, cleaned };
 }

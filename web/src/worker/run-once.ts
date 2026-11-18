@@ -89,8 +89,8 @@ async function main() {
   // them every five minutes would hammer the platform APIs, which is why they
   // are opt-in rather than part of every tick.
   if (process.env.RUN_ONCE_COARSE === '1') {
-    const { expanded, analytics } = await runCoarseUpkeep();
-    console.log(`[run-once] coarse upkeep — recurrences expanded ${expanded}, analytics queued for ${analytics} workspace(s)`);
+    const { expanded, analytics, cleaned } = await runCoarseUpkeep();
+    console.log(`[run-once] coarse upkeep — recurrences expanded ${expanded}, analytics queued for ${analytics} workspace(s), ${cleaned} old run file(s) deleted`);
   }
 
   // First, because the two scans below both decide what to do from job rows.
