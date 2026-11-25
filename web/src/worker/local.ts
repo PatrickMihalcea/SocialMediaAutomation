@@ -53,7 +53,12 @@ async function main() {
   // Starts busy, so whatever is already queued is picked up straight away.
   let busyUntil = Date.now() + BUSY_WINDOW_MS;
 
-  const reclaimed = await reclaimLocalJobs();
+  // Not fatal: with the database unreachable the loop below just waits, and
+  // the next queue check picks the work up once it is back.
+  const reclaimed = await reclaimLocalJobs().catch((error: unknown) => {
+    console.error('[local-worker] could not reach the database to reclaim unfinished jobs', error instanceof Error ? error.message.split('\n').filter(Boolean).pop() : error);
+    return 0;
+  });
   if (reclaimed > 0) console.log(`[local-worker] picked up ${reclaimed} job(s) a previous run left unfinished`);
   console.log(`[local-worker] started — ComfyUI at ${env.COMFYUI_URL}, storage=${env.STORAGE_DRIVER}, concurrency ${CONCURRENCY}`);
 
