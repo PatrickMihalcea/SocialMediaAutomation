@@ -4,7 +4,7 @@ import { env } from '@/lib/env';
 import { runJob } from '@/lib/queue/runner';
 import { LOCAL_QUEUES, reclaimLocalJobs } from '@/lib/queue/store';
 import { ComfyClient } from '@/lib/ai/providers/comfyui';
-import { LOCAL_WORKER_ID } from '@/lib/queue/local-worker';
+import { lastLocalWorkSignal, writeLocalHeartbeat } from '@/lib/queue/local-signal';
 
 /**
  * The worker that runs on the operator's Mac, beside ComfyUI.
@@ -22,6 +22,15 @@ import { LOCAL_WORKER_ID } from '@/lib/queue/local-worker';
 const POLL_MS = 3_000;
 const HEARTBEAT_MS = 30_000;
 /**
+ * The database is only asked for work when there is a reason to: new work was
+ * signalled, a job finished recently (its retries come back within minutes),
+ * or three hours have passed as a safety net. Asking every few seconds kept Neon
+ * awake around the clock and spent its free month in three weeks.
+ */
+const SIGNAL_CHECK_MS = 10_000;
+const BUSY_WINDOW_MS = 10 * 60 * 1000;
+const SAFETY_CHECK_MS = 3 * 60 * 60 * 1000;
+/**
  * One at a time by default. A laptop has one GPU, and two renders sharing it
  * each take twice as long while holding twice the memory — the second is more
  * likely to fail than to finish sooner.
@@ -38,6 +47,11 @@ async function main() {
   let stopping = false;
   let comfyUp = false;
   let lastBeat = 0;
+  let lastSignalCheck = 0;
+  let seenSignal: number | null = null;
+  let lastQueueCheck = 0;
+  // Starts busy, so whatever is already queued is picked up straight away.
+  let busyUntil = Date.now() + BUSY_WINDOW_MS;
 
   const reclaimed = await reclaimLocalJobs();
   if (reclaimed > 0) console.log(`[local-worker] picked up ${reclaimed} job(s) a previous run left unfinished`);
@@ -63,17 +77,26 @@ async function main() {
 
     if (Date.now() - lastBeat > HEARTBEAT_MS) {
       lastBeat = Date.now();
-      await db.workerHeartbeat.upsert({
-        where: { id: LOCAL_WORKER_ID },
-        create: { id: LOCAL_WORKER_ID, seenAt: new Date(), detail: { comfyui: up } },
-        update: { seenAt: new Date(), detail: { comfyui: up } },
-      }).catch((error: unknown) => console.error('[local-worker] could not record heartbeat', error));
+      await writeLocalHeartbeat({ comfyui: up })
+        .catch((error: unknown) => console.error('[local-worker] could not record heartbeat', error));
     }
+
+    if (Date.now() - lastSignalCheck > SIGNAL_CHECK_MS) {
+      lastSignalCheck = Date.now();
+      const signal = await lastLocalWorkSignal();
+      if (signal !== null && signal !== seenSignal) {
+        if (seenSignal !== null) busyUntil = Date.now() + BUSY_WINDOW_MS;
+        seenSignal = signal;
+      }
+    }
+    if (inFlight.size > 0) busyUntil = Date.now() + BUSY_WINDOW_MS;
+    const checkQueue = Date.now() < busyUntil || Date.now() - lastQueueCheck > SAFETY_CHECK_MS;
 
     // Only while ComfyUI answers. A job claimed against a closed ComfyUI would
     // spend an attempt failing; left in the queue it just waits.
     const capacity = up ? CONCURRENCY - inFlight.size : 0;
-    if (capacity > 0) {
+    if (capacity > 0 && checkQueue) {
+      lastQueueCheck = Date.now();
       const due = await db.job.findMany({
         where: { ...LOCAL_QUEUES, status: JobStatus.QUEUED, runAt: { lte: new Date() } },
         orderBy: { runAt: 'asc' },
@@ -83,6 +106,7 @@ async function main() {
         console.error('[local-worker] could not read the queue', error);
         return [];
       });
+      if (due.length) busyUntil = Date.now() + BUSY_WINDOW_MS;
       for (const job of due) {
         if (inFlight.has(job.id)) continue;
         inFlight.add(job.id);

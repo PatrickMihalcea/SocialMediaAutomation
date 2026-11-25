@@ -3,6 +3,7 @@ import { env } from '@/lib/env';
 import { BullQueue } from '@/lib/queue/bullmq';
 import { InProcessQueue } from '@/lib/queue/in-process';
 import { wakeRemoteWorker } from '@/lib/queue/wake-remote-worker';
+import { signalLocalWork } from '@/lib/queue/local-signal';
 import { LOCAL_QUEUE, type EnqueueOptions, type JobPayloadMap, type JobType, type QueueDriver } from '@/lib/queue/types';
 
 const globalForQueue = globalThis as unknown as { queue?: QueueDriver };
@@ -24,7 +25,10 @@ export async function enqueue<T extends JobType>(
   // written, not on GitHub's response. See wake-remote-worker.ts for why this
   // can never turn into a failure for the caller. Local work is not the
   // remote worker's to do, so starting a VM for it would buy nothing.
+  // The Mac watches a file in storage rather than the database; see
+  // local-signal.ts.
   if (options?.queue !== LOCAL_QUEUE) void wakeRemoteWorker();
+  else await signalLocalWork();
   return id;
 }
 

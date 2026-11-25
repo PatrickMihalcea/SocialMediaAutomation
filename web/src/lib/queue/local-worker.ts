@@ -2,6 +2,7 @@ import 'server-only';
 import { JobStatus } from '@prisma/client';
 import { db } from '@/lib/db';
 import { LOCAL_QUEUES } from '@/lib/queue/store';
+import { readLocalHeartbeat } from '@/lib/queue/local-signal';
 
 export const LOCAL_WORKER_ID = 'local';
 
@@ -27,15 +28,14 @@ export interface LocalWorkerStatus {
  */
 export async function localWorkerStatus(): Promise<LocalWorkerStatus> {
   const [beat, queued] = await Promise.all([
-    db.workerHeartbeat.findUnique({ where: { id: LOCAL_WORKER_ID } }),
+    readLocalHeartbeat(),
     db.job.count({ where: { ...LOCAL_QUEUES, status: JobStatus.QUEUED } }),
   ]);
-  const online = Boolean(beat && Date.now() - beat.seenAt.getTime() < FRESH_MS);
-  const detail = (beat?.detail ?? {}) as { comfyui?: unknown };
+  const online = Boolean(beat && Date.now() - beat.at < FRESH_MS);
   return {
     online,
-    comfyui: online && detail.comfyui === true,
-    seenAt: beat?.seenAt.toISOString() ?? null,
+    comfyui: online && beat?.comfyui === true,
+    seenAt: beat ? new Date(beat.at).toISOString() : null,
     queued,
   };
 }
